@@ -59,7 +59,7 @@ Corpora are parsed **once at startup** into flat, arena-owned structures; the ho
 | `src/main.zig` | Entry: load corpora, run stdio loop |
 | `src/protocol/json_rpc.zig` | Request/response/notification types |
 | `src/protocol/meta.zig` | `_meta` parse + version negotiation + legacy version inference (D10) |
-| `src/protocol/errors.zig` | Error codes: `-32700`, `-32600..-32603`, `-32022` (`-32020`/`-32021` are HTTP-only and reserved) |
+| `src/protocol/errors.zig` | Error codes: `-32700`, `-32600..-32603`, `-32022` (`-32020`/`-32021` are HTTP-only and reserved; `-32002` is never emitted) |
 | `src/transport/stdio.zig` | Newline framing, stdout purity, stderr logs, per-line flush before the next read |
 | `src/server/registry.zig` | Comptime capability table (D8) — one source of truth for name/description/schema/handler |
 | `src/server/discover.zig` | `server/discover` |
