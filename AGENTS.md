@@ -88,10 +88,10 @@ Present today:
 | Path | Purpose |
 |---|---|
 | `PLAN.md` | **Spec of record.** §2 decisions (D1–D10) + §2.1 rejected architectures, §3 evidence base, §4 architecture, §5 layout, §6 data model, §7 MCP surface, §8 doc import (+ CI mechanics), §9 pattern mapping, §10 verification, §11 milestones, §12 risks, §13 open questions |
-| `systems_programming_context_v1.md` (219 lines) | Upstream reference: `CONTEXT` §14, `CORE` §29, `P01`–`P12` §50–138, `GUARANTEES` §141, `SELECT` §150, `VERIFY` §169, `LIMITS` §184, `SOURCES` §194 (S01–S24) |
-| `readme.md` | **Empty (0 bytes)** — a known gap; PLAN.md mandates no content for it (it appears only in the §5 layout tree) |
+| `AGENTS.md` | This file — repo guidelines for AI agents working in this tree |
+| `systems_programming_context_v1.md` | Upstream reference, by section heading: `CONTEXT` (scope + the evidence-label legend), `CORE` (the P01–P12 concept table), `P01`–`P12` (one section per paradigm), `GUARANTEES`, `SELECT` (12 conditional rules), `VERIFY`, `LIMITS`, `SOURCES` (S01–S24) |
+| `readme.md` | **Empty by design** — a known gap; PLAN.md mandates no content for it (it appears only in the §5 layout tree) |
 | `.gitignore` | Excludes `zig-out/`, `.zig-cache/`, `.probe/`, `docs/`, `generated/`, and native byproducts |
-| `.probe/` | Scratch directory for throwaway API probes — **not present** (the last stale probe was deleted; it used the removed `std.fs.File`). Create it under `.probe/` when verifying stdlib APIs, then delete it before finishing; never commit it |
 
 Planned (PLAN §5): `src/` (above), `data/advice/*.zon` + `data/sources.zon`, `tools/indexer.zig` + `tools/advice_check.zig`, `generated/index.jsonl` (CI-produced, never hand-edited), `.github/workflows/{ci,bump-master,index,release}.yml`.
 
