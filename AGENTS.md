@@ -41,7 +41,8 @@ stdin line (newline-framed JSON)
                               _meta["io.modelcontextprotocol/serverInfo"];
                               + cache hints (ttlMs + cacheScope) on the six
                               cacheable methods (PLAN §7.4);
-                              legacy (inferred 2025-06-18) responses omit both
+                              legacy (inferred 2025-06-18) responses omit the
+                              resultType/serverInfo pair and the cache hints
                               tool-level failure → isError:true inside a normal result (NOT a JSON-RPC error)
   → std.json.Stringify        into a fixed buffer
   → transport/stdio.zig       write ONE line to stdout and FLUSH it before reading the next
