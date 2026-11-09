@@ -7,6 +7,7 @@
 
 const std = @import("std");
 const options = @import("server_options");
+const sleep_util = @import("sleep_util");
 
 const io = std.testing.io;
 
@@ -58,7 +59,7 @@ const Harness = struct {
         var waited_ms: u64 = 0;
         while (waited_ms < watchdog_deadline_ms) : (waited_ms += 100) {
             if (harness.finished.load(.acquire)) return;
-            std.Io.sleep(io, std.Io.Duration.fromMilliseconds(100), .awake) catch return;
+            sleep_util.sleepMilliseconds(io, 100);
         }
         if (harness.finished.load(.acquire)) return;
         harness.timed_out.store(true, .release);

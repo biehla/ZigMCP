@@ -17,5 +17,6 @@ test {
     _ = @import("server/tools.zig");
     _ = @import("transport/stdio.zig");
     _ = @import("util/arena_pool.zig");
+    _ = @import("util/sleep.zig");
     _ = @import("util/text.zig");
 }

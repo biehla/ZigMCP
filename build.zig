@@ -64,12 +64,21 @@ pub fn build(b: *std.Build) void {
     const server_options = b.addOptions();
     server_options.addOptionPath("server_exe", exe.getEmittedBin());
 
+    const sleep_module = b.createModule(.{
+        .root_source_file = b.path("src/util/sleep.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     const protocol_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("tests/protocol_test.zig"),
             .target = target,
             .optimize = optimize,
-            .imports = &.{.{ .name = "server_options", .module = server_options.createModule() }},
+            .imports = &.{
+                .{ .name = "server_options", .module = server_options.createModule() },
+                .{ .name = "sleep_util", .module = sleep_module },
+            },
         }),
     });
     const run_protocol_tests = b.addRunArtifact(protocol_tests);

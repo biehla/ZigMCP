@@ -120,7 +120,7 @@ zig build test               # unit + protocol + golden test layers
 zig build check              # validate the advice corpus (advice_check)
 zig build run                # start the stdio server
 zig build -Doptimize=ReleaseSafe
-zig fmt --check .            # formatter gate (also: --zon, --ast-check)
+zig fmt --check . --exclude tests/fixtures   # formatter gate (also: --zon, --ast-check)
 ```
 
 The formatter gate must skip the indexer fixture tree: `tests/fixtures/indexer_src/`
@@ -135,13 +135,15 @@ corpus; the doc tools then report that nothing matched.
 ### Dependency management
 
 ```bash
-# Re-pin an upstream branch. Requires a build.zig.zon to write into, so run it
-# in a SCRATCH checkout (zig init), then copy the resolved .url/.hash across.
+# Re-pin an upstream branch. `zig fetch --save` needs a build.zig.zon to write
+# into, so run it in a SCRATCH checkout (zig init), then transcribe the resolved
+# .url/.hash/.commit into data/sources.zon — that file is the pin home
+# (build.zig.zon carries no dependencies: the server has none, PLAN D1).
 zig fetch --save=zig_std "git+https://github.com/ziglang/zig.git#master"
 zig fetch --save=mcp_zig "git+https://github.com/muhammad-fiaz/mcp.zig.git#main"
 ```
 
-**Dependency URLs never float.** `zig fetch --save` resolves the branch to a commit and writes `url = "git+https://…git?ref=<branch>#<sha>"` plus a content `hash`; the `#<sha>` freezes the commit and the `hash` is the source of truth. Tracking a branch therefore requires an explicit re-pin step — owned by the `bump-master.yml` CI job (PLAN §8.5, D6). Branch names differ per repo (`master` for zig, `main` for mcp.zig); a wrong branch fails with `error: ref not found`.
+**Dependency URLs never float.** `zig fetch --save` resolves the branch to a commit and writes `url = "git+https://…git?ref=<branch>#<sha>"` plus a content `hash`; the `#<sha>` freezes the commit and the `hash` is the source of truth. Tracking a branch therefore requires an explicit re-pin step — owned by the `bump-master.yml` CI job (PLAN §8.5, D6), which updates `data/sources.zon`. Branch names differ per repo (`master` for zig, `main` for mcp.zig); a wrong branch fails with `error: ref not found`.
 
 ## Code Conventions & Common Patterns
 

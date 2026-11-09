@@ -48,12 +48,14 @@ jobs:
               "mcpServers": {
                 "zigmcp": {
                   "command": "./zigmcp",
-                  "env": { "ZIGMCP_INDEX": "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/index.jsonl" }
+                  "env": { "ZIGMCP_INDEX": "./index.jsonl" }
                 }
               }
             }
             ```
 
-            > The server resolves its index from `ZIGMCP_INDEX` (local path or
-            > HTTP(S) URL) and hot-reloads it; the bundled fallback index is
-            > only used when no index is configured.
+            > The server resolves its index from `ZIGMCP_INDEX` (a **local
+            > path**) and hot-reloads it; the index artifact attached to this
+            > release is the file to point at. Without an index the server
+            > still serves the advice corpus, and the doc tools report that
+            > nothing matched.
