@@ -147,6 +147,44 @@ const tool_defs = [_]ToolDef{
     .{ .name = "recommend_approach", .arguments_json = "{\"signals\":[\"measured memory bottleneck\"]}" },
 };
 
+/// The first symbol in an index artifact.
+///
+/// The doc tools are exercised against the index that was actually loaded, so
+/// a report never mixes the latency of one index with the contents of another.
+fn firstIndexSymbol(io: std.Io, alloc: std.mem.Allocator, path: []const u8) ?struct { project: []const u8, symbol: []const u8 } {
+    const bytes = std.Io.Dir.cwd().readFileAllocOptions(
+        io,
+        path,
+        alloc,
+        .limited(64 * 1024 * 1024),
+        .of(u8),
+        null,
+    ) catch return null;
+
+    var lines = std.mem.splitScalar(u8, bytes, '\n');
+    while (lines.next()) |raw| {
+        const line = std.mem.trim(u8, raw, " \t\r");
+        if (line.len == 0) continue;
+        const parsed = std.json.parseFromSlice(std.json.Value, alloc, line, .{}) catch return null;
+        const value = parsed.value;
+        if (value != .object) continue;
+        const project = value.object.get("project") orelse continue;
+        const symbol = value.object.get("symbol") orelse continue;
+        if (project == .string and symbol == .string) {
+            return .{ .project = project.string, .symbol = symbol.string };
+        }
+    }
+    return null;
+}
+
+/// Serializes a JSON value into the arena.
+fn jsonString(alloc: std.mem.Allocator, value: std.json.Value) ![]const u8 {
+    var out: std.Io.Writer.Allocating = .init(alloc);
+    defer out.deinit();
+    try std.json.Stringify.value(value, .{}, &out.writer);
+    return out.toOwnedSlice();
+}
+
 const ToolStats = struct {
     name: []const u8,
     arguments_json: []const u8,
@@ -349,8 +387,23 @@ pub fn main(init: std.process.Init) !void {
     }
     const startup_ms = nowMs(io) - startup_start;
 
+    // The doc tools are pointed at the index that was actually loaded, so the
+    // report's latency and the index it names always agree.
+    var defs = tool_defs;
+    if (index_path) |path| {
+        if (firstIndexSymbol(io, alloc, path)) |symbol| {
+            defs[1].arguments_json = try std.fmt.allocPrint(alloc, "{{\"project\":{s},\"symbol\":{s}}}", .{
+                try jsonString(alloc, .{ .string = symbol.project }),
+                try jsonString(alloc, .{ .string = symbol.symbol }),
+            });
+            defs[3].arguments_json = try std.fmt.allocPrint(alloc, "{{\"query\":{s}}}", .{
+                try jsonString(alloc, .{ .string = symbol.symbol }),
+            });
+        }
+    }
+
     var stats: [tool_defs.len]ToolStats = undefined;
-    for (&stats, tool_defs) |*stat, def| {
+    for (&stats, defs) |*stat, def| {
         stat.* = .{ .name = def.name, .arguments_json = def.arguments_json };
     }
     defer for (&stats) |*stat| stat.latencies_ms.deinit(gpa);

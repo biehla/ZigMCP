@@ -53,6 +53,11 @@ pub fn build(b: *std.Build) void {
     run_bench.step.dependOn(b.getInstallStep());
     run_bench.addArg("--server");
     run_bench.addFileArg(exe.getEmittedBin());
+    // An explicit index keeps the report reproducible: without one the server
+    // silently picks up whatever `generated/index.jsonl` happens to be, which
+    // is gitignored and absent in CI.
+    run_bench.addArg("--index");
+    run_bench.addArg("tests/golden/index.jsonl");
     const bench_step = b.step("bench", "Produce the verification report (PLAN §10.3)");
     bench_step.dependOn(&run_bench.step);
 
