@@ -132,6 +132,15 @@ environment variables `ZIGMCP_INDEX` and `ZIGMCP_ADVICE_DIR` are the
 equivalent. With no index configured the server starts and serves the advice
 corpus; the doc tools then report that nothing matched.
 
+### Language server
+
+`lsp.json` wires [ZLS](https://zigtools.org/zls/) (the Zig language server)
+to this project, so editors — and the agent's own `lsp` tool — get
+definitions, references, hovers and diagnostics for `.zig` files. ZLS follows
+the Zig release it ships with: keep it on the same minor version as the
+toolchain (Zig 0.17.1 ⇒ ZLS 0.17.x). `zig build test` remains the authority on
+whether the tree compiles; ZLS is the fast inner loop.
+
 ### Dependency management
 
 ```bash

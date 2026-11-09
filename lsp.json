@@ -1,0 +1,10 @@
+{
+  "servers": {
+    "zls": {
+      "command": "zls",
+      "args": [],
+      "fileTypes": [".zig"],
+      "rootMarkers": ["build.zig", "build.zig.zon"]
+    }
+  }
+}
