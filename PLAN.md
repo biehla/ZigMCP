@@ -34,7 +34,7 @@ The server binary is treated as a stable, thin host. Everything that changes —
 
 | ID | Decision | Rationale | Alternative rejected |
 |---|---|---|---|
-| D1 | Implement the MCP wire layer **in-repo** (JSON-RPC 2.0 over stdio), not as a dependency | The most complete third-party Zig MCP library (`mcp.zig`) requires Zig ≥ 0.17 for its current release, while the local toolchain is 0.16.0 and upstream master is `0.18.0-dev.935+ead8f5a7a`; a pinned dependency would break on every upstream master bump. Our surface is small: `server/discover`, `tools/list`, `tools/call`, `resources/list`, `resources/read`, `resources/templates/list`, `prompts/list`, `prompts/get` | `mcp.zig` 0.0.9 — revisit if HTTP/OAuth/tasks/MRTR become requirements |
+| D1 | Implement the MCP wire layer **in-repo** (JSON-RPC 2.0 over stdio), not as a dependency | The most complete third-party Zig MCP library (`mcp.zig`) tracks a newer Zig than our release floor (its current release requires Zig ≥ 0.17 and its master is `0.18.0-dev`); a pinned dependency would break on every upstream master bump and couple our release cadence to theirs. Our surface is small: `server/discover`, `tools/list`, `tools/call`, `resources/list`, `resources/read`, `resources/templates/list`, `prompts/list`, `prompts/get` | `mcp.zig` 0.0.9 — revisit if HTTP/OAuth/tasks/MRTR become requirements |
 | D2 | Advice corpus is **data** (ZON), not Zig code | Directly applies P01 (table/configuration driven) to the corpus itself; editing advice must not require touching handlers | Hardcoded Zig structs — rejected, couples content to code |
 | D3 | Doc index is a **runtime-loaded artifact**, not embedded, and is **hot-reloadable** (validate-then-atomic-swap) | Satisfies G3: CI republishes the index; the binary is unchanged and the running server picks the new index up on its own | `@embedFile` of the index — forces a rebuild per upstream commit; load-only-at-startup — forces a client restart per upstream commit |
 | D4 | Index canonical form is **JSONL** (one record per line), optionally `.zst`-compressed for shipping | Diffable and reviewable: the bump PR attaches the JSONL diff, so a reviewer reads changed doc text instead of a binary blob (bot-generated updates stay auditable); `std.compress.zstd` exists in the stdlib | A custom binary blob — rejected as a review dead end |
@@ -42,7 +42,7 @@ The server binary is treated as a stable, thin host. Everything that changes —
 | D6 | Upstream sources are **hash-pinned in `build.zig.zon`**, re-pinned by a CI bump job | Reproducible builds; the bump job is what delivers G3 | Floating git refs in `build.zig.zon` — Zig's package manager resolves and freezes the commit at fetch time anyway |
 | D7 | Protocol revision support: implement `2026-07-28` plus a legacy `initialize` alias | `server/discover` is mandatory in the current revision; older clients still probe with `initialize` | Only the new revision — rejects currently-deployed clients |
 | D8 | Tool/resource descriptors live in a **comptime table**; JSON Schema is derived from it | One source of truth for name, description, schema, and handler; no drift between advertised and implemented capabilities | Hand-written JSON per tool — rejected as a drift source |
-| D9 | **Release artifacts are built with a pinned Zig release** (the current stable, e.g. 0.16.x), never a moving master; the master-nightly CI leg is a canary that never publishes | A moving toolchain turns a green `master` build into an unreproducible release. The upstream projects whose docs we import track their master branch, but they are **never compiled into the server** — only parsed (D5) and shipped as runtime data (D3), so their churn cannot break our build | Building releases from master nightly — rejected as unreproducible |
+| D9 | **Release artifacts are built with a pinned Zig release** (the current stable, e.g. 0.17.x), never a moving master; the master-nightly CI leg is a canary that never publishes | A moving toolchain turns a green `master` build into an unreproducible release. The upstream projects whose docs we import track their master branch, but they are **never compiled into the server** — only parsed (D5) and shipped as runtime data (D3), so their churn cannot break our build | Building releases from master nightly — rejected as unreproducible |
 | D10 | Legacy clients (pre-`2026-07-28`) are supported by **version inference, not a second code path**: a request whose `_meta` is absent is treated as `2025-06-18`, and the `initialize` alias returns the old-style result shape | Older clients send no `_meta` at all, so the strict `-32602` check would reject them outright. One parser with a "version inferred" flag keeps the wire layer single-path while remaining compatible | A full second protocol implementation — doubles the surface and drifts; dropping legacy support — breaks deployed clients |
 
 ### 2.1 Architectures brainstormed and rejected
@@ -65,7 +65,7 @@ Two sub-questions the same brainstorm settled:
 
 ## 3. Evidence base
 
-### 3.1 Verified locally (Zig 0.16.0, `C:\Users\Sethticles\scoop\apps\zig\0.16.0`)
+### 3.1 Verified locally (Zig 0.17.1, `C:\Users\Sethticles\scoop\apps\zig\0.17.1`)
 
 | Fact | How it was verified |
 |---|---|
@@ -74,7 +74,12 @@ Two sub-questions the same brainstorm settled:
 | `std.json` provides `Value`, `ObjectMap`, `Stringify` (`beginObject`/`objectField`/`endObject`) | `lib/std/json.zig` |
 | `std.compress.zstd` exists | `lib/std/compress/` listing |
 | `std.http.Client.fetch(client, options)` is a one-shot, threadsafe request; the body is written to a caller-supplied buffer via `FetchOptions.response_writer`, and `FetchResult` exposes only `status` (no `ETag`/conditional-GET support) | `lib/std/http/Client.zig` — `Client.fetch`, `FetchOptions`, `FetchResult` |
-| `std.zig.Ast.parse` takes a **sentinel-terminated** source (`[:0]const u8`) and **does not fail on malformed input** — syntax errors are collected in `tree.errors` (the AST is still returned) | Probe: a deliberately broken source parsed successfully with `errors.len = 1` (`expected_type_expr`) |
+| `std.zig.Ast.parse` takes a **sentinel-terminated** source (`[:0]const u8`) plus an options struct (`.{ .mode = .zig }` in 0.17) and **does not fail on malformed input** — syntax errors are collected in `tree.errors` (the AST is still returned) | Probe: a deliberately broken source parsed successfully with `errors.len = 1` (`expected_type_expr`); the 0.17 signature is `Ast.parse(gpa, source, ParseOptions)` |
+| ZON parsing in 0.17: `std.zon.parse.fromSlice(T, .{ .gpa, .arena, .source, .diagnostics })`; the 0.16 `fromSliceAlloc`/`free` pair is gone and `Diagnostics` is `{ errors: []const Error }` | Compile + run against `data/advice/*.zon`; `lib/std/zon/parse.zig` — `Options`, `fromSlice`, `Diagnostics` |
+| `std.heap.ArenaAllocator.allocator()` returns an allocator whose `ptr` **is the arena** — copying an arena by value leaves the copy's allocator pointing at the dead original | Crash (segfault in `ArenaAllocator.deinit`) when the corpus/pool arenas were copied; `lib/std/heap/ArenaAllocator.zig` — `allocator`, `deinit` |
+| `std.json.ObjectMap` / `std.json.Array` are the **managed** collections (`put(gpa, key, value)` / `init(gpa)` + `append(value)`); `std.ArrayList(T)` is the **unmanaged** one (`append(gpa, value)`) | Compile errors + probes: `lib/std/array_list.zig`, `lib/std/json/dynamic.zig` |
+| `std.Io.Mutex` needs an `Io` (`lock(io)` / `unlock(io)`); sleeping is `std.Io.sleep(io, duration, .awake)`; `std.Thread.sleep` is gone; `std.mem.Allocator.dupeZ` became `dupeSentinel` | `lib/std/Io.zig` — `Mutex`, `sleep`, `Duration`; `lib/std/mem/Allocator.zig` — `dupeSentinel` |
+| `std.process.Args.iterate` is a compile error on Windows — use `std.process.Args.toSlice(args, arena)` | `lib/std/process/Args.zig` — `iterate` (`@compileError` for Windows), `toSlice` |
 | `tree.tokens.items(.tag)` returns `[]Token.Tag` **directly** (not a struct with `.items`) | Probe compile error "`no member named 'items' in '[]zig.tokenizer.Token.Tag'`" |
 | `ast.tokenSlice(i)` takes a `u32` `TokenIndex` and returns the **whole comment including the `///` prefix** | Probe: `tok[2] doc_comment slice=[/// Doc for Foo.]` |
 | A declaration's doc is the contiguous run of `.doc_comment` tokens immediately preceding `ast.firstToken(decl)`; `firstToken` of a `pub` decl is the `pub` keyword | Probe: `pub const Foo` → `first_tok=4 tag=keyword_pub`, doc run = tokens 2..3; `pub fn topLevel` → `first_tok=35`, doc run = token 34 |
@@ -487,6 +492,11 @@ Before any future claim about a smarter index, build and measure: (a) linear sca
 | M2 | Doc index | `tools/indexer.zig`, JSONL format, columnar loader, `doc_search` / `doc_get` / `doc_import_status` tools, `docs://*` resources | Indexer reproduces the golden fixture (fields, methods, params, error-set members, container docs, a warning-only file, a file with a syntax error); a degraded file still contributes its usable records and is reported as degraded; search returns `path:line` |
 | M3 | CI/CD | `ci.yml` matrix (pinned stable = release toolchain × 3 OS; master nightly = canary, non-publishing), `bump-master.yml`, `index.yml`, `release.yml`, install/client-config docs | A scheduled run whose upstream docs actually changed opens one bump PR (pin updates + JSONL diff) and, after it merges, republishes the index **without any source change**; a run whose upstream commits changed no doc text opens no PR; release artifacts include binaries and the index; release artifacts are reproducible from the pinned stable toolchain (D9); the published index carries a short cache TTL so clients see the new index without a server rebuild |
 | M4 | Hardening & polish | Fuzz targets, concurrency integration test, `docs://` pagination, `--index`/env configuration, `instructions` field on discover, optional `-femit-docs` artifact | Verification report published with each release; all §10.2 layers green on the matrix |
+
+**Status (2026-11-09).** M0, M1 and M2 are implemented in the tree (see `AGENTS.md` for the
+module map and the test layers). M3's four workflows exist but have never run against a real
+upstream bump. M4 is partial: `--index`/env configuration and the `instructions` field ship;
+the fuzz, concurrency-integration and end-to-end layers do not exist yet.
 
 ---
 
