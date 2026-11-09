@@ -1,0 +1,59 @@
+name: Release
+
+# PLAN D9: release binaries are built with the pinned stable Zig (0.16.0),
+# never master. Attaches binaries + the current index artifact and publishes
+# client configuration snippets.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write  # create the GitHub Release
+
+jobs:
+  release:
+    name: Build and publish (pinned Zig)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.1  # D9: pinned stable, never master
+      - name: Build release binary
+        run: zig build -Doptimize=ReleaseSafe
+      - name: Package artifacts
+        shell: bash
+        run: |
+          mkdir -p dist
+          bin="zig-out/bin/zigmcp"
+          [ -f "$bin" ] || bin="zig-out/bin/zigmcp.exe"
+          cp "$bin" "dist/zigmcp-${{ matrix.os }}${bin##*.}"
+          # Attach the current index if present (generated/index.jsonl).
+          if [ -f generated/index.jsonl ]; then cp generated/index.jsonl dist/; fi
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          body: |
+            ## Client configuration
+
+            ### Claude Code / generic MCP client (stdio)
+
+            ```json
+            {
+              "mcpServers": {
+                "zigmcp": {
+                  "command": "./zigmcp",
+                  "env": { "ZIGMCP_INDEX": "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/index.jsonl" }
+                }
+              }
+            }
+            ```
+
+            > The server resolves its index from `ZIGMCP_INDEX` (local path or
+            > HTTP(S) URL) and hot-reloads it; the bundled fallback index is
+            > only used when no index is configured.

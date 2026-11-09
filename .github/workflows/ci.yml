@@ -1,0 +1,51 @@
+name: CI
+
+# PLAN §11 M3 / D9: pinned stable Zig (0.16.0) is the release toolchain and
+# blocks merges; the master (nightly) leg is a non-publishing canary that
+# only surfaces breakage early (continue-on-error, never blocks).
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Release (pinned Zig ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.1
+      - name: Fetch dependencies
+        run: zig build --fetch=all
+      - name: Build and test
+        run: zig build test
+      - name: Format check
+        # The indexer fixture tree contains a deliberately unparseable file and
+        # a warning-only file, so it is excluded from the formatter gate.
+        run: zig fmt --check . --exclude tests/fixtures
+
+  canary:
+    name: Canary (Zig master)
+    runs-on: ubuntu-latest
+    continue-on-error: true  # non-blocking canary; failure never blocks a merge
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: master
+      - name: Fetch dependencies
+        run: zig build --fetch=all
+      - name: Build and test
+        run: zig build test
+      - name: Format check
+        # The indexer fixture tree contains a deliberately unparseable file and
+        # a warning-only file, so it is excluded from the formatter gate.
+        run: zig fmt --check . --exclude tests/fixtures

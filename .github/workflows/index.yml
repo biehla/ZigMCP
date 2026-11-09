@@ -1,0 +1,121 @@
+name: Rebuild index
+
+# PLAN §8.6: after the bump PR merges, re-run the indexer over the merged
+# pinned trees and publish generated/index.jsonl (sorted by (project, symbol)).
+# Degrade-don't-skip (AGENTS.md): a file with parse diagnostics still
+# contributes usable records and is reported as degraded — never fail the run.
+on:
+  workflow_run:
+    workflows: ["Bump upstream masters"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  index:
+    name: Index pinned trees
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.1
+
+      - name: Plan the fetch (parse data/sources.zon)
+        run: |
+          mkdir -p upstream generated
+          python3 - <<'PY'
+          import pathlib, re, sys
+          text = pathlib.Path("data/sources.zon").read_text()
+          blocks = re.findall(r'\.(\w+)\s*=\s*\.\{(.*?)\n    \},', text, re.S)
+          if not blocks:
+              sys.exit("::error::no sources parsed from data/sources.zon")
+          rows = []
+          for name, body in blocks:
+              url = re.search(r'\.url\s*=\s*"([^"]+)"', body)
+              commit = re.search(r'\.commit\s*=\s*"([^"]+)"', body)
+              include = re.search(r'\.include\s*=\s*\.\{([^}]*)\}', body, re.S)
+              if not url or not commit:
+                  sys.exit(f"::error::source {name} missing url/commit")
+              repo = url.group(1)
+              repo = repo.removeprefix("git+")
+              repo = re.sub(r'\?ref=[^#]*', '', repo)
+              repo = repo.split('#')[0]
+              inc = "."
+              if include:
+                  parts = re.findall(r'"([^"]+)"', include.group(1))
+                  inc = parts[0].removesuffix("/**") if parts else "."
+              rows.append((name, repo, commit.group(1), inc))
+          pathlib.Path("upstream/plan.tsv").write_text(
+              "".join("\t".join(r) + "\n" for r in rows))
+          print("\n".join("\t".join(r) for r in rows))
+          PY
+
+      - name: Fetch the pinned upstream trees
+        run: |
+          while IFS=$'\t' read -r name repo commit include; do
+            echo "fetching $name @ $commit"
+            git clone --filter=blob:none --no-checkout "$repo" "upstream/$name"
+            git -C "upstream/$name" checkout --detach "$commit"
+          done < upstream/plan.tsv
+
+      - name: Build the index (degrade-don't-skip)
+        run: |
+          : > generated/index.jsonl
+          : > generated/index.status.json
+          while IFS=$'\t' read -r name repo commit include; do
+            # The indexer never fails the run because one upstream file is
+            # broken: its usable records are still emitted and the file is
+            # reported as degraded in the status sidecar.
+            zig run tools/indexer.zig -- \
+              --out "generated/$name.jsonl" \
+              --status "generated/$name.status.json" \
+              --source "$name=$commit=upstream/$name" \
+              --include "$include" || true
+          done < upstream/plan.tsv
+
+      - name: Merge and sort the index
+        run: |
+          python3 - <<'PY'
+          import json, pathlib
+          records = []
+          for path in sorted(pathlib.Path("generated").glob("*.jsonl")):
+              for line in path.read_text().splitlines():
+                  if line.strip():
+                      records.append(json.loads(line))
+          # Canonical order: (project, symbol), ties by (path, line) — the same
+          # order the indexer itself emits.
+          records.sort(key=lambda r: (r["project"], r["symbol"], r["path"], r["line"]))
+          out = pathlib.Path("generated/index.jsonl")
+          out.write_text("".join(
+              json.dumps(r, separators=(",", ":"), ensure_ascii=False) + "\n"
+              for r in records))
+          print(f"{len(records)} records")
+          PY
+          test -s generated/index.jsonl
+
+      - name: Merge the status sidecars
+        run: |
+          python3 - <<'PY'
+          import json, pathlib
+          projects = {}
+          for path in sorted(pathlib.Path("generated").glob("*.status.json")):
+              data = json.loads(path.read_text())
+              for name, status in data.get("projects", {}).items():
+                  projects[name] = status
+          pathlib.Path("generated/index.status.json").write_text(
+              json.dumps({"projects": projects}, separators=(",", ":")))
+          print(json.dumps(projects, indent=2)[:2000])
+          PY
+
+      - name: Publish index artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: index
+          path: generated/
+          if-no-files-found: error

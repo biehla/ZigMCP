@@ -1,0 +1,257 @@
+name: Bump upstream masters
+
+# PLAN §8.5/§8.6, D6: upstream sources are hash-pinned in data/sources.zon
+# and re-resolved here (`zig fetch --save` pins a branch to a commit).
+# The diff baseline is the index.jsonl asset of the most recent published
+# release, downloaded before indexing; before the first release the baseline
+# is rebuilt from the currently pinned commits. NEVER use a prior workflow
+# run's artifact as the baseline (artifacts expire and need a run-id/token).
+# Opens at most one PR, and only when the resulting index actually differs —
+# the gate is computed in this job, before any PR exists.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write        # push the bump branch
+  pull-requests: write   # open the single bump PR
+  actions: read          # read the release asset for the baseline
+
+jobs:
+  bump:
+    name: Re-pin and diff index
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.1
+
+      - name: Plan the sources (parse data/sources.zon)
+        id: plan
+        run: |
+          mkdir -p upstream scratch generated bump-results
+          python3 - <<'PY'
+          import pathlib, re, sys
+          text = pathlib.Path("data/sources.zon").read_text()
+          blocks = re.findall(r'\.(\w+)\s*=\s*\.\{(.*?)\n    \},', text, re.S)
+          if not blocks:
+              sys.exit("::error::no sources parsed from data/sources.zon")
+          rows = []
+          for name, body in blocks:
+              url = re.search(r'\.url\s*=\s*"([^"]+)"', body)
+              branch = re.search(r'\.branch\s*=\s*"([^"]+)"', body)
+              commit = re.search(r'\.commit\s*=\s*"([^"]+)"', body)
+              include = re.search(r'\.include\s*=\s*\.\{([^}]*)\}', body, re.S)
+              if not url or not branch or not commit:
+                  sys.exit(f"::error::source {name} missing url/branch/commit")
+              repo = url.group(1).removeprefix("git+")
+              repo = re.sub(r'\?ref=[^#]*', '', repo).split('#')[0]
+              inc = "."
+              if include:
+                  parts = re.findall(r'"([^"]+)"', include.group(1))
+                  inc = parts[0].removesuffix("/**") if parts else "."
+              rows.append((name, repo, branch.group(1), commit.group(1), inc))
+          pathlib.Path("upstream/plan.tsv").write_text(
+              "".join("\t".join(r) + "\n" for r in rows))
+          print("\n".join("\t".join(r) for r in rows))
+          PY
+
+      - name: Fetch the currently pinned trees (baseline side)
+        run: |
+          while IFS=$'\t' read -r name repo branch commit include; do
+            git clone --filter=blob:none --no-checkout "$repo" "upstream/$name"
+            git -C "upstream/$name" checkout --detach "$commit"
+          done < upstream/plan.tsv
+
+      - name: Build the baseline index from the current pins
+        run: |
+          : > baseline.jsonl
+          while IFS=$'\t' read -r name repo branch commit include; do
+            zig run tools/indexer.zig -- \
+              --out "bump-results/$name.jsonl" \
+              --source "$name=$commit=upstream/$name" \
+              --include "$include" || true
+          done < upstream/plan.tsv
+          cat bump-results/*.jsonl > baseline.jsonl || true
+
+      - name: Download the published baseline (most recent release asset)
+        id: baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # PLAN §8.6: the baseline is the index.jsonl asset of the most recent
+          # published release. Without a release (first run) the baseline stays
+          # the index rebuilt from the current pins above.
+          if gh release download --pattern index.jsonl --dir published 2>/dev/null; then
+            echo "baseline_source=release-asset" >> "$GITHUB_OUTPUT"
+            cp published/index.jsonl baseline.jsonl
+          else
+            echo "baseline_source=rebuilt-from-current-pins" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Re-resolve the tracked branches (per-project isolation)
+        run: |
+          cd scratch
+          zig init >/dev/null 2>&1 || true
+          cd ..
+          : > bump-results/pins.tsv
+          while IFS=$'\t' read -r name repo branch commit include; do
+            old_commit="$commit"
+            if zig fetch --save="$name" "git+${repo}#${branch}" >>bump-results/fetch.log 2>&1; then
+              new_commit=$(python3 - "$name" <<'PY'
+          import re, sys, pathlib
+          name = sys.argv[1]
+          text = pathlib.Path("scratch/build.zig.zon").read_text()
+          block = re.search(r'\.' + re.escape(name) + r'\s*=\s*\.\{(.*?)\n        \},', text, re.S)
+          if not block:
+              sys.exit("no dependency block")
+          url = re.search(r'\.url\s*=\s*"([^"]+)"', block.group(1)).group(1)
+          commit = url.split('#')[-1]
+          print(commit)
+          PY
+              )
+              echo -e "$name\t$repo\t$branch\t$old_commit\t$new_commit\t$include" >> bump-results/pins.tsv
+              echo "$name OK old=$old_commit new=$new_commit" >> bump-results/summary.txt
+            else
+              # A dead branch fails only this project; its previous pin is kept.
+              echo -e "$name\t$repo\t$branch\t$old_commit\t$old_commit\t$include" >> bump-results/pins.tsv
+              echo "$name FAILED branch=$branch (previous pin kept)" >> bump-results/failures.txt
+              echo "$name FAILED old=$old_commit new=$old_commit" >> bump-results/summary.txt
+            fi
+          done < upstream/plan.tsv
+
+      - name: Fetch the newly pinned trees and index them
+        run: |
+          rm -rf upstream && mkdir -p upstream
+          while IFS=$'\t' read -r name repo branch old_commit new_commit include; do
+            git clone --filter=blob:none --no-checkout "$repo" "upstream/$name" || continue
+            git -C "upstream/$name" checkout --detach "$new_commit" || continue
+            zig run tools/indexer.zig -- \
+              --out "bump-results/$name.jsonl" \
+              --source "$name=$new_commit=upstream/$name" \
+              --include "$include" || true
+          done < bump-results/pins.tsv
+          python3 - <<'PY'
+          import json, pathlib
+          records = []
+          for path in sorted(pathlib.Path("bump-results").glob("*.jsonl")):
+              for line in path.read_text().splitlines():
+                  if line.strip():
+                      records.append(json.loads(line))
+          records.sort(key=lambda r: (r["project"], r["symbol"], r["path"], r["line"]))
+          pathlib.Path("generated/index.jsonl").write_text("".join(
+              json.dumps(r, separators=(",", ":"), ensure_ascii=False) + "\n"
+              for r in records))
+          print(f"{len(records)} records")
+          PY
+
+      - name: Gate on a real index difference
+        id: gate
+        run: |
+          changed=0
+          if ! diff -q baseline.jsonl generated/index.jsonl >/dev/null 2>&1; then changed=1; fi
+          echo "index_changed=$changed" >> "$GITHUB_OUTPUT"
+          python3 - <<'PY'
+          import json, collections, pathlib
+          def load(p):
+              return collections.Counter((r.get("project"), r.get("symbol"), r.get("path"))
+                                         for r in map(json.loads, pathlib.Path(p).read_text().splitlines()) if r)
+          try:
+              old, new = load("baseline.jsonl"), load("generated/index.jsonl")
+              counts = collections.Counter()
+              for k in set(old) | set(new):
+                  if old[k] != new[k]:
+                      counts[k[0]] += 1
+              pathlib.Path("bump-results/changed-counts.txt").write_text(
+                  "".join(f"{p}: {n}\n" for p, n in counts.most_common()))
+          except FileNotFoundError:
+              pass
+          PY
+          diff -u baseline.jsonl generated/index.jsonl > bump-results/index.diff || true
+          cat bump-results/summary.txt 2>/dev/null || true
+
+      - name: Upload the JSONL diff artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: index-diff
+          path: bump-results/
+          if-no-files-found: warn
+
+      - name: Update the pins
+        if: steps.gate.outputs.index_changed == '1'
+        run: |
+          python3 - <<'PY'
+          import pathlib, re
+          pins = {}
+          for line in pathlib.Path("bump-results/pins.tsv").read_text().splitlines():
+              name, repo, branch, old_commit, new_commit, include = line.split("\t")
+              pins[name] = (repo, branch, old_commit, new_commit)
+          # The content hash written by `zig fetch --save` (scratch/build.zig.zon).
+          scratch = pathlib.Path("scratch/build.zig.zon").read_text()
+          hashes = {}
+          for match in re.finditer(r'\.(\w+)\s*=\s*\.\{(.*?)\n        \},', scratch, re.S):
+              name, body = match.group(1), match.group(2)
+              found = re.search(r'\.hash\s*=\s*"([^"]+)"', body)
+              if found:
+                  hashes[name] = found.group(1)
+          path = pathlib.Path("data/sources.zon")
+          text = path.read_text()
+          for name, (repo, branch, old_commit, new_commit) in pins.items():
+              if old_commit == new_commit:
+                  continue
+              url = f"git+{repo}?ref={branch}#{new_commit}"
+              text = re.sub(
+                  r'(\.' + re.escape(name) + r'\s*=\s*\.\{.*?\.url\s*=\s*")[^"]*(")',
+                  lambda m: m.group(1) + url + m.group(2),
+                  text, flags=re.S)
+              text = re.sub(
+                  r'(\.' + re.escape(name) + r'\s*=\s*\.\{.*?\.commit\s*=\s*")[^"]*(")',
+                  lambda m: m.group(1) + new_commit + m.group(2),
+                  text, flags=re.S)
+              if name in hashes:
+                  text = re.sub(
+                      r'(\.' + re.escape(name) + r'\s*=\s*\.\{.*?\.hash\s*=\s*")[^"]*(")',
+                      lambda m: m.group(1) + hashes[name] + m.group(2),
+                      text, flags=re.S)
+          path.write_text(text)
+          PY
+          git diff --stat
+
+      - name: Open the bump PR (only if the index changed)
+        if: steps.gate.outputs.index_changed == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          branch="bump/upstream-$(date -u +%Y-%m-%d)"
+          git config user.name "zigmcp-bot"
+          git config user.email "zigmcp-bot@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add data/sources.zon
+          git commit -m "chore: re-pin upstream sources" || exit 0
+          git push -u origin "$branch"
+          {
+            echo "## Upstream re-pin"
+            echo
+            echo "Baseline: ${{ steps.baseline.outputs.baseline_source }}"
+            echo
+            echo "## Per-project pins"
+            echo
+            echo '```'
+            cat bump-results/summary.txt 2>/dev/null || true
+            echo '```'
+            echo
+            echo "## Changed doc records per project"
+            echo
+            echo '```'
+            cat bump-results/changed-counts.txt 2>/dev/null || echo "(none)"
+            echo '```'
+            if [ -s bump-results/failures.txt ]; then
+              echo "## Failed sources (previous pin kept)"
+              echo
+              cat bump-results/failures.txt
+            fi
+          } > pr-body.md
+          gh pr create --title "chore: re-pin upstream sources" --body-file pr-body.md --base main --head "$branch"
