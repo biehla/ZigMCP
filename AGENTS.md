@@ -135,23 +135,23 @@ zig fetch --save=mcp_zig "git+https://github.com/muhammad-fiaz/mcp.zig.git#main"
 
 ### Zig (0.16) API facts that bite
 
-These are verified against the installed toolchain; re-verify before relying on them.
+These are verified against the installed toolchain (Zig 0.16.0); re-verify before relying on them. Citations are by file and symbol, not line number — line numbers rot between toolchain releases.
 
-- **`std.fs.File` no longer exists.** Use `std.Io.File.stdin()/stdout()/stderr()`; `file.writer(io, &buf)` returns a writer whose `.interface` is the `std.Io.Writer` (`lib/std/Io/File.zig:91,104,117,600`).
-- **Entry point receives `std.process.Init`** (`lib/std/process.zig:30`): `gpa`, `io`, `arena` (`*std.heap.ArenaAllocator`), `environ_map`, `preopens`, `minimal`.
-- **`std.json`**: `Value`, `ObjectMap` (= `StringArrayHashMap(Value)`), `Array`, `Stringify` (`beginObject`/`objectField`/`endObject`), `parseFromSlice` (`lib/std/json.zig:63-65,94`; `lib/std/json/static.zig:73`).
-- **`std.compress.zstd`** exists (`lib/std/compress.zig:8`).
-- **Doc-comment extraction** (`lib/std/zig/Ast.zig`): `parse` :145, `rootDecls` :326, `firstToken` :604, `nodeMainToken` :100, `tokenSlice` :276, `fullVarDecl` :2291, `fullContainerDecl` :2393. `///` → token tag `.doc_comment`, `//!` → `.container_doc_comment`. A declaration's doc is the contiguous run of `.doc_comment` tokens immediately **preceding** `ast.firstToken(decl)`.
+- **`std.fs.File` no longer exists.** Use `std.Io.File.stdin()/stdout()/stderr()`; `file.writer(io, &buf)` returns a writer whose `.interface` is the `std.Io.Writer` (`lib/std/Io/File.zig` — `File.writer`, `File.stdout`, `File.stderr`, `File.stdin`).
+- **Entry point receives `std.process.Init`** (`lib/std/process.zig`): `gpa`, `io`, `arena` (`*std.heap.ArenaAllocator`), `environ_map`, `preopens`, `minimal`.
+- **`std.json`**: `Value`, `ObjectMap` (= `StringArrayHashMap(Value)`), `Array`, `Stringify` (`beginObject`/`objectField`/`endObject`), `parseFromSlice` (`lib/std/json.zig`; `lib/std/json/static.zig`).
+- **`std.compress.zstd`** exists (`lib/std/compress.zig`).
+- **Doc-comment extraction** (`lib/std/zig/Ast.zig` — `Ast.parse`, `Ast.rootDecls`, `Ast.firstToken`, `Ast.nodeMainToken`, `Ast.tokenSlice`, `Ast.fullVarDecl`, `Ast.fullContainerDecl`): `///` → token tag `.doc_comment`, `//!` → `.container_doc_comment`. A declaration's doc is the contiguous run of `.doc_comment` tokens immediately **preceding** `ast.firstToken(decl)`.
   - `Ast.parse` takes a **sentinel-terminated** source (`[:0]const u8`) and **does not fail on malformed input** — diagnostics land in `tree.errors`, which mixes warnings and errors (no severity field; `Ast.Error` = `tag`, `is_note`, `token_is_prev`, `token`, `extra`).
   - `tree.tokens.items(.tag)` returns `[]Token.Tag` **directly** (no `.items` on it). `ast.tokenSlice(i)` takes a `u32` token index and returns the comment **including** its `///` prefix.
   - `fullContainerDecl` takes a `var buf: [2]Ast.Node.Index = undefined` local and returns an **optional** → `if (opt) |v| { … }` with **no** `.?` inside the capture. Members are `cd.ast.members` (**not** `cd.members`).
-  - `Node.Index` is `enum(u32)` (:2930); `OptionalIndex` (:2948) exposes `.unwrap() → ?Node.Index` — use that instead of a manual `@enumFromInt(@intFromEnum(x))` on the raw enum value (a bare `@intFromEnum` is rejected by the compiler).
+  - `Node.Index` is `enum(u32)`; `Node.OptionalIndex` exposes `.unwrap() → ?Node.Index` — use that instead of a manual `@enumFromInt(@intFromEnum(x))` on the raw enum value (a bare `@intFromEnum` is rejected by the compiler).
   - **Error-set members are not AST nodes**: an `error_set_decl` node holds only the `{`/`}` token indexes (`nodeData(node).token_and_token`); members are plain `identifier` tokens in the stream, each optionally preceded by a `.doc_comment` token.
   - **Parameter docs**: `ast.fullFnProto(&buf1, decl)` (optional) exposes `name_token`; `proto.iterate(&tree)` yields `Param{ first_doc_comment, name_token, … }`.
   - Container initializer tags: `container_decl`, `container_decl_trailing`, `container_decl_two`, `container_decl_two_trailing`, `container_decl_arg`, `container_decl_arg_trailing` (plus `tagged_union*`).
 - **`std.Io.File.stdout().writer(io, &buf)` is buffered** — call `.flush()` or nothing is emitted.
 - **`zig build-lib -femit-docs <file.zig>` writes `docs/` into the current working directory** (no `-femit-docs-dir` flag in 0.16).
-- **Build API** (`lib/std/Build.zig`): `addExecutable` :787, `addTest` :881, `addModule` :909, `createModule` :918, `addRunArtifact` :936, `addWriteFiles` :1099, `step` :1355, `installArtifact` :1660, `addInstallDirectory` :1726, `dependency` :2055. `root_module` is a **field** in the options struct, not a function argument. `lib/std/Build/Module.zig`: `addImport` :326, `addAnonymousImport` :332, `addEmbedPath` :507. `lib/std/Build/Step/Compile.zig:889`: `getEmittedDocs`.
+- **Build API** (`lib/std/Build.zig` — `addExecutable`, `addTest`, `addModule`, `createModule`, `addRunArtifact`, `addWriteFiles`, `step`, `installArtifact`, `addInstallDirectory`, `dependency`): `root_module` is a **field** in the options struct, not a function argument. `lib/std/Build/Module.zig` — `addImport`, `addAnonymousImport`, `addEmbedPath`. `lib/std/Build/Step/Compile.zig` — `getEmittedDocs`.
 
 ### Allocation discipline
 
