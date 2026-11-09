@@ -408,6 +408,8 @@ The four workflows are deliberately separated so a failure in one never blocks t
 
 Noise control (the failure mode that kills bot-driven repos): the bump job opens a PR **only if the resulting index actually differs** — the gate is computed in the bump job's own scratch checkout, before the PR exists, so the decision never depends on a later workflow. The PR body lists, per project, the old commit, the new commit, and the count of changed doc records. The JSONL diff is attached to the PR as a workflow artifact (the index itself stays out of the repo — `generated/` is gitignored) — a reviewer reads doc text changes, not a binary blob.
 
+**Diff baseline.** The "last published index" the bump job diffs against is the `index.jsonl` asset of the most recent published release; the bump job downloads it before indexing. Before the first release exists (no baseline asset), the bump job instead **rebuilds the baseline from the currently pinned commits** and diffs against that — so the first run compares "what the new pins produce" against "what the old pins produced", not against an empty file. The baseline is never a workflow artifact of a prior run: those expire and are not fetchable without a run-id/token dance, so the release asset is the single baseline source.
+
 Rollback: because the index is a separately published artifact and the server keeps the last good one in memory, rollback is "publish the previous index" — no binary rebuild, no client action beyond the short TTL.
 
 ---
