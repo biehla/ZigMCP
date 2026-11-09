@@ -127,6 +127,11 @@ The formatter gate must skip the indexer fixture tree: `tests/fixtures/indexer_s
 contains a deliberately unparseable file and a warning-only file, so
 `zig fmt --check . --exclude tests/fixtures` is the correct invocation.
 
+Killing a `zig build` can leave its `build-exe` compiler children running.
+They hold the local cache lock, so the next build blocks behind them and looks
+like a hang. After an interrupted build, check for orphaned `zig.exe` processes
+and clear them before timing anything.
+
 The server binary takes `--index <path>` and `--advice-dir <path>`; the
 environment variables `ZIGMCP_INDEX` and `ZIGMCP_ADVICE_DIR` are the
 equivalent. With no index configured the server starts and serves the advice
