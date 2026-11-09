@@ -1,0 +1,46 @@
+.{
+    .version = 1,
+    .guarantees = .{
+        .{
+            .id = "G01",
+            .claim = "batching can trade individual-packet latency for throughput in DPDK",
+            .evidence = .fact,
+            .guidance = "report both; do not substitute throughput for deadline performance",
+            .sources = .{"S06"},
+        },
+        .{
+            .id = "G02",
+            .claim = "RCU separates removal from reclamation so relevant readers can finish",
+            .evidence = .fact,
+            .guidance = "atomic pointer replacement alone does not solve publication, consistency, and reclamation",
+            .sources = .{"S21"},
+        },
+        .{
+            .id = "G03",
+            .claim = "safe Rust prevents data races but not all general race conditions",
+            .evidence = .fact,
+            .guidance = "distinguish memory safety from correct event order",
+            .sources = .{"S22"},
+        },
+        .{
+            .id = "G04",
+            .claim = "Bloom/CALM work identifies coordination-free consistency opportunities under relevant monotonicity conditions",
+            .evidence = .fact,
+            .guidance = "do not generalise this to arbitrary distributed programs",
+            .sources = .{"S23"},
+        },
+        .{
+            .id = "G05",
+            .claim = "ML systems can incur system-level debt through data dependencies, entanglement, feedback, and external changes",
+            .evidence = .fact,
+            .guidance = "retain model/configuration versions, decision provenance, and a defined recovery path",
+            .sources = .{"S24"},
+        },
+        .{
+            .id = "G06",
+            .claim = "well-formed input, admitted execution, correct policy, memory safety, consistency, and bounded timing are distinct properties.",
+            .evidence = .synthesis,
+            .sources = .{},
+        },
+    },
+}

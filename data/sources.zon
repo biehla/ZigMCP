@@ -1,0 +1,27 @@
+.{
+    // Upstream sources whose documentation is imported (PLAN §6.3, D6).
+    //
+    // The pins are frozen to a commit: `zig fetch` resolves a branch to a
+    // commit and writes the content hash, and the bump job re-resolves them.
+    // These trees are only *parsed* by the indexer — they are never compiled
+    // into the server, so upstream churn cannot break our build.
+    .zig_std = .{
+        .url = "git+https://github.com/ziglang/zig.git?ref=master#738d2be9d6b6ef3ff3559130c05159ef53336224",
+        .hash = "zig-0.0.0-Fp4XJNbCXw2v_D8DXrew2oo6vDN89kl-wEwpdX3pYuTq",
+        .branch = "master",
+        .commit = "738d2be9d6b6ef3ff3559130c05159ef53336224",
+        .scope = .{
+            .include = .{"lib/std/**"},
+            .exclude = .{"lib/std/**/testdata/**"},
+        },
+    },
+    .mcp_zig = .{
+        .url = "git+https://github.com/muhammad-fiaz/mcp.zig.git?ref=main#1bc38f6a11ab79d2b2a01e07f63b52b24fc2d101",
+        .hash = "mcp-0.0.9-cIUFg028CgDKn08ehMGGt-Dz8ai5Ue11cy3BTiy79bIE",
+        .branch = "main",
+        .commit = "1bc38f6a11ab79d2b2a01e07f63b52b24fc2d101",
+        .scope = .{
+            .include = .{"src/**"},
+        },
+    },
+}

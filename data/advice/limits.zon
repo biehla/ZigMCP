@@ -1,0 +1,18 @@
+.{
+    .version = 1,
+    .limits = .{
+        "This is a selective narrative synthesis, not a systematic review, standard taxonomy, or benchmark ranking.",
+        "Documentation establishes mechanisms, not universal efficiency or defect reductions.",
+        "Historical measurements retain their original workloads, baselines, and hardware scope.",
+        "No new tests, implementations, formal guarantees, or current-version compatibility checks were performed.",
+        "Keep hypotheses and GUIDANCE distinct from FACT and RESULT.",
+        "Check target versions before implementation; cite exact source documents for technical claims.",
+        "Research gaps: comparable benchmarks, timing-aware compilation, safe schema evolution, robust learned components, decision provenance, joint layout/scheduling optimisation, and measured maintenance costs.",
+    },
+    .evidence_legend = .{
+        .{ .label = "FACT", .meaning = "a documented mechanism; source IDs follow the claim" },
+        .{ .label = "RESULT", .meaning = "a study-specific empirical finding; retain its conditions" },
+        .{ .label = "SYNTHESIS", .meaning = "the report's classification or interpretation, not a standard taxonomy" },
+        .{ .label = "GUIDANCE", .meaning = "an engineering recommendation requiring project-specific validation" },
+    },
+}

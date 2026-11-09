@@ -1,0 +1,77 @@
+.{
+    .version = 1,
+    .rules = .{
+        .{
+            .id = "R01",
+            .condition = "Repeated variants within fixed semantics",
+            .then = .{ .consider = .{"P01"} },
+            .evidence = .guidance,
+        },
+        .{
+            .id = "R02",
+            .condition = "Input matching dominates control logic",
+            .then = .{ .consider = .{"P02"} },
+            .evidence = .guidance,
+        },
+        .{
+            .id = "R03",
+            .condition = "Measured memory/access bottleneck",
+            .then = .{ .consider = .{"P03"}, .and_only_if = "P04 only if composition/query organisation fits" },
+            .evidence = .guidance,
+        },
+        .{
+            .id = "R04",
+            .condition = "Recursive relationships dominate",
+            .then = .{ .consider = .{"P05"} },
+            .evidence = .guidance,
+        },
+        .{
+            .id = "R05",
+            .condition = "Fixed data rates and constrained topology",
+            .then = .{ .consider = .{"P06"}, .and_only_if = "SDF" },
+            .evidence = .guidance,
+        },
+        .{
+            .id = "R06",
+            .condition = "Repeated recomputation over changing inputs",
+            .then = .{ .consider = .{"P06"}, .and_only_if = "compare incremental maintenance with full recomputation, including retained state" },
+            .evidence = .guidance,
+        },
+        .{
+            .id = "R07",
+            .condition = "Duplicated domain descriptions",
+            .then = .{ .consider = .{"P07"}, .and_only_if = "choose binding time explicitly" },
+            .evidence = .guidance,
+        },
+        .{
+            .id = "R08",
+            .condition = "Infrastructure extension requirement",
+            .then = .{ .consider = .{"P08"}, .and_only_if = "compare supported targets and constraints" },
+            .evidence = .guidance,
+        },
+        .{
+            .id = "R09",
+            .condition = "Many pending I/O requests",
+            .then = .{ .consider = .{"P09"}, .and_only_if = "explicit lifetimes and queue limits" },
+            .evidence = .guidance,
+        },
+        .{
+            .id = "R10",
+            .condition = "Representative execution measurements available",
+            .then = .{ .consider = .{"P10"} },
+            .evidence = .guidance,
+        },
+        .{
+            .id = "R11",
+            .condition = "Search prediction potentially economical",
+            .then = .{ .consider = .{"P11"}, .and_only_if = "compare against tuned exact baselines" },
+            .evidence = .guidance,
+        },
+        .{
+            .id = "R12",
+            .condition = "Complex policy optimisation",
+            .then = .{ .consider = .{"P12"}, .and_only_if = "separately enforced invariants and a measured fallback" },
+            .evidence = .guidance,
+        },
+    },
+}

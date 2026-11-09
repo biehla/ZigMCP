@@ -1,0 +1,1 @@
+{"projects":{"fixture":{"commit":"0000000","records":25,"files_total":4,"files_degraded":3,"degraded":[{"path":"lib/std/broken.zig","diagnostics":[{"tag":"expected_expr","line":7}]},{"path":"lib/std/sample.zig","diagnostics":[{"tag":"unattached_doc_comment","line":61}]},{"path":"lib/std/warn_only.zig","diagnostics":[{"tag":"mismatched_binary_op_whitespace","line":5}]}]}}}

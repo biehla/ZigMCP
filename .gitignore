@@ -5,6 +5,9 @@ zig-out/
 # Scratch used for local stdlib/API verification — never committed
 .probe/
 
+# Superpowers planning scratch (briefs, reports, ledger) — never committed
+.superpowers/
+
 # Compiler-generated docs (`zig build-lib -femit-docs` writes here)
 docs/
 

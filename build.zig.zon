@@ -1,0 +1,20 @@
+.{
+    .name = .zigmcp,
+    .version = "0.1.0",
+    .fingerprint = 0x777244a99ef3ee70,
+    .minimum_zig_version = "0.17.1",
+    // Zero third-party runtime dependencies: the MCP wire layer is implemented
+    // in-repo (PLAN D1).
+    .dependencies = .{},
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "data",
+        "tools",
+        "tests",
+        "PLAN.md",
+        "AGENTS.md",
+        "systems_programming_context_v1.md",
+    },
+}
