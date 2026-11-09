@@ -19,10 +19,13 @@ const Harness = struct {
     stdout_reader: std.Io.File.Reader,
     /// The watchdog gives up on a silent server instead of hanging the suite.
     timed_out: std.atomic.Value(bool) = .init(false),
+    /// Set while the test waits for the server to exit on stdin EOF.
+    awaiting_exit: std.atomic.Value(bool) = .init(false),
     finished: std.atomic.Value(bool) = .init(false),
     watchdog: ?std.Thread = null,
 
     const watchdog_deadline_ms = 30_000;
+    const exit_deadline_ms = 10_000;
 
     fn start() !*Harness {
         const harness = try std.testing.allocator.create(Harness);
@@ -54,12 +57,24 @@ const Harness = struct {
         return harness;
     }
 
-    /// A server that stops answering must fail the test, not stall the suite.
+    /// A server that stops answering — or that ignores stdin EOF — must fail
+    /// the test, not stall the suite.
     fn watchdogLoop(harness: *Harness) void {
         var waited_ms: u64 = 0;
+        var exit_wait_ms: u64 = 0;
         while (waited_ms < watchdog_deadline_ms) : (waited_ms += 100) {
             if (harness.finished.load(.acquire)) return;
             sleep_util.sleepMilliseconds(io, 100);
+            if (harness.awaiting_exit.load(.acquire)) {
+                exit_wait_ms += 100;
+                if (exit_wait_ms >= exit_deadline_ms) {
+                    harness.timed_out.store(true, .release);
+                    harness.child.kill(io);
+                    return;
+                }
+            } else {
+                exit_wait_ms = 0;
+            }
         }
         if (harness.finished.load(.acquire)) return;
         harness.timed_out.store(true, .release);
@@ -81,8 +96,11 @@ const Harness = struct {
     }
 
     /// Closes stdin (EOF) and waits for a clean exit.
+    ///
+    /// The watchdog stays armed while we wait: a server that ignores EOF is
+    /// killed and the test fails instead of hanging the suite.
     fn stop(self: *Harness) !void {
-        self.finished.store(true, .release);
+        self.awaiting_exit.store(true, .release);
         self.child.stdin.?.close(io);
         self.child.stdin = null;
         const term = try self.child.wait(io);
@@ -90,6 +108,17 @@ const Harness = struct {
             .exited => |code| try std.testing.expectEqual(@as(u8, 0), code),
             else => return error.UnexpectedExit,
         }
+    }
+
+    /// Terminates the server without waiting for stdin EOF.
+    ///
+    /// The per-test teardown uses this: waiting for EOF on every server makes
+    /// the suite sensitive to pipe-handle lifetime on Windows. The clean-exit
+    /// behaviour is pinned by the dedicated EOF test instead.
+    fn kill(self: *Harness) void {
+        self.finished.store(true, .release);
+        // `Child.kill` terminates the process and reaps it.
+        self.child.kill(io);
     }
 
     /// Stops the watchdog and releases the harness.
@@ -110,7 +139,7 @@ fn metaParams(comptime version: []const u8) []const u8 {
 test "server/discover returns the spec-shaped result" {
     const harness = try Harness.start();
     defer {
-        harness.stop() catch {};
+        harness.kill();
         harness.release();
         std.testing.allocator.destroy(harness);
     }
@@ -137,7 +166,7 @@ test "server/discover returns the spec-shaped result" {
 test "a legacy request without _meta gets legacy semantics" {
     const harness = try Harness.start();
     defer {
-        harness.stop() catch {};
+        harness.kill();
         harness.release();
         std.testing.allocator.destroy(harness);
     }
@@ -159,7 +188,7 @@ test "a legacy request without _meta gets legacy semantics" {
 test "an incomplete _meta is invalid params" {
     const harness = try Harness.start();
     defer {
-        harness.stop() catch {};
+        harness.kill();
         harness.release();
         std.testing.allocator.destroy(harness);
     }
@@ -177,7 +206,7 @@ test "an incomplete _meta is invalid params" {
 test "an unsupported protocol version is rejected with the supported list" {
     const harness = try Harness.start();
     defer {
-        harness.stop() catch {};
+        harness.kill();
         harness.release();
         std.testing.allocator.destroy(harness);
     }
@@ -198,7 +227,7 @@ test "an unsupported protocol version is rejected with the supported list" {
 test "an unparseable line is a parse error" {
     const harness = try Harness.start();
     defer {
-        harness.stop() catch {};
+        harness.kill();
         harness.release();
         std.testing.allocator.destroy(harness);
     }
@@ -213,7 +242,7 @@ test "an unparseable line is a parse error" {
 test "a malformed envelope is an invalid request" {
     const harness = try Harness.start();
     defer {
-        harness.stop() catch {};
+        harness.kill();
         harness.release();
         std.testing.allocator.destroy(harness);
     }
@@ -228,7 +257,7 @@ test "a malformed envelope is an invalid request" {
 test "an unknown method is a method-not-found error" {
     const harness = try Harness.start();
     defer {
-        harness.stop() catch {};
+        harness.kill();
         harness.release();
         std.testing.allocator.destroy(harness);
     }
@@ -243,7 +272,7 @@ test "an unknown method is a method-not-found error" {
 test "tools/list advertises the tools sorted by name" {
     const harness = try Harness.start();
     defer {
-        harness.stop() catch {};
+        harness.kill();
         harness.release();
         std.testing.allocator.destroy(harness);
     }
@@ -276,7 +305,7 @@ test "tools/list advertises the tools sorted by name" {
 test "an unknown tool is invalid params" {
     const harness = try Harness.start();
     defer {
-        harness.stop() catch {};
+        harness.kill();
         harness.release();
         std.testing.allocator.destroy(harness);
     }
@@ -293,7 +322,7 @@ test "an unknown tool is invalid params" {
 test "advice_lookup returns the record with its evidence label" {
     const harness = try Harness.start();
     defer {
-        harness.stop() catch {};
+        harness.kill();
         harness.release();
         std.testing.allocator.destroy(harness);
     }
@@ -318,7 +347,7 @@ test "advice_lookup returns the record with its evidence label" {
 test "a missing resource is invalid params with the uri" {
     const harness = try Harness.start();
     defer {
-        harness.stop() catch {};
+        harness.kill();
         harness.release();
         std.testing.allocator.destroy(harness);
     }
@@ -337,7 +366,7 @@ test "a missing resource is invalid params with the uri" {
 test "a prompt is returned with its messages" {
     const harness = try Harness.start();
     defer {
-        harness.stop() catch {};
+        harness.kill();
         harness.release();
         std.testing.allocator.destroy(harness);
     }
