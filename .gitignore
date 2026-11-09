@@ -1,0 +1,18 @@
+# Zig build output
+zig-out/
+.zig-cache/
+
+# Scratch used for local stdlib/API verification — never committed
+.probe/
+
+# Compiler-generated docs (`zig build-lib -femit-docs` writes here)
+docs/
+
+# CI-produced data artifacts (PLAN §5: published, not hand-edited)
+generated/
+
+# Native build byproducts (e.g. `zig build-lib` leaves a .lib next to the source)
+*.lib
+*.a
+*.o
+*.obj
