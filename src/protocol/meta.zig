@@ -172,6 +172,61 @@ test "a non-object params member is invalid params" {
     try std.testing.expectError(error.InvalidParams, resolve(.{ .integer = 3 }));
 }
 
+test "property: a _meta is accepted only when it is well formed" {
+    // The property layer from PLAN §10.2. A deterministic generator stands in
+    // for a fuzzer: the invariant is that the resolver never accepts an
+    // incomplete or mistyped `_meta`, and never rejects a well-formed one
+    // with invalid params.
+    var prng = std.Random.DefaultPrng.init(0x5eed);
+    const random = prng.random();
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    var iteration: usize = 0;
+    while (iteration < 1000) : (iteration += 1) {
+        const has_version = random.boolean();
+        const has_capabilities = random.boolean();
+        const capabilities_are_object = random.boolean();
+
+        var meta: std.json.ObjectMap = .{};
+        if (has_version) {
+            const version = switch (random.uintLessThan(u8, 4)) {
+                0 => current_version,
+                1 => legacy_version,
+                2 => "1999-01-01",
+                else => "",
+            };
+            try meta.put(gpa, "io.modelcontextprotocol/protocolVersion", .{ .string = version });
+        }
+        if (has_capabilities) {
+            if (capabilities_are_object) {
+                try meta.put(gpa, "io.modelcontextprotocol/clientCapabilities", .{ .object = .{} });
+            } else {
+                try meta.put(gpa, "io.modelcontextprotocol/clientCapabilities", .{ .string = "not-an-object" });
+            }
+        }
+
+        var params: std.json.ObjectMap = .{};
+        try params.put(gpa, "_meta", .{ .object = meta });
+
+        const outcome = resolve(.{ .object = params });
+        const well_formed = has_version and has_capabilities and capabilities_are_object;
+        if (well_formed) {
+            if (outcome) |resolution| {
+                // A well-formed `_meta` resolves to one of the two revisions.
+                try std.testing.expect(resolution.version == .current or resolution.version == .legacy);
+            } else |err| switch (err) {
+                error.UnsupportedVersion => {},
+                error.InvalidParams => try std.testing.expect(false),
+            }
+        } else {
+            try std.testing.expectError(error.InvalidParams, outcome);
+        }
+    }
+}
+
 test "supported versions payload lists both revisions" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

@@ -37,6 +37,8 @@ const ProjectStatus = struct {
     records: usize,
     files_total: usize,
     degraded: std.ArrayList(DegradedFile),
+    skipped: bool = false,
+    previous_records: usize = 0,
 };
 
 const lessThan = struct {
@@ -55,9 +57,9 @@ pub fn main(init: std.process.Init) !void {
     var args_iter = try std.process.Args.Iterator.initAllocator(init.minimal.args, gpa);
     defer args_iter.deinit();
     _ = args_iter.next(); // program name
-
     var out_path: ?[]const u8 = null;
     var status_path: ?[]const u8 = null;
+    var previous_path: ?[]const u8 = null;
     var sources = std.ArrayList(Source).empty;
     var includes = std.ArrayList([]const u8).empty;
 
@@ -68,6 +70,8 @@ pub fn main(init: std.process.Init) !void {
             out_path = args_iter.next() orelse usage(io);
         } else if (std.mem.eql(u8, arg, "--status")) {
             status_path = args_iter.next() orelse usage(io);
+        } else if (std.mem.eql(u8, arg, "--previous")) {
+            previous_path = args_iter.next() orelse usage(io);
         } else if (std.mem.eql(u8, arg, "--source")) {
             const v = args_iter.next() orelse usage(io);
             sources.append(gpa, try parseSource(io, gpa, v)) catch unreachable;
@@ -83,6 +87,10 @@ pub fn main(init: std.process.Init) !void {
 
     var records = std.ArrayList(Record).empty;
     var statuses = std.ArrayList(ProjectStatus).empty;
+    var previous: []const Record = &.{};
+    if (previous_path) |pp| {
+        previous = try loadPrevious(io, gpa, pp);
+    }
 
     for (sources.items) |src| {
         var st = ProjectStatus{
@@ -92,7 +100,13 @@ pub fn main(init: std.process.Init) !void {
             .files_total = 0,
             .degraded = .empty,
         };
-        try indexSource(io, gpa, src, includes.items, &records, &st);
+        if (previous_path != null and countPreviousFor(previous, src.project, src.commit) > 0) {
+            try carryPrevious(gpa, previous, src.project, src.commit, &records);
+            st.skipped = true;
+            st.previous_records = countForProject(records.items, src.project);
+        } else {
+            try indexSource(io, gpa, src, includes.items, &records, &st);
+        }
         st.records = countForProject(records.items, src.project);
         try statuses.append(gpa, st);
     }
@@ -116,7 +130,7 @@ pub fn main(init: std.process.Init) !void {
     try fw.flush();
 
     const sp = status_path orelse deriveStatusPath(gpa, out_path.?) catch unreachable;
-    try writeStatus(io, gpa, sp, statuses.items);
+    try writeStatus(io, gpa, sp, statuses.items, previous_path != null);
 }
 
 fn countForProject(records: []Record, project: []const u8) usize {
@@ -125,6 +139,36 @@ fn countForProject(records: []Record, project: []const u8) usize {
         if (std.mem.eql(u8, r.project, project)) n += 1;
     }
     return n;
+}
+
+fn loadPrevious(io: std.Io, gpa: std.mem.Allocator, path: []const u8) ![]const Record {
+    const bytes = try std.Io.Dir.cwd().readFileAllocOptions(io, path, gpa, .limited(1024 * 1024 * 1024), .of(u8), null);
+    var out = std.ArrayList(Record).empty;
+    var lines = std.mem.splitScalar(u8, bytes, '\n');
+    while (lines.next()) |raw_line| {
+        var line = std.mem.trim(u8, raw_line, " \t\r");
+        if (line.len == 0) continue;
+        if (line[line.len - 1] == '\r') line = line[0 .. line.len - 1];
+        const parsed = try std.json.parseFromSlice(Record, gpa, line, .{});
+        try out.append(gpa, parsed.value);
+    }
+    return out.toOwnedSlice(gpa);
+}
+
+fn countPreviousFor(previous: []const Record, project: []const u8, commit: []const u8) usize {
+    var n: usize = 0;
+    for (previous) |r| {
+        if (std.mem.eql(u8, r.project, project) and std.mem.eql(u8, r.commit, commit)) n += 1;
+    }
+    return n;
+}
+
+fn carryPrevious(gpa: std.mem.Allocator, previous: []const Record, project: []const u8, commit: []const u8, records: *std.ArrayList(Record)) !void {
+    for (previous) |r| {
+        if (std.mem.eql(u8, r.project, project) and std.mem.eql(u8, r.commit, commit)) {
+            try records.append(gpa, r);
+        }
+    }
 }
 
 fn deriveStatusPath(gpa: std.mem.Allocator, out: []const u8) ![]const u8 {
@@ -137,8 +181,8 @@ fn deriveStatusPath(gpa: std.mem.Allocator, out: []const u8) ![]const u8 {
     return std.fmt.allocPrint(gpa, "{s}.status.json", .{out});
 }
 
-fn writeStatus(io: std.Io, gpa: std.mem.Allocator, path: []const u8, statuses: []ProjectStatus) !void {
-    const payload = try buildStatus(gpa, statuses);
+fn writeStatus(io: std.Io, gpa: std.mem.Allocator, path: []const u8, statuses: []ProjectStatus, report_skip: bool) !void {
+    const payload = try buildStatus(gpa, statuses, report_skip);
     var buf: [8192]u8 = undefined;
     const f = try std.Io.Dir.cwd().createFile(io, path, .{});
     defer f.close(io);
@@ -147,7 +191,7 @@ fn writeStatus(io: std.Io, gpa: std.mem.Allocator, path: []const u8, statuses: [
     try w.flush();
 }
 
-fn buildStatus(gpa: std.mem.Allocator, statuses: []ProjectStatus) ![]const u8 {
+fn buildStatus(gpa: std.mem.Allocator, statuses: []ProjectStatus, report_skip: bool) ![]const u8 {
     var aw: std.Io.Writer.Allocating = .init(gpa);
     defer aw.deinit();
     const w = &aw.writer;
@@ -159,7 +203,12 @@ fn buildStatus(gpa: std.mem.Allocator, statuses: []ProjectStatus) ![]const u8 {
         try writeJsonString(gpa, w, st.project);
         try w.writeAll(":{\"commit\":");
         try writeJsonString(gpa, w, st.commit);
-        try w.print(",\"records\":{},\"files_total\":{},\"files_degraded\":{},\"degraded\":[", .{ st.records, st.files_total, st.degraded.items.len });
+        try w.print(",\"records\":{},\"files_total\":{},\"files_degraded\":{}", .{ st.records, st.files_total, st.degraded.items.len });
+        if (report_skip) {
+            try w.print(",\"skipped\":{s}", .{if (st.skipped) "true" else "false"});
+            if (st.skipped) try w.print(",\"previous_records\":{}", .{st.previous_records});
+        }
+        try w.writeAll(",\"degraded\":[");
         var first_f = true;
         for (st.degraded.items) |df| {
             if (!first_f) try w.writeByte(',');
@@ -194,7 +243,7 @@ fn usage(io: std.Io) noreturn {
     const f = std.Io.File.stderr();
     var w = f.writer(io, &buf);
     w.interface.writeAll(
-        \\usage: indexer --out <index.jsonl> --source <project>=<commit>=<root> [--source ...] [--include <subpath> ...] [--status <path>]
+        \\usage: indexer --out <index.jsonl> --source <project>=<commit>=<root> [--source ...] [--include <subpath> ...] [--status <path>] [--previous <index.jsonl>]
     ) catch {};
     w.interface.writeAll("\n") catch {};
     w.flush() catch {};

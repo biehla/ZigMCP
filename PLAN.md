@@ -495,8 +495,15 @@ Before any future claim about a smarter index, build and measure: (a) linear sca
 
 **Status (2026-11-09).** M0, M1 and M2 are implemented in the tree (see `AGENTS.md` for the
 module map and the test layers). M3's four workflows exist but have never run against a real
-upstream bump. M4 is partial: `--index`/env configuration and the `instructions` field ship;
-the fuzz, concurrency-integration and end-to-end layers do not exist yet.
+upstream bump. M4 is partial: `--index`/env configuration, the `instructions` field, the
+HTTP(S) index source (§4/§8.5), incremental re-indexing (§8.3, `indexer --previous`), the
+property, concurrency-integration and end-to-end test layers (§10.2) and the verification
+report tool (§10.3, `zig build bench`) ship. Still open: a real fuzz harness (the property
+tests are deterministic generators, not coverage-guided fuzzing), `docs://` pagination,
+the optional `-femit-docs` artifact, and the "bundled minimal index" fallback — with no
+`ZIGMCP_INDEX` configured the server starts with an empty in-memory index, which serves the
+advice corpus and reports "nothing matched" for the doc tools rather than shipping a
+checked-in placeholder index.
 
 ---
 

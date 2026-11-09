@@ -383,6 +383,11 @@ fn statusSidecarPath(gpa: std.mem.Allocator, index_path: []const u8) ![]const u8
 /// Loads the status sidecar, if the indexer wrote one.
 fn loadStatusSidecar(ctx: *Context, gpa: std.mem.Allocator) !?std.json.Value {
     const index_path = ctx.index_path orelse return null;
+    // A remote artifact has no local sidecar: the indexer wrote it next to the
+    // file it produced, not next to the URL the server downloads from.
+    if (std.mem.startsWith(u8, index_path, "http://") or std.mem.startsWith(u8, index_path, "https://")) {
+        return null;
+    }
     const sidecar_path = try statusSidecarPath(gpa, index_path);
     const bytes = std.Io.Dir.cwd().readFileAllocOptions(
         ctx.io,

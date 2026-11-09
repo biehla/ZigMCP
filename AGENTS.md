@@ -101,8 +101,9 @@ Present today:
 | `src/` | The server plane (module map above) |
 | `data/advice/*.zon` | The advice corpus: `patterns.zon` (P01–P12), `rules.zon` (R01–R12), `guarantees.zon`, `limits.zon` (+ evidence legend), `sources.zon` (the S01–S24 registry) |
 | `data/sources.zon` | Upstream projects to import, hash-pinned to a commit with their scope |
-| `tools/indexer.zig` | Doc indexer: upstream tree → JSONL (+ a status sidecar listing degraded files) |
+| `tools/indexer.zig` | Doc indexer: upstream tree → JSONL (+ a status sidecar listing degraded files); `--previous <index.jsonl>` skips a project whose commit is unchanged (PLAN §8.3) |
 | `tools/advice_check.zig` | Corpus validator: dangling `Sxx`, missing evidence label, duplicate/malformed ids |
+| `tools/bench.zig` | Verification report: startup time, per-tool p50/p95/p99 latency, error counts, index size, peak RSS (PLAN §10.3) |
 | `tests/` | `fixtures/indexer_src/` (indexer fixture tree), `golden/index.jsonl` (+ `index.status.json`), `protocol_test.zig`, `indexer_test.zig` |
 | `.github/workflows/` | `ci.yml`, `bump-master.yml`, `index.yml`, `release.yml` |
 | `readme.md` | **Empty by design** — a known gap; PLAN.md mandates no content for it (it appears only in the §5 layout tree) |
@@ -118,6 +119,7 @@ zig env                      # lib_dir / std_dir / global_cache_dir
 zig build                    # build + install to zig-out/ (server + indexer)
 zig build test               # unit + protocol + golden test layers
 zig build check              # validate the advice corpus (advice_check)
+zig build bench              # verification report: startup, per-tool p50/p95/p99, RSS
 zig build run                # start the stdio server
 zig build -Doptimize=ReleaseSafe
 zig fmt --check . --exclude tests/fixtures   # formatter gate (also: --zon, --ast-check)
@@ -132,10 +134,14 @@ They hold the local cache lock, so the next build blocks behind them and looks
 like a hang. After an interrupted build, check for orphaned `zig.exe` processes
 and clear them before timing anything.
 
-The server binary takes `--index <path>` and `--advice-dir <path>`; the
+The server binary takes `--index <path-or-url>` and `--advice-dir <path>`; the
 environment variables `ZIGMCP_INDEX` and `ZIGMCP_ADVICE_DIR` are the
-equivalent. With no index configured the server starts and serves the advice
-corpus; the doc tools then report that nothing matched.
+equivalent. The index location may be a local path **or an HTTP(S) URL**
+(PLAN §4/§8.5): a local artifact is polled by mtime + size, a remote one is
+re-fetched on the poll interval and compared by content hash (the stdlib HTTP
+client has no conditional-GET support). With no index configured the server
+starts and serves the advice corpus; the doc tools then report that nothing
+matched.
 
 ### Language server
 
@@ -274,13 +280,13 @@ Load corpora at startup into the **arena**; serve requests from flat, read-only 
 
 | Layer | Status | Where |
 |---|---|---|
-| **Unit** | ✅ | `test` blocks in `src/**` (45 tests: `_meta` resolution, JSON-RPC envelope, error codes, rule matcher, corpus load, JSONL loader, columnar layout, search ranking, reload swap, tool registry + schema derivation) |
+| **Unit** | ✅ | `test` blocks in `src/**` (`_meta` resolution, JSON-RPC envelope, error codes, rule matcher, corpus load, JSONL loader, columnar layout, search ranking, reload swap, tool registry + schema derivation) |
 | **Golden** | ✅ | `tests/indexer_test.zig` — the indexer must reproduce `tests/golden/index.jsonl` byte-for-byte over `tests/fixtures/indexer_src/` |
-| **Protocol** | ✅ | `tests/protocol_test.zig` — drives `zig-out/bin/zigmcp` as a subprocess over pipes: discover, legacy `initialize`, `-32602`, `-32022`, `-32700`, `-32600`, `-32601`, `tools/list` ordering, `advice_lookup`, missing resource, `prompts/get`, clean exit on EOF |
+| **Protocol** | ✅ | `tests/protocol_test.zig` — drives `zig-out/bin/zigmcp` as a subprocess over pipes: discover, legacy `initialize`, `-32602`, `-32022`, `-32700`, `-32600`, `-32601`, `tools/list` ordering, cache hints on all six cacheable methods, `advice_lookup`, missing resource, `prompts/get`, clean exit on EOF |
 | **Corpus validation** | ✅ | `tools/advice_check.zig` (wired as `zig build check`) |
-| **Property/fuzz** | ⬜ | planned (PLAN §10.2) |
-| **Integration** (concurrent reload) | ⬜ | planned — the reload path exists (`src/docs/reload.zig`), the test does not |
-| **End-to-end** | ⬜ | planned |
+| **Property/fuzz** | ✅ | property tests with deterministic generators: `src/protocol/meta.zig` (random `_meta`), `src/docs/index.zig` (mutated, truncated and invalid-UTF-8 JSONL), `src/docs/search.zig` (pathological queries) |
+| **Integration** (concurrent reload) | ✅ | `src/docs/reload.zig` — a reader thread takes snapshots while the writer swaps indexes; a torn read would mix two versions |
+| **End-to-end** | ✅ | `tests/protocol_test.zig` — a scripted session: discover → list tools → call every tool → read a resource → get a prompt |
 
 Run everything with `zig build test` (unit + protocol + golden). The protocol layer
 writes one request and blocks on the response, so it also pins the

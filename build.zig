@@ -37,6 +37,25 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    // The verification report tool (PLAN §10.3): startup time, per-tool
+    // latency quantiles, error counts and peak RSS.
+    const bench = b.addExecutable(.{
+        .name = "bench",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/bench.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    b.installArtifact(bench);
+
+    const run_bench = b.addRunArtifact(bench);
+    run_bench.step.dependOn(b.getInstallStep());
+    run_bench.addArg("--server");
+    run_bench.addFileArg(exe.getEmittedBin());
+    const bench_step = b.step("bench", "Produce the verification report (PLAN §10.3)");
+    bench_step.dependOn(&run_bench.step);
+
     const run_step = b.step("run", "Run the MCP server over stdio");
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());

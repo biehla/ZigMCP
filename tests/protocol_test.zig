@@ -40,7 +40,10 @@ const Harness = struct {
         };
 
         harness.child = try std.process.spawn(io, .{
-            .argv = &.{ options.server_exe, "--advice-dir", "data/advice" },
+            // The golden index is checked in, so the doc tools are exercised
+            // against real records on every machine (the generated index is
+            // gitignored and may not exist).
+            .argv = &.{ options.server_exe, "--advice-dir", "data/advice", "--index", "tests/golden/index.jsonl" },
             .stdin = .pipe,
             .stdout = .pipe,
             // The server's diagnostics stay visible: a failing protocol test
@@ -131,9 +134,15 @@ const Harness = struct {
     }
 };
 
+/// The `_meta` object itself.
+fn metaObject(comptime version: []const u8) []const u8 {
+    return "{\"io.modelcontextprotocol/protocolVersion\":\"" ++ version ++
+        "\",\"io.modelcontextprotocol/clientCapabilities\":{}}";
+}
+
+/// A whole `params` object that carries nothing but `_meta`.
 fn metaParams(comptime version: []const u8) []const u8 {
-    return "{\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"" ++ version ++
-        "\",\"io.modelcontextprotocol/clientCapabilities\":{}}}";
+    return "{\"_meta\":" ++ comptime metaObject(version) ++ "}";
 }
 
 test "server/discover returns the spec-shaped result" {
@@ -383,6 +392,119 @@ test "a prompt is returned with its messages" {
     const text = messages.items[0].object.get("content").?.object.get("text").?.string;
     try std.testing.expect(std.mem.indexOf(u8, text, "GUIDANCE") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "checks") != null);
+}
+
+test "a scripted client session walks the whole surface" {
+    // The end-to-end layer from PLAN §10.2: discover → list tools → call
+    // every tool → read a resource → get a prompt, in one session.
+    const harness = try Harness.start();
+    defer {
+        harness.kill();
+        harness.release();
+        std.testing.allocator.destroy(harness);
+    }
+
+    try harness.send("{\"jsonrpc\":\"2.0\",\"id\":20,\"method\":\"server/discover\",\"params\":" ++ comptime metaParams("2026-07-28") ++ "}");
+    {
+        const response = try harness.receive();
+        defer response.deinit();
+        const result = response.value.object.get("result").?.object;
+        try std.testing.expectEqualStrings("complete", result.get("resultType").?.string);
+        try std.testing.expect(result.get("capabilities").?.object.get("tools") != null);
+    }
+
+    try harness.send("{\"jsonrpc\":\"2.0\",\"id\":21,\"method\":\"tools/list\",\"params\":" ++ comptime metaParams("2026-07-28") ++ "}");
+    {
+        const response = try harness.receive();
+        defer response.deinit();
+        const tools = response.value.object.get("result").?.object.get("tools").?.array;
+        try std.testing.expectEqual(@as(usize, 5), tools.items.len);
+    }
+
+    // Every advertised tool must answer with a well-formed tool result. The
+    // harness points the server at the checked-in golden index, so the doc
+    // tools are exercised against real records.
+    const calls = [_]struct { name: []const u8, arguments: []const u8 }{
+        .{ .name = "advice_lookup", .arguments = "{\"concept\":\"P01\"}" },
+        .{ .name = "recommend_approach", .arguments = "{\"signals\":[\"repeated recomputation over changing inputs\"]}" },
+        .{ .name = "doc_search", .arguments = "{\"query\":\"sample\"}" },
+        .{ .name = "doc_get", .arguments = "{\"project\":\"fixture\",\"symbol\":\"lib.std.sample.single\"}" },
+        .{ .name = "doc_import_status", .arguments = "{}" },
+    };
+
+    var id: i64 = 22;
+    for (calls) |call| {
+        id += 1;
+        const request = try std.fmt.allocPrint(
+            std.testing.allocator,
+            "{{\"jsonrpc\":\"2.0\",\"id\":{d},\"method\":\"tools/call\",\"params\":{{\"name\":\"{s}\",\"arguments\":{s},\"_meta\":{{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{{}}}}}}}}",
+            .{ id, call.name, call.arguments },
+        );
+        defer std.testing.allocator.free(request);
+
+        try harness.send(request);
+        const response = try harness.receive();
+        defer response.deinit();
+
+        if (response.value.object.get("result") == null) {
+            const error_object = response.value.object.get("error").?.object;
+            std.debug.print("tool call {s} failed: {s}\n", .{ call.name, error_object.get("message").?.string });
+            return error.ToolCallFailed;
+        }
+        const result = response.value.object.get("result").?.object;
+        try std.testing.expect(result.get("content").?.array.items.len > 0);
+        // Every tool answers successfully against the checked-in index.
+        try std.testing.expect(!result.get("isError").?.bool);
+    }
+
+    try harness.send("{\"jsonrpc\":\"2.0\",\"id\":30,\"method\":\"resources/read\",\"params\":{\"uri\":\"advice://overview\",\"_meta\":" ++ comptime metaObject("2026-07-28") ++ "}}");
+    {
+        const response = try harness.receive();
+        defer response.deinit();
+        const result = response.value.object.get("result").?.object;
+        try std.testing.expect(result.get("contents").?.array.items.len > 0);
+    }
+
+    try harness.send("{\"jsonrpc\":\"2.0\",\"id\":31,\"method\":\"prompts/get\",\"params\":{\"name\":\"approach_selection\",\"arguments\":{\"situation\":\"a hot loop over changing inputs\"},\"_meta\":" ++ comptime metaObject("2026-07-28") ++ "}}");
+    {
+        const response = try harness.receive();
+        defer response.deinit();
+        const result = response.value.object.get("result").?.object;
+        const messages = result.get("messages").?.array;
+        try std.testing.expectEqual(@as(usize, 1), messages.items.len);
+    }
+}
+
+test "every cacheable method carries the cache hints" {
+    // SEP-2549 makes ttlMs + cacheScope mandatory on the six cacheable
+    // methods. server/discover and resources/read are asserted by their own
+    // tests; this covers the remaining four.
+    const harness = try Harness.start();
+    defer {
+        harness.kill();
+        harness.release();
+        std.testing.allocator.destroy(harness);
+    }
+
+    const methods = [_][]const u8{ "tools/list", "prompts/list", "resources/list", "resources/templates/list" };
+    for (methods, 0..) |method, index| {
+        const request = try std.fmt.allocPrint(
+            std.testing.allocator,
+            "{{\"jsonrpc\":\"2.0\",\"id\":{d},\"method\":\"{s}\",\"params\":{s}}}",
+            .{ @as(i64, 40 + @as(i64, @intCast(index))), method, comptime metaParams("2026-07-28") },
+        );
+        defer std.testing.allocator.free(request);
+
+        try harness.send(request);
+        const response = try harness.receive();
+        defer response.deinit();
+
+        const result = response.value.object.get("result").?.object;
+        try std.testing.expectEqualStrings("complete", result.get("resultType").?.string);
+        try std.testing.expect(result.get("ttlMs").?.integer >= 0);
+        const scope = result.get("cacheScope").?.string;
+        try std.testing.expect(std.mem.eql(u8, scope, "public") or std.mem.eql(u8, scope, "private"));
+    }
 }
 
 test "the server exits cleanly on stdin EOF" {

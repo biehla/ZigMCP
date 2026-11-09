@@ -131,7 +131,8 @@ jobs:
             zig run tools/indexer.zig -- \
               --out "bump-results/$name.jsonl" \
               --source "$name=$new_commit=upstream/$name" \
-              --include "$include" || true
+              --include "$include" \
+              --previous baseline.jsonl || true
           done < bump-results/pins.tsv
           python3 - <<'PY'
           import json, pathlib

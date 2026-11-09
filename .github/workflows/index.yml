@@ -4,11 +4,15 @@ name: Rebuild index
 # pinned trees and publish generated/index.jsonl (sorted by (project, symbol)).
 # Degrade-don't-skip (AGENTS.md): a file with parse diagnostics still
 # contributes usable records and is reported as degraded — never fail the run.
+#
+# The trigger is the merge itself: a push to main that changes the pins.
+# `workflow_run` on the bump workflow would fire when the PR is *opened*,
+# before the new pins are on main, so it would publish the old index.
 on:
-  workflow_run:
-    workflows: ["Bump upstream masters"]
-    types: [completed]
+  push:
     branches: [main]
+    paths:
+      - data/sources.zon
   workflow_dispatch:
 
 permissions:
@@ -64,6 +68,21 @@ jobs:
             git -C "upstream/$name" checkout --detach "$commit"
           done < upstream/plan.tsv
 
+      - name: Download the published index (the previous version)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # PLAN §8.3: a project whose commit is unchanged is skipped entirely
+          # and its records are carried over from the published index. Without
+          # a published release the index is rebuilt from scratch.
+          gh release download --pattern index.jsonl --dir published 2>/dev/null || true
+          if [ -f published/index.jsonl ]; then
+            cp published/index.jsonl previous.jsonl
+            echo "previous index available"
+          else
+            echo "no published index: rebuilding every project"
+          fi
+
       - name: Build the index (degrade-don't-skip)
         run: |
           : > generated/index.jsonl
@@ -72,11 +91,20 @@ jobs:
             # The indexer never fails the run because one upstream file is
             # broken: its usable records are still emitted and the file is
             # reported as degraded in the status sidecar.
-            zig run tools/indexer.zig -- \
-              --out "generated/$name.jsonl" \
-              --status "generated/$name.status.json" \
-              --source "$name=$commit=upstream/$name" \
-              --include "$include" || true
+            if [ -f previous.jsonl ]; then
+              zig run tools/indexer.zig -- \
+                --out "generated/$name.jsonl" \
+                --status "generated/$name.status.json" \
+                --source "$name=$commit=upstream/$name" \
+                --include "$include" \
+                --previous previous.jsonl || true
+            else
+              zig run tools/indexer.zig -- \
+                --out "generated/$name.jsonl" \
+                --status "generated/$name.status.json" \
+                --source "$name=$commit=upstream/$name" \
+                --include "$include" || true
+            fi
           done < upstream/plan.tsv
 
       - name: Merge and sort the index

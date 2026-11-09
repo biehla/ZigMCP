@@ -22,7 +22,9 @@ const prompts_module = @import("server/prompts.zig");
 
 const default_advice_dir = "data/advice";
 const default_index_path = "generated/index.jsonl";
-const watcher_poll_ms = 1_000;
+const watcher_poll_ms: u64 = 1_000;
+/// A remote index is re-fetched on this cadence (≈ the index TTL).
+const remote_poll_ms: u64 = 60_000;
 
 const Options = struct {
     advice_dir: []const u8 = default_advice_dir,
@@ -61,14 +63,22 @@ pub fn main(init: std.process.Init) !void {
     };
 
     var store = docs_reload.Store.init(gpa, initial_index);
-    defer store.deinit();
+    // Cleared when the watcher cannot be stopped in time: the thread may still
+    // touch the store, so it is deliberately not freed.
+    var store_alive = true;
+    defer if (store_alive) store.deinit();
 
     var index_path: ?[]const u8 = null;
+    var index_source: ?docs_reload.Source = null;
+    var index_digest: ?docs_reload.Digest = null;
     if (options.index_path) |path| {
         index_path = path;
+        const source = docs_reload.Source.fromString(path);
+        index_source = source;
         const loaded = gpa.create(docs_index.Index) catch |err| return err;
-        if (docs_index.loadFile(init.io, gpa, path)) |loaded_index| {
-            loaded.* = loaded_index;
+        if (docs_reload.loadSource(init.io, gpa, source)) |result| {
+            loaded.* = result.index;
+            index_digest = result.digest;
             store.swap(loaded);
         } else |err| {
             gpa.destroy(loaded);
@@ -79,15 +89,26 @@ pub fn main(init: std.process.Init) !void {
     }
 
     var watcher: ?docs_reload.Watcher = null;
-    if (index_path) |path| {
-        watcher = docs_reload.startWatcher(gpa, init.io, &store, path, watcher_poll_ms) catch |err| blk: {
+    if (index_source) |source| {
+        // A remote artifact is re-fetched on a slow cadence: the index TTL is
+        // ~60 s, so polling the origin every second would hammer it for no
+        // benefit.
+        const poll_ms = if (source.isUrl()) remote_poll_ms else watcher_poll_ms;
+        watcher = docs_reload.startWatcher(gpa, init.io, &store, source, poll_ms, index_digest) catch |err| blk: {
             logStderr(init.io, "zigmcp: cannot start the index watcher ({s})\n", .{@errorName(err)});
             break :blk null;
         };
     }
     defer if (watcher) |*w| {
-        w.stop();
-        logStderr(init.io, "zigmcp: index watcher stopped\n", .{});
+        if (w.stop()) {
+            logStderr(init.io, "zigmcp: index watcher stopped\n", .{});
+        } else {
+            // The watcher is parked in a network read. The process is exiting,
+            // so the store is intentionally left alive rather than freed under
+            // a live thread.
+            store_alive = false;
+            logStderr(init.io, "zigmcp: index watcher did not stop in time; leaving it to the process exit\n", .{});
+        }
     };
 
     var pool = try pool_module.ArenaPool.init(gpa);
@@ -382,10 +403,11 @@ fn printUsage(io: std.Io) !void {
     try stderr.interface.writeAll(
         \\zigmcp — an MCP server for systems-programming advice and imported Zig docs
         \\
-        \\Usage: zigmcp [--index <path>] [--advice-dir <path>]
+        \\Usage: zigmcp [--index <path-or-url>] [--advice-dir <path>]
         \\
-        \\  --index <path>      JSONL doc index to load and watch (default: generated/index.jsonl
-        \\                      when it exists; also settable through ZIGMCP_INDEX)
+        \\  --index <path>      JSONL doc index to load and watch: a local path or an
+        \\                      HTTP(S) URL (default: generated/index.jsonl when it
+        \\                      exists; also settable through ZIGMCP_INDEX)
         \\  --advice-dir <path> Advice corpus directory (default: data/advice; also settable
         \\                      through ZIGMCP_ADVICE_DIR)
         \\  --help              Show this message
