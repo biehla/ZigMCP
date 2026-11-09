@@ -23,9 +23,12 @@ fn sleepWindows(ms: u64) void {
 
     // LARGE_INTEGER counts 100-nanosecond intervals; a negative value is a
     // relative delay. Cap the request so an overflow cannot turn it positive
-    // (which would mean "no delay"). The constants are typed explicitly: Zig
-    // 0.17 gives an unsuffixed literal the smallest type that fits it, and
-    // `std.time.ns_per_ms` cannot even be represented by its own `u10` type.
+    // (which would mean "no delay").
+    //
+    // The widths are spelled out on purpose: `@min(runtime_u64, comptime_int)`
+    // narrows to the smallest type that fits the literal (u20 for 1_000_000),
+    // and a multiplication then inherits that narrow type and overflows in
+    // checked arithmetic. Pinning the operands to u64 keeps the product wide.
     const max_ms: u64 = 1_000_000;
     const ticks_per_ms: u64 = 10_000;
     const capped_ms: u64 = @min(ms, max_ms);

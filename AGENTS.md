@@ -136,10 +136,18 @@ corpus; the doc tools then report that nothing matched.
 
 `lsp.json` wires [ZLS](https://zigtools.org/zls/) (the Zig language server)
 to this project, so editors — and the agent's own `lsp` tool — get
-definitions, references, hovers and diagnostics for `.zig` files. ZLS follows
-the Zig release it ships with: keep it on the same minor version as the
-toolchain (Zig 0.17.1 ⇒ ZLS 0.17.x). `zig build test` remains the authority on
-whether the tree compiles; ZLS is the fast inner loop.
+definitions, references, hovers and diagnostics for `.zig` files.
+
+Two constraints make this fragile, so keep them in mind:
+
+- **ZLS is pinned to one Zig version.** Keep it on the toolchain's minor
+  version (Zig 0.17.1 ⇒ ZLS 0.17.x); a mismatched ZLS misparses the tree.
+  Upgrading means stopping the running `zls.exe` first — scoop refuses to
+  overwrite a binary that is in use.
+- **Diagnostics lag by kind.** ZLS reports syntax errors immediately, but
+  semantic errors (a wrong type, a missing declaration) arrive with the next
+  `zig build` run, which is minutes on a cold cache. `zig build test` remains
+  the authority on whether the tree compiles; ZLS is the fast inner loop.
 
 ### Dependency management
 
