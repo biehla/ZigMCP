@@ -39,6 +39,8 @@ stdin line (newline-framed JSON)
   → build result              on 2026-07-28 responses ALWAYS include resultType
                               ("complete"; "input_required" reserved) and
                               _meta["io.modelcontextprotocol/serverInfo"];
+                              + cache hints (ttlMs + cacheScope) on the six
+                              cacheable methods (PLAN §7.4);
                               legacy (inferred 2025-06-18) responses omit both
                               tool-level failure → isError:true inside a normal result (NOT a JSON-RPC error)
   → std.json.Stringify        into a fixed buffer
