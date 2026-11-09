@@ -93,7 +93,7 @@ Present today:
 | `readme.md` | **Empty by design** — a known gap; PLAN.md mandates no content for it (it appears only in the §5 layout tree) |
 | `.gitignore` | Excludes `zig-out/`, `.zig-cache/`, `.probe/`, `docs/`, `generated/`, and native byproducts |
 
-Planned (PLAN §5): `src/` (above), `data/advice/*.zon` + `data/sources.zon`, `tools/indexer.zig` + `tools/advice_check.zig`, `generated/index.jsonl` (CI-produced, never hand-edited), `.github/workflows/{ci,bump-master,index,release}.yml`.
+Planned (PLAN §5): `build.zig`, `build.zig.zon`, `src/` (above), `data/advice/*.zon` + `data/sources.zon`, `tools/indexer.zig` + `tools/advice_check.zig`, `generated/index.jsonl` (CI-produced, never hand-edited), `.github/workflows/{ci,bump-master,index,release}.yml`.
 
 ## Development Commands
 
