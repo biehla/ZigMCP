@@ -366,8 +366,17 @@ fn indexFile(gpa: std.mem.Allocator, project: []const u8, commit: []const u8, re
 }
 
 fn stripPrefix3(slice: []const u8, prefix: []const u8) []const u8 {
-    if (slice.len >= prefix.len and std.mem.eql(u8, slice[0..prefix.len], prefix)) return slice[prefix.len..];
-    return slice;
+    var result = slice;
+    if (result.len >= prefix.len and std.mem.eql(u8, result[0..prefix.len], prefix)) {
+        result = result[prefix.len..];
+    }
+    // A checkout with CRLF line endings must not change the extracted text:
+    // the line ending is not part of the documentation, and the golden
+    // comparison is byte-for-byte.
+    if (result.len > 0 and result[result.len - 1] == '\r') {
+        result = result[0 .. result.len - 1];
+    }
+    return result;
 }
 
 fn modulePath(gpa: std.mem.Allocator, rel: []const u8) ![]const u8 {

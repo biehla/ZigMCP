@@ -1,0 +1,6 @@
+# Keep the checked-in text files byte-identical on every platform.
+#
+# The golden index is compared byte-for-byte against the indexer's output, so
+# a CRLF checkout (git's default on Windows) would change the doc hashes and
+# break the golden test. LF everywhere also keeps the fixture tree stable.
+* text=auto eol=lf
