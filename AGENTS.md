@@ -161,9 +161,11 @@ Load corpora at startup into the **arena**; serve requests from flat, read-only 
 |---|---|
 | Malformed JSON line | JSON-RPC `-32700` |
 | Malformed JSON-RPC envelope | JSON-RPC `-32600` |
+| Unknown method | JSON-RPC `-32601` |
 | `_meta` present but missing a required field (`protocolVersion`, `clientCapabilities`) | JSON-RPC `-32602` — the spec defines a request missing a required field as invalid **params**, not invalid request |
 | `_meta` entirely absent | Not an error — version-inferred as legacy `2025-06-18` (D10) |
 | Unsupported protocol version | JSON-RPC `-32022` with the supported list |
+| Internal failure | JSON-RPC `-32603` |
 | Tool fails at runtime | Normal result with `isError: true` — **not** a JSON-RPC error |
 
 `-32020` / `-32021` are reserved spec codes and are **not wired in v1** (no HTTP transport, so no header/auth surface).
