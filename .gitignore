@@ -1,18 +1,19 @@
 # Zig build output
-zig-out/
-.zig-cache/
+/zig-out/
+/.zig-cache/
 
 # Scratch used for local stdlib/API verification — never committed
-.probe/
+/.probe/
 
 # Superpowers planning scratch (briefs, reports, ledger) — never committed
-.superpowers/
+/.superpowers/
 
-# Compiler-generated docs (`zig build-lib -femit-docs` writes here)
-docs/
+# Compiler-generated docs (`zig build-lib -femit-docs` writes here).
+# Anchored to the root: `src/docs/` is the doc-index module and is tracked.
+/docs/
 
 # CI-produced data artifacts (PLAN §5: published, not hand-edited)
-generated/
+/generated/
 
 # Native build byproducts (e.g. `zig build-lib` leaves a .lib next to the source)
 *.lib
