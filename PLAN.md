@@ -335,7 +335,8 @@ All five tools are read-only: the registry sets `annotations.readOnlyHint = true
 - Every result object carries `resultType` (`"complete"` for now; `"input_required"` reserved) and `_meta["io.modelcontextprotocol/serverInfo"]` = `{ name, version }` — on `2026-07-28` responses.
 - **Cache hints are mandatory** on `resultType: "complete"` results of `server/discover`, `tools/list`, `prompts/list`, `resources/list`, `resources/templates/list`, `resources/read`: `ttlMs` (≥ 0) and `cacheScope` (`"public"` | `"private"`). Policy: static advice resources get a long TTL (`"public"`); anything derived from the current index gets a short TTL (e.g. 60 s, `"private"`) so a freshly republished index is picked up quickly.
 - `tools/list` ordering is deterministic (sorted by name) so clients can cache it.
-- Unknown tool, unknown prompt, invalid arguments, invalid cursor, unknown resource URI ⇒ `-32602`. A malformed JSON-RPC envelope ⇒ `-32600`; unparseable line ⇒ `-32700`; unknown method ⇒ `-32601`.
+- Unknown tool, unknown prompt, invalid arguments, invalid cursor, unknown resource URI ⇒ `-32602`. A malformed JSON-RPC envelope ⇒ `-32600`; unparseable line ⇒ `-32700`; unknown method ⇒ `-32601`; an unexpected server-side failure ⇒ `-32603`.
+- The legacy resource-not-found code `-32002` **MUST NOT** be emitted — a missing resource is `-32602` with `data.uri`. The spec-reserved `-32020` (header mismatch) and `-32021` (missing client capability) are HTTP-only and are **not wired** in v1.
 - Application-level failures inside a tool (e.g. "no advice matched") are returned as tool results with `isError: true`, not JSON-RPC errors. Tool *dispatch* failures (unknown name, bad arguments) are `-32602`.
 - Logging is opt-in per request via `_meta["io.modelcontextprotocol/logLevel"]`; without it the server MUST NOT emit `notifications/message`. Diagnostics still go to stderr.
 - stdout carries MCP messages only; all diagnostics go to stderr.
