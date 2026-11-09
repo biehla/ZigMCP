@@ -70,10 +70,10 @@ Two sub-questions the same brainstorm settled:
 | Fact | How it was verified |
 |---|---|
 | `std.Io.File.stdin()/stdout()/stderr()` exist; `file.writer(io, &buf)` → `.interface`; `std.fs.File` **no longer exists** in 0.16 | Probe compiled and ran with `std.Io.File.stdout().writer(init.io, &buf)`; `std.fs.File` failed to compile |
-| `std.process.Init` exposes `gpa`, `io`, `arena`, `environ_map` | `lib/std/process.zig:30` |
-| `std.json` provides `Value`, `ObjectMap`, `Stringify` (`beginObject`/`objectField`/`endObject`) | `lib/std/json.zig:1-63` |
+| `std.process.Init` exposes `gpa`, `io`, `arena`, `environ_map` | `lib/std/process.zig` — `process.Init` |
+| `std.json` provides `Value`, `ObjectMap`, `Stringify` (`beginObject`/`objectField`/`endObject`) | `lib/std/json.zig` |
 | `std.compress.zstd` exists | `lib/std/compress/` listing |
-| `std.http.Client.fetch(client, options)` is a one-shot, threadsafe request; the body is written to a caller-supplied buffer via `FetchOptions.response_writer`, and `FetchResult` exposes only `status` (no `ETag`/conditional-GET support) | `lib/std/http/Client.zig:1801` (`fetch`), `:1754` (`FetchOptions`), `:1787` (`FetchResult`) |
+| `std.http.Client.fetch(client, options)` is a one-shot, threadsafe request; the body is written to a caller-supplied buffer via `FetchOptions.response_writer`, and `FetchResult` exposes only `status` (no `ETag`/conditional-GET support) | `lib/std/http/Client.zig` — `Client.fetch`, `FetchOptions`, `FetchResult` |
 | `std.zig.Ast.parse` takes a **sentinel-terminated** source (`[:0]const u8`) and **does not fail on malformed input** — syntax errors are collected in `tree.errors` (the AST is still returned) | Probe: a deliberately broken source parsed successfully with `errors.len = 1` (`expected_type_expr`) |
 | `tree.tokens.items(.tag)` returns `[]Token.Tag` **directly** (not a struct with `.items`) | Probe compile error "`no member named 'items' in '[]zig.tokenizer.Token.Tag'`" |
 | `ast.tokenSlice(i)` takes a `u32` `TokenIndex` and returns the **whole comment including the `///` prefix** | Probe: `tok[2] doc_comment slice=[/// Doc for Foo.]` |
@@ -87,8 +87,8 @@ Two sub-questions the same brainstorm settled:
 | `zig build-lib -femit-docs <file.zig>` writes `docs/{index.html,main.js,main.wasm,sources.tar}` into the **current working directory** (no `-femit-docs-dir` flag in 0.16) | Probe: `zig build-lib -femit-docs .probe/doc_fixture.zig` → `docs/` created in the repo root; `-femit-docs-dir` is "unrecognized parameter" |
 | `zig fetch --save=NAME "git+https://github.com/ziglang/docgen.git#main"` resolves a branch to a commit and writes `url = "git+https://…git?ref=main#<sha>"` + content `hash` | Ran; resolved to `ff2a1ee7b9f61bb84d885dd301415277b7de5e0a` |
 | A `?ref=<branch>` URL with a frozen commit does **not** float — `#master` fails when the remote lacks that branch | Ran `…#master` against docgen → `error: ref not found: master` (its default branch is `main`) |
-| `zig build --fetch[=needed|all]` fetches the dependency tree; `b.dependency(name, args).module("x")` wires a dependency module | `zig build --help` output; `lib/std/Build.zig` `Dependency.module` |
-| `Step.Compile.getEmittedDocs()` returns the generated docs dir; `Module.addEmbedPath`/`addAnonymousImport` exist | `lib/std/Build/Step/Compile.zig:889`, `lib/std/Build/Module.zig:507` |
+| `zig build --fetch[=needed|all]` fetches the dependency tree; `b.dependency(name, args).module("x")` wires a dependency module | `zig build --help` output; `lib/std/Build.zig` — `Dependency.module` |
+| `Step.Compile.getEmittedDocs()` returns the generated docs dir; `Module.addEmbedPath`/`addAnonymousImport` exist | `lib/std/Build/Step/Compile.zig` — `getEmittedDocs`; `lib/std/Build/Module.zig` — `addEmbedPath`, `addAnonymousImport` |
 
 ### 3.2 From Context7 / upstream specs
 
