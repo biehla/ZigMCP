@@ -175,10 +175,10 @@ Load corpora at startup into the **arena**; serve requests from flat, read-only 
 ### Corpus conventions (the non-obvious rules)
 
 - **Evidence labels are mandatory.** Every advice record carries exactly one of `FACT` / `RESULT` / `SYNTHESIS` / `GUIDANCE` (enum `.evidence` in ZON) plus a `sources` array of `Sxx` IDs. `tools/advice_check.zig` fails the build on a dangling `Sxx` reference or a missing label. Never present `GUIDANCE` as `FACT`.
-- **The source doc's legend** (`systems_programming_context_v1.md:20-27`): `FACT` = documented mechanism; `RESULT` = study-specific finding, retain its conditions; `SYNTHESIS` = the report's classification, not a standard taxonomy; `GUIDANCE` = engineering recommendation needing project-specific validation. Candidate uses and checks in concept records are GUIDANCE unless labelled otherwise. **All 12 SELECT rules are GUIDANCE** — transcribe them into `rules.zon` with `.evidence = .guidance`.
-- **Corpus provenance:** the advice corpus carries `version: 1` and `source_research_date: 2026-11-09` — match the source doc's frontmatter (`systems_programming_context_v1.md:4-5`). Every doc-index record carries its upstream `commit`.
+- **The source doc's legend** (the `CONTEXT` section's "Evidence labels" list): `FACT` = documented mechanism; `RESULT` = study-specific finding, retain its conditions; `SYNTHESIS` = the report's classification, not a standard taxonomy; `GUIDANCE` = engineering recommendation needing project-specific validation. Candidate uses and checks in concept records are GUIDANCE unless labelled otherwise. **All 12 SELECT rules are GUIDANCE** — transcribe them into `rules.zon` with `.evidence = .guidance`.
+- **Corpus provenance:** the advice corpus carries `version: 1` and `source_research_date: 2026-11-09` — match the source doc's frontmatter fields. Every doc-index record carries its upstream `commit`.
 - **Advice corpus format: ZON** (`data/advice/patterns.zon`, `rules.zon`, `guarantees.zon`, `limits.zon`). `patterns.zon` = one record per P01–P12; `rules.zon` = the 12 SELECT rules as `(condition → consider → constraint)` rows.
-- **Doc index format: JSONL**, one object per line: `project`, `commit`, `path`, `line`, `kind` (`fn`/`var`/`field`/`container`/`error`/`param`), `symbol`, `doc`, `doc_hash`. Sorted by `(project, symbol)`. JSONL is deliberate — the file must stay diffable so CI PRs show only genuinely changed doc text.
+- **Doc index format: JSONL**, one object per line: `project`, `commit`, `path`, `line`, `kind` (`fn`/`var`/`field`/`container`/`error`/`param`), `symbol`, `doc`, `doc_hash`. Sorted by `(project, symbol)`. JSONL is deliberate — the file must stay diffable so the bump PR's attached diff shows only genuinely changed doc text.
 - **Upstream sources: ZON** (`data/sources.zon`) — `url` + `hash` + path scope, mirroring `build.zig.zon` `.dependencies`. `build.zig.zon` is the pin home; the bump PR updates both.
 - **Adding a tool = adding a row to the comptime registry + a handler** (D8). Never hand-write a separate JSON Schema — derive it from the registry so advertised and implemented capabilities cannot drift.
 - **Doc text is verbatim** except `///` prefix stripping and paragraph joining.
@@ -196,9 +196,8 @@ Load corpora at startup into the **arena**; serve requests from flat, read-only 
 | File | Role |
 |---|---|
 | `PLAN.md` | The spec. Read §2 before proposing any architectural change; §9 explains which systems-programming patterns apply and which are deliberately excluded (P04, P08, P10, P11, P12). |
-| `systems_programming_context_v1.md` | Upstream source for the advice corpus. Its `SOURCES` registry (§194) defines S01–S24; `LIMITS` (§184) is the evidence-label legend. Reference material — do not edit to change project behavior. |
-| `readme.md` | Empty (0 bytes). Listed in the planned layout; PLAN.md mandates no specific content for it. |
-| `.probe/` | Scratch directory for throwaway API probes — **not present** (the last stale probe was deleted; it used the removed `std.fs.File`). Create it under `.probe/` when verifying stdlib APIs, then delete it before finishing; never commit it |
+| `systems_programming_context_v1.md` | Upstream source for the advice corpus. Its `SOURCES` registry defines S01–S24; the evidence-label legend lives in `CONTEXT` (`FACT` / `RESULT` / `SYNTHESIS` / `GUIDANCE`), while `LIMITS` is the "preserve when summarising or recommending" section. Reference material — do not edit to change project behavior. |
+| `readme.md` | Empty by design. Listed in the planned layout; PLAN.md mandates no specific content for it. |
 
 ## Runtime & Tooling Preferences
 
