@@ -466,6 +466,26 @@ fn sidecarProject(value: std.json.Value, name: []const u8) ?std.json.ObjectMap {
     return entry.object;
 }
 
+/// Copies one sidecar count into the result when it is a non-negative integer
+/// that fits `usize`, returning the count it reported.
+///
+/// The sidecar is ordinary local data — a hand edit or a truncated indexer run
+/// is enough — so a value of the wrong type or sign is dropped rather than
+/// `@intCast`-ed, which aborted the process on the first `doc_import_status`
+/// call (SRV-6).
+fn putSidecarCount(
+    item: *std.json.ObjectMap,
+    gpa: std.mem.Allocator,
+    entry: std.json.ObjectMap,
+    key: []const u8,
+) !?usize {
+    const value = entry.get(key) orelse return null;
+    if (value != .integer) return null;
+    const count = std.math.cast(usize, value.integer) orelse return null;
+    try item.put(gpa, key, .{ .integer = @intCast(count) });
+    return count;
+}
+
 /// `doc_import_status`: what the index currently holds.
 pub fn docImportStatus(ctx: *Context, args: std.json.Value) ToolError!ToolOutcome {
     registry.validate(doc_import_status_input, args) catch return error.InvalidParams;
@@ -517,10 +537,7 @@ pub fn docImportStatus(ctx: *Context, args: std.json.Value) ToolError!ToolOutcom
                 if (entry.get("files_total")) |files_total| {
                     try item.put(gpa, "files_total", files_total);
                 }
-                if (entry.get("files_degraded")) |files_degraded| {
-                    try item.put(gpa, "files_degraded", files_degraded);
-                    if (files_degraded == .integer) degraded_files = @intCast(files_degraded.integer);
-                }
+                degraded_files = try putSidecarCount(&item, gpa, entry, "files_degraded");
                 if (entry.get("degraded")) |degraded| {
                     try item.put(gpa, "degraded", degraded);
                 }
@@ -542,4 +559,33 @@ pub fn docImportStatus(ctx: *Context, args: std.json.Value) ToolError!ToolOutcom
     try structured.put(gpa, "projects", .{ .array = project_values });
 
     return .{ .text = try text.toOwnedSlice(gpa), .structured = .{ .object = structured } };
+}
+
+test "a negative sidecar count is dropped instead of cast" {
+    // SRV-6: `@intCast` on a negative `files_degraded` aborted the process on
+    // the first `doc_import_status` call. A bad count is now omitted.
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const parsed = try std.json.parseFromSlice(
+        std.json.Value,
+        gpa,
+        "{\"files_degraded\":-1,\"files_total\":3}",
+        .{},
+    );
+    const entry = parsed.value.object;
+
+    var item: std.json.ObjectMap = .{};
+    try std.testing.expectEqual(
+        @as(?usize, null),
+        try putSidecarCount(&item, gpa, entry, "files_degraded"),
+    );
+    try std.testing.expect(item.get("files_degraded") == null);
+
+    try std.testing.expectEqual(
+        @as(?usize, 3),
+        try putSidecarCount(&item, gpa, entry, "files_total"),
+    );
+    try std.testing.expectEqual(@as(i64, 3), item.get("files_total").?.integer);
 }
