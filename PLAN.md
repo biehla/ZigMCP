@@ -1,8 +1,8 @@
 # PLAN.md — defects, edge cases, limitations, and guideline deviations
 
-Status: open backlog. Twenty-two items were fixed on 2026-11-09, thirty-one on
+Status: open backlog. Twenty-two items were fixed on 2026-11-09, thirty-two on
 2026-11-10, and five more were closed that day because they were already done — the
-option chosen for each, its commit and its verification are in §13–§24. Two sources: a read-through
+option chosen for each, its commit and its verification are in §13–§25. Two sources: a read-through
 of the tree on 2026-11-09, and a breakage campaign the same day that fuzzed the
 stdio surface and the indexer, profiled the hot paths, and inspected a `ReleaseSafe`
 PE with REA — method, measurements and negative results in §12.
@@ -93,12 +93,6 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri"
   toolchains each run. Options: (a) `actions/cache` keyed by project+commit; (b) reuse
   the `zig fetch` package cache; (c) shallow clones (`--depth 1`) plus
   `git fetch --depth 1 <sha>`. Verify: compare run times.
-
-- **CI-8 — `release.yml` ships no corpus.** The released binary cannot start without
-  `data/advice`. Options: (a) tar `data/advice/` with the binary; (b) compile a
-  fallback corpus in with `@embedFile` (data plane rule still holds for the index);
-  (c) resolve the advice directory relative to the executable. Verify: unpack a
-  release and run it from an empty directory.
 
 - **CI-9 — every `uses:` runs on a deprecated node20 runtime.** `actions/checkout@v4`,
   `actions/upload-artifact@v4` and `softprops/action-gh-release@v2` are node20
@@ -196,7 +190,6 @@ must own its test, because no such layer exists yet.
 |---|---|---|
 |CI-6|—|rerun the workflow; no local test|
 |CI-7|—|timing only|
-|CI-8|—|unpack a release and run it from an empty directory (CI smoke test)|
 |REL-1|—|local HTTP server counting requests|
 |REL-2|—|black-hole address plus quit; timing-based|
 |REL-6|—|integration: URL index with no sidecar|
@@ -469,6 +462,16 @@ test pins that no error member is invented.
 |Id|Option|Commit|Verification|
 |---|---|---|---|
 |IDX-7|(a) keep|`4d33172`|indexer test `a nested declaration in an error set degrades the file instead of inventing a member`: exit 0, no `kind:error` record for the nested name, `bad.zig` listed as degraded; the `if`/`struct`/`@import`/string variants were probed too (all exit 0, no records, never a misattributed member)|
+
+## 25. Resolved on 2026-11-10, eleventh chunk
+
+One CI item, one commit (`7db2cee`): the release tarball now contains the binary
+and the advice corpus it loads at startup, and the raw-binary name no longer depends
+on the Unix binary having an extension.
+
+|Id|Option|Commit|Verification|
+|---|---|---|---|
+|CI-8|(a)|`7db2cee`|local smoke: tar the ReleaseSafe binary + `data/advice`, unpack into an empty directory, run with EOF → exit 0 with all five corpus files present; `zig build workflows`, `zig fmt` and actionlint 1.7.7 pass|
 
 
 
