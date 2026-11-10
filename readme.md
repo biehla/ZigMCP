@@ -317,8 +317,12 @@ zig build test-regressions  # cross-cutting handler tests (also part of `test`)
 zig build check             # validate the advice corpus
 zig build workflows         # workflow trigger/expression consistency
 zig build bench             # verification report
-zig fmt --check . --exclude tests/fixtures
+zig fmt --check . --exclude tests/fixtures --exclude upstream
 ```
+
+`--exclude upstream` matters once you have cloned the upstreams there for indexing:
+the formatter walks the working tree, not git, and Zig master's syntax is not what
+this toolchain formats. A fresh clone needs only the fixture exclusion.
 
 - **Tests.** Unit and property tests live next to the code in `src/`. The protocol
   tests start the real binary and talk to it over pipes. The golden test runs the

@@ -646,6 +646,10 @@ zig fmt --check . --exclude tests/fixtures   # the fixture tree is deliberately 
   error name, a stack trace or exit 1 (SRV-8).
 - **Interrupted builds** can orphan `zig.exe` compiler children that hold the cache
   lock; the next build then looks hung. Kill them before timing anything.
+- **Formatting gate with `upstream/` present:** `zig fmt` walks the working tree, not
+  git, and the local indexing checkouts the readme creates hold Zig master sources this
+  toolchain's formatter cannot parse. Add `--exclude upstream` on a machine that has
+  one; a fresh clone needs only `--exclude tests/fixtures` (what `ci.yml` runs).
 - **ZLS** is wired through `lsp.json`. Keep it on the toolchain's minor version
   (0.17.x); stop `zls.exe` before upgrading (scoop cannot overwrite a running
   binary). ZLS reports syntax errors at once but semantic errors only after the next
