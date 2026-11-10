@@ -403,7 +403,7 @@ src/                         the server
   protocol/                  JSON-RPC parsing, protocol versions, error codes
   transport/                 stdio framing
   server/                    tools, resources, prompts, discovery
-  advice/                    corpus loader, rule matcher, rendering
+  advice/                    shared corpus schema, corpus loader, rule matcher, rendering
   docs/                      index loader, in-memory layout, search, hot reload
   util/                      scratch memory, text helpers
 data/advice/                 the advice corpus (ZON)

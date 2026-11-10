@@ -13,6 +13,7 @@ const std = @import("std");
 const registry = @import("server/registry.zig");
 const tools = @import("server/tools.zig");
 const resources = @import("server/resources.zig");
+const prompts = @import("server/prompts.zig");
 const corpus_module = @import("advice/corpus.zig");
 const rules_module = @import("advice/rules.zig");
 const docs_index = @import("docs/index.zig");
@@ -145,4 +146,45 @@ test "PROTO-13: projects differing only in case stay distinct" {
     const outcome = try tools.docSearch(&harness.ctx, .{ .object = args });
     const structured = outcome.structured.?.object;
     try std.testing.expectEqual(@as(i64, 1), structured.get("count").?.integer);
+}
+
+test "GUIDE-2: resource families dispatch through the table" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    // A one-record index for project `p`, so both families have something to serve.
+    const harness = try startHarnessWithIndex(gpa,
+        \\{"project":"p","commit":"c","path":"a.zig","line":1,"kind":"fn","symbol":"s","container":"","doc":"alpha docs","doc_hash":"36a69add5014cf58a2cee74b1c30ef5fe3b80cd48ab14cd5e5efa3b22dc8dc2d"}
+    );
+
+    // A URI shape is a table row, a fixed URI is not a family.
+    try std.testing.expect(resources.findFamily("advice://patterns/P03") != null);
+    try std.testing.expect(resources.findFamily("docs://p/index") != null);
+    try std.testing.expect(resources.findFamily("advice://overview") == null);
+
+    for ([_][]const u8{ "advice://patterns/P03", "docs://p/index", "docs://p/symbols/s" }) |uri| {
+        _ = resources.read(&harness.ctx, uri) catch |err| {
+            std.debug.print("family URI unreadable: {s} ({s})\n", .{ uri, @errorName(err) });
+            return err;
+        };
+    }
+}
+
+test "GUIDE-2: prompts dispatch through the table" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const harness = try startHarness(gpa);
+
+    for (prompts.prompt_specs) |spec| {
+        var args: std.json.ObjectMap = .{};
+        try args.put(gpa, spec.argument, .{ .string = "memory-bound workload" });
+        const result = try prompts.get(&harness.ctx, spec.name, .{ .object = args });
+        const text = result.value.object.get("messages").?.array.items[0]
+            .object.get("content").?.object.get("text").?.string;
+        // Both builders emit this word; a wrong or missing handler cannot.
+        try std.testing.expect(std.mem.indexOf(u8, text, "GUIDANCE") != null);
+    }
 }

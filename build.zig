@@ -4,6 +4,14 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // The ZON schema: one module so the server, the validator and the report
+    // cannot drift (GUIDE-3).
+    const advice_schema = b.createModule(.{
+        .root_source_file = b.path("src/advice/schema.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     // The server binary: a thin host that loads its corpora at runtime.
     const exe = b.addExecutable(.{
         .name = "zigmcp",
@@ -11,6 +19,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
+            .imports = &.{.{ .name = "advice_schema", .module = advice_schema }},
         }),
     });
     b.installArtifact(exe);
@@ -34,6 +43,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("tools/advice_check.zig"),
             .target = target,
             .optimize = optimize,
+            .imports = &.{.{ .name = "advice_schema", .module = advice_schema }},
         }),
     });
 
@@ -45,6 +55,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("tools/bench.zig"),
             .target = target,
             .optimize = optimize,
+            .imports = &.{.{ .name = "advice_schema", .module = advice_schema }},
         }),
     });
     b.installArtifact(bench);
@@ -100,6 +111,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/root.zig"),
             .target = target,
             .optimize = optimize,
+            .imports = &.{.{ .name = "advice_schema", .module = advice_schema }},
         }),
     });
     const run_unit_tests = b.addRunArtifact(unit_tests);
@@ -178,6 +190,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/regressions_test.zig"),
             .target = target,
             .optimize = optimize,
+            .imports = &.{.{ .name = "advice_schema", .module = advice_schema }},
         }),
     });
     const run_regression_tests = b.addRunArtifact(regression_tests);

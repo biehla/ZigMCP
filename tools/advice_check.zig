@@ -1,81 +1,8 @@
+//! Corpus validator: fails on a dangling source id, a duplicate id or an unknown
+//! evidence label (AGENTS.md §12).
+
 const std = @import("std");
-
-const Evidence = enum { fact, result, synthesis, guidance };
-
-const Fact = struct {
-    text: []const u8,
-    source: []const u8,
-    evidence: Evidence,
-};
-
-const Pattern = struct {
-    id: []const u8,
-    name: []const u8,
-    what_data_controls: []const u8,
-    mechanism: ?[]const u8 = null,
-    facts: []const Fact,
-    candidate_uses: []const []const u8,
-    boundaries: []const []const u8,
-    checks: []const []const u8,
-    evidence: Evidence,
-    sources: []const []const u8,
-};
-
-const PatternsFile = struct {
-    version: u32,
-    source_research_date: []const u8,
-    patterns: []const Pattern,
-};
-
-const Rule = struct {
-    id: []const u8,
-    condition: []const u8,
-    then: struct {
-        consider: []const []const u8,
-        and_only_if: ?[]const u8 = null,
-    },
-    evidence: Evidence,
-};
-
-const RulesFile = struct {
-    version: u32,
-    rules: []const Rule,
-};
-
-const Guarantee = struct {
-    id: []const u8,
-    claim: []const u8,
-    evidence: Evidence,
-    guidance: ?[]const u8 = null,
-    sources: []const []const u8,
-};
-
-const GuaranteesFile = struct {
-    version: u32,
-    guarantees: []const Guarantee,
-};
-
-const LimitsFile = struct {
-    version: u32,
-    limits: []const []const u8,
-    evidence_legend: []const struct {
-        label: []const u8,
-        meaning: []const u8,
-    },
-};
-
-const Source = struct {
-    id: []const u8,
-    author: []const u8,
-    title: []const u8,
-    kind: []const u8,
-    url: []const u8,
-};
-
-const SourcesFile = struct {
-    version: u32,
-    sources: []const Source,
-};
+const schema = @import("advice_schema");
 
 var failures: usize = 0;
 var io_glob: std.Io = undefined;
@@ -175,11 +102,11 @@ pub fn main(init: std.process.Init) !void {
     const limits_src = try dir.readFileAllocOptions(io, try std.fmt.allocPrint(alloc, "{s}/limits.zon", .{data_dir}), alloc, .unlimited, .of(u8), 0);
     const sources_src = try dir.readFileAllocOptions(io, try std.fmt.allocPrint(alloc, "{s}/sources.zon", .{data_dir}), alloc, .unlimited, .of(u8), 0);
 
-    const patterns_file = parseZon(PatternsFile, scratch_alloc, alloc, patterns_src, "patterns.zon") catch std.process.exit(1);
-    const rules_file = parseZon(RulesFile, scratch_alloc, alloc, rules_src, "rules.zon") catch std.process.exit(1);
-    const guarantees_file = parseZon(GuaranteesFile, scratch_alloc, alloc, guarantees_src, "guarantees.zon") catch std.process.exit(1);
-    const limits_file = parseZon(LimitsFile, scratch_alloc, alloc, limits_src, "limits.zon") catch std.process.exit(1);
-    const sources_file = parseZon(SourcesFile, scratch_alloc, alloc, sources_src, "sources.zon") catch std.process.exit(1);
+    const patterns_file = parseZon(schema.PatternsFile, scratch_alloc, alloc, patterns_src, "patterns.zon") catch std.process.exit(1);
+    const rules_file = parseZon(schema.RulesFile, scratch_alloc, alloc, rules_src, "rules.zon") catch std.process.exit(1);
+    const guarantees_file = parseZon(schema.GuaranteesFile, scratch_alloc, alloc, guarantees_src, "guarantees.zon") catch std.process.exit(1);
+    const limits_file = parseZon(schema.LimitsFile, scratch_alloc, alloc, limits_src, "limits.zon") catch std.process.exit(1);
+    const sources_file = parseZon(schema.SourcesFile, scratch_alloc, alloc, sources_src, "sources.zon") catch std.process.exit(1);
 
     // Build source id set.
     const source_ids = try alloc.alloc([]const u8, sources_file.sources.len);

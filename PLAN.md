@@ -1,7 +1,8 @@
 # PLAN.md — defects, edge cases, limitations, and guideline deviations
 
-Status: open backlog. Twenty-two items were fixed on 2026-11-09 — the option chosen
-for each, its commit and its verification are in §13. Two sources: a read-through of
+Status: open backlog. Twenty-two items were fixed on 2026-11-09 and three on
+2026-11-10 — the option chosen for each, its commit and its verification are in §13
+and §14. Two sources: a read-through of
 the tree on 2026-11-09, and a breakage campaign the same day that fuzzed the stdio
 surface and the indexer, profiled the hot paths, and inspected a `ReleaseSafe` PE
 with REA — method, measurements and negative results in §12.
@@ -275,23 +276,6 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri"
 Rules being broken are in `AGENTS.md` §5, §11, §12 (code/corpus conventions) and D8
 (table-driven capabilities).
 
-- **GUIDE-1 — two tools lack the mandatory `//!` header.** `tools/indexer.zig` and
-  `tools/advice_check.zig` start at `const std`. Options: (a) add headers; (b) relax
-  the rule to `src/` only; (c) generate headers from a template. Verify: grep for
-  files whose first line is not `//!` under `src/` and `tools/`.
-
-- **GUIDE-2 — prompts and resources dispatch by `if`/`else` chains.** D8/P01 says a
-  capability is a table row plus a handler, but `prompts.get` compares names and
-  `resources.read` compares URIs, so adding one means editing the chain. Options:
-  (a) put a handler pointer in `PromptSpec`/`ResourceSpec`; (b) a comptime switch by
-  name; (c) accept and document. Verify: add a prompt without touching `get`.
-
-- **GUIDE-3 — the ZON schema is declared three times.** `src/advice/corpus.zig`,
-  `tools/advice_check.zig` and `tools/bench.zig` each define `Pattern`/`Rule`/…, so a
-  schema change needs three edits. Options: (a) one shared `src/advice/schema.zig`
-  imported by all three; (b) generate the tool copies at build time; (c) keep with a
-  checklist (current). Verify: add a field and compile all targets.
-
 - **GUIDE-4 — input sizes are not bounded.** §12 says bound every input, but
   `question`, `query` and `symbol` accept anything the 64 KiB line allows. Options:
   (a) cap at e.g. 4 KiB and return `-32602`; (b) cap and truncate with a flag; (c)
@@ -403,9 +387,6 @@ must own its test, because no such layer exists yet.
 |REL-5|—|integration: sparse 257 MiB index file|
 |REL-6|—|integration: URL index with no sidecar|
 |REL-7|—|reload integration test: equal size, restored mtime|
-|GUIDE-1|—|lint: every `src/**` and `tools/**` file starts with `//!`|
-|GUIDE-2|—|structural; test that a capability is added by a table row alone|
-|GUIDE-3|—|structural; compile all three targets after one schema edit|
 |GUIDE-4|—|handler test: 60 KiB query expects `-32602`|
 |GUIDE-7|—|same as CI-3|
 |GUIDE-8|—|doc lint: each gap id appears once across the tree|
@@ -429,15 +410,14 @@ test is a few lines.
 ## 11. Suggested order
 
 The first three steps of the original order — the pipeline, the cheap client-visible
-fixes and the data-plane trust items — are done (§13). What remains:
+fixes and the data-plane trust items — are done (§13), as is the structural debt
+(§14). What remains, in order:
 
-1. GUIDE-3, GUIDE-2, GUIDE-1 — structural debt that makes every later change
-   costlier.
-2. TEST-1, TEST-2, TEST-5, TEST-6 — pin the remaining items so they cannot regress.
-3. Remaining limitations by demand: PROTO-10, REL-1, REL-5.
-4. Measured hot spots: IDX-9 (quadratic indexer) and SRV-7 (client-chosen stall).
-5. Contract and packaging gaps: DOC-4, CI-9.
-6. Everything else in §1–§6 by demand.
+1. TEST-1, TEST-2, TEST-5, TEST-6 — pin the remaining items so they cannot regress.
+2. Remaining limitations by demand: PROTO-10, REL-1, REL-5.
+3. Measured hot spots: IDX-9 (quadratic indexer) and SRV-7 (client-chosen stall).
+4. Contract and packaging gaps: DOC-4, CI-9.
+5. Everything else in §1–§6 by demand.
 
 ---
 

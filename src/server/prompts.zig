@@ -10,12 +10,18 @@ const rules_module = @import("../advice/rules.zig");
 const tools_module = @import("tools.zig");
 const json_array = @import("../util/json_array.zig");
 
+pub const PromptError = error{OutOfMemory};
+
+/// Text renderer for a prompt; the argument has already been read from the request.
+pub const PromptHandler = *const fn (ctx: *registry.Context, argument: []const u8) PromptError![]const u8;
+
 pub const PromptSpec = struct {
     name: []const u8,
     title: []const u8,
     description: []const u8,
     argument: []const u8,
     argument_description: []const u8,
+    handler: PromptHandler,
 };
 
 pub const prompt_specs = [_]PromptSpec{
@@ -25,6 +31,7 @@ pub const prompt_specs = [_]PromptSpec{
         .description = "Applies the conditional decision rules and cites the matched rule ids.",
         .argument = "situation",
         .argument_description = "The diagnosed situation: signals, constraints and what is being decided.",
+        .handler = approachSelectionText,
     },
     .{
         .name = "systems_review",
@@ -32,6 +39,7 @@ pub const prompt_specs = [_]PromptSpec{
         .description = "Reviews a design against the matching advice records, their checks and their boundaries.",
         .argument = "design",
         .argument_description = "The design or plan under review.",
+        .handler = systemsReviewText,
     },
 };
 
@@ -75,10 +83,7 @@ pub fn get(ctx: *registry.Context, name: []const u8, arguments: ?std.json.Value)
     const spec = findPrompt(name) orelse return error.UnknownPrompt;
     const argument_text = registry.getString(arguments, spec.argument) orelse return error.InvalidArguments;
 
-    const text = if (std.mem.eql(u8, name, "systems_review"))
-        try systemsReviewText(ctx, argument_text)
-    else
-        try approachSelectionText(ctx, argument_text);
+    const text = try spec.handler(ctx, argument_text);
 
     var content: std.json.ObjectMap = .{};
     try content.put(gpa, "type", .{ .string = "text" });
@@ -97,7 +102,7 @@ pub fn get(ctx: *registry.Context, name: []const u8, arguments: ?std.json.Value)
     return .{ .value = .{ .object = object }, .cache = null };
 }
 
-fn systemsReviewText(ctx: *registry.Context, design: []const u8) ![]const u8 {
+fn systemsReviewText(ctx: *registry.Context, design: []const u8) PromptError![]const u8 {
     const gpa = ctx.pool.allocator();
     var text: std.ArrayList(u8) = .empty;
 
@@ -126,7 +131,7 @@ fn systemsReviewText(ctx: *registry.Context, design: []const u8) ![]const u8 {
     return text.toOwnedSlice(gpa);
 }
 
-fn approachSelectionText(ctx: *registry.Context, situation: []const u8) ![]const u8 {
+fn approachSelectionText(ctx: *registry.Context, situation: []const u8) PromptError![]const u8 {
     const gpa = ctx.pool.allocator();
     var text: std.ArrayList(u8) = .empty;
 

@@ -156,7 +156,8 @@ server would put upstream-parse failure modes on the request path.
 |`src/server/tools.zig`|Tool handlers, `tools/list`, tool-result envelope|
 |`src/server/resources.zig`|`resources/list`, `resources/templates/list`, `resources/read`|
 |`src/server/prompts.zig`|`prompts/list`, `prompts/get`|
-|`src/advice/corpus.zig`|ZON schemas + loader for `data/advice/*.zon`|
+|`src/advice/schema.zig`|The ZON record types and file schemas, shared by the server, `advice_check` and `bench`|
+|`src/advice/corpus.zig`|Loader for `data/advice/*.zon`; re-exports the schema types|
 |`src/advice/rules.zig`|Token-overlap matcher over the SELECT rules (P05)|
 |`src/advice/render.zig`|Record → structured JSON and text, labels attached|
 |`src/docs/index.zig`|JSONL loader (whole-or-nothing), 256 MiB ceiling|
@@ -320,9 +321,9 @@ Every file has `.version = 1`. `patterns.zon` also carries
 // sources.zon:    .{ .id = "S01", .author, .title, .kind, .url }
 ```
 
-The loader (`corpus.zig`) and the validator (`advice_check.zig`) each declare these
-structs; change them together, plus `tools/bench.zig`, which has a third copy for
-counting.
+The record types live in `src/advice/schema.zig`, imported as the `advice_schema` module
+by `corpus.zig`, `tools/advice_check.zig` and `tools/bench.zig`. `corpus.zig` re-exports
+them, so a schema change is one edit and all three targets recompile.
 
 ### Doc index record (JSONL, one minified object per line)
 
@@ -624,9 +625,11 @@ Bound every input and output (query length, clamped `limit`, 256 MiB artifacts).
 - **Tool:** add a row to `registry.tool_specs` (keep it **sorted by name** — a unit
   test enforces it) with `input`/`output` `Schema`s and a handler in `tools.zig`.
   Never hand-write JSON Schema (D8). Validate arguments with `registry.validate` first.
-- **Resource:** add to `resources.resource_specs` and handle the URI in
-  `resources.read`; choose `advice_cache` or `index_cache` honestly.
-- **Prompt:** add to `prompts.prompt_specs` (sorted) and its text builder.
+- **Resource:** add to `resources.resource_specs` (one fixed URI) or
+  `resources.resource_families` (a URI shape), giving it a `handler` and an honest
+  `cache` hint; `resources.read` dispatches through the tables and never changes.
+- **Prompt:** add to `prompts.prompt_specs` (sorted) with its `handler`; `prompts.get`
+  dispatches through the table and never changes.
 - Update §5 here and the surface tables in `readme.md`; extend
   `tests/protocol_test.zig`.
 

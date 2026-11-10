@@ -12,12 +12,21 @@ const render = @import("../advice/render.zig");
 const text_util = @import("../util/text.zig");
 const json_array = @import("../util/json_array.zig");
 
+/// The error set every resource text handler may return. Explicit so the
+/// caller's `switch` stays exhaustive.
+pub const ResourceError = error{ OutOfMemory, UnknownResource };
+
+/// Text renderer for a resource; `uri` has already been matched.
+pub const ResourceHandler = *const fn (ctx: *registry.Context, uri: []const u8) ResourceError![]const u8;
+
 pub const ResourceSpec = struct {
     uri: []const u8,
     name: []const u8,
     title: []const u8,
     description: []const u8,
     mime_type: []const u8 = "text/plain",
+    handler: ResourceHandler,
+    cache: registry.CacheHint,
 };
 
 pub const resource_specs = [_]ResourceSpec{
@@ -26,38 +35,84 @@ pub const resource_specs = [_]ResourceSpec{
         .name = "advice-overview",
         .title = "Systems-programming advice overview",
         .description = "The 12 advice patterns as a compact table with evidence labels.",
+        .handler = overviewText,
+        .cache = registry.advice_cache,
     },
     .{
         .uri = "advice://patterns",
         .name = "advice-patterns",
         .title = "Advice patterns",
         .description = "All 12 patterns in one document, or one per pattern: advice://patterns/P01 … advice://patterns/P12.",
+        .handler = allPatternsText,
+        .cache = registry.advice_cache,
     },
     .{
         .uri = "advice://rules",
         .name = "advice-rules",
         .title = "Conditional decision rules",
         .description = "The 12 SELECT rules, all GUIDANCE.",
+        .handler = rulesText,
+        .cache = registry.advice_cache,
     },
     .{
         .uri = "advice://guarantees",
         .name = "advice-guarantees",
         .title = "Cross-cutting guarantees",
         .description = "Constraints that hold across patterns, with their evidence labels.",
+        .handler = guaranteesText,
+        .cache = registry.advice_cache,
     },
     .{
         .uri = "advice://limits",
         .name = "advice-limits",
         .title = "Limits and evidence legend",
         .description = "The limits of the source document and the evidence-label legend.",
+        .handler = limitsText,
+        .cache = registry.advice_cache,
     },
     .{
         .uri = "advice://sources",
         .name = "advice-sources",
         .title = "Source registry",
         .description = "The S01..S24 source registry with URLs.",
+        .handler = sourcesText,
+        .cache = registry.advice_cache,
     },
 };
+
+/// A URI shape rather than one fixed URI: matched by `matcher`, served by `handler`.
+pub const ResourceFamily = struct {
+    matcher: *const fn (uri: []const u8) bool,
+    handler: ResourceHandler,
+    cache: registry.CacheHint,
+};
+
+fn matchesPatternFamily(uri: []const u8) bool {
+    return std.mem.startsWith(u8, uri, "advice://patterns/");
+}
+
+fn matchesDocsFamily(uri: []const u8) bool {
+    return std.mem.startsWith(u8, uri, "docs://");
+}
+
+pub const resource_families = [_]ResourceFamily{
+    .{ .matcher = matchesPatternFamily, .handler = patternText, .cache = registry.advice_cache },
+    .{ .matcher = matchesDocsFamily, .handler = docsText, .cache = registry.index_cache },
+};
+
+fn findResource(uri: []const u8) ?*const ResourceSpec {
+    for (&resource_specs) |*spec| {
+        if (std.mem.eql(u8, spec.uri, uri)) return spec;
+    }
+    return null;
+}
+
+pub fn findFamily(uri: []const u8) ?*const ResourceFamily {
+    for (&resource_families) |*family| {
+        if (family.matcher(uri)) return family;
+    }
+    return null;
+}
 
 pub const symbol_template = "docs://{project}/symbols/{symbol}";
 
@@ -87,6 +142,8 @@ pub fn list(ctx: *registry.Context) !registry.Result {
             .name = try std.fmt.allocPrint(gpa, "advice-pattern-{s}", .{pattern.id}),
             .title = try std.fmt.allocPrint(gpa, "Advice pattern {s}", .{pattern.id}),
             .description = pattern.name,
+            .handler = patternText,
+            .cache = registry.advice_cache,
         }));
     }
 
@@ -99,6 +156,8 @@ pub fn list(ctx: *registry.Context) !registry.Result {
             .name = try std.fmt.allocPrint(gpa, "{s}-index", .{project}),
             .title = try std.fmt.allocPrint(gpa, "{s} symbol index", .{project}),
             .description = "Symbols imported for this project.",
+            .handler = docsText,
+            .cache = registry.index_cache,
         }));
     }
 
@@ -147,28 +206,22 @@ fn projectNames(gpa: std.mem.Allocator, columnar: *const @import("../docs/column
     return names.toOwnedSlice(gpa);
 }
 
-/// `resources/read`.
-pub fn read(ctx: *registry.Context, uri: []const u8) !registry.Result {
+/// `resources/read`. Dispatch goes through the two tables (D8/P01): a fixed URI
+/// is a `resource_specs` row, a URI shape is a `resource_families` row.
+pub fn read(ctx: *registry.Context, uri: []const u8) ResourceError!registry.Result {
     const gpa = ctx.pool.allocator();
 
-    const text = if (std.mem.eql(u8, uri, "advice://overview"))
-        try overviewText(ctx)
-    else if (std.mem.eql(u8, uri, "advice://rules"))
-        try rulesText(ctx)
-    else if (std.mem.eql(u8, uri, "advice://guarantees"))
-        try guaranteesText(ctx)
-    else if (std.mem.eql(u8, uri, "advice://limits"))
-        try limitsText(ctx)
-    else if (std.mem.eql(u8, uri, "advice://sources"))
-        try sourcesText(ctx)
-    else if (std.mem.eql(u8, uri, "advice://patterns"))
-        try allPatternsText(ctx)
-    else if (std.mem.startsWith(u8, uri, "advice://patterns/"))
-        try patternText(ctx, uri["advice://patterns/".len..])
-    else if (std.mem.startsWith(u8, uri, "docs://"))
-        try docsText(ctx, uri)
-    else
+    var text: []const u8 = undefined;
+    var cache: registry.CacheHint = undefined;
+    if (findResource(uri)) |spec| {
+        text = try spec.handler(ctx, uri);
+        cache = spec.cache;
+    } else if (findFamily(uri)) |family| {
+        text = try family.handler(ctx, uri);
+        cache = family.cache;
+    } else {
         return error.UnknownResource;
+    }
 
     var contents: std.json.ObjectMap = .{};
     try contents.put(gpa, "uri", .{ .string = uri });
@@ -181,11 +234,11 @@ pub fn read(ctx: *registry.Context, uri: []const u8) !registry.Result {
     var object: std.json.ObjectMap = .{};
     try object.put(gpa, "contents", .{ .array = contents_array });
 
-    const cache = if (std.mem.startsWith(u8, uri, "docs://")) registry.index_cache else registry.advice_cache;
     return .{ .value = .{ .object = object }, .cache = cache };
 }
 
-fn overviewText(ctx: *registry.Context) ![]const u8 {
+fn overviewText(ctx: *registry.Context, uri: []const u8) ResourceError![]const u8 {
+    _ = uri;
     const gpa = ctx.pool.allocator();
     var text: std.ArrayList(u8) = .empty;
     try text.print(gpa, "Systems-programming advice (version {d}, source research date {s})\n\n", .{
@@ -203,10 +256,11 @@ fn overviewText(ctx: *registry.Context) ![]const u8 {
     return text.toOwnedSlice(gpa);
 }
 
-fn patternText(ctx: *registry.Context, id: []const u8) ![]const u8 {
-    const gpa = ctx.pool.allocator();
-    const pattern = ctx.corpus.findPattern(id) orelse return error.UnknownResource;
-    return render.patternText(gpa, pattern);
+fn patternText(ctx: *registry.Context, uri: []const u8) ResourceError![]const u8 {
+    const prefix = "advice://patterns/";
+    if (!std.mem.startsWith(u8, uri, prefix)) return error.UnknownResource;
+    const pattern = ctx.corpus.findPattern(uri[prefix.len..]) orelse return error.UnknownResource;
+    return render.patternText(ctx.pool.allocator(), pattern);
 }
 
 /// `advice://patterns`: every pattern in one document.
@@ -214,7 +268,8 @@ fn patternText(ctx: *registry.Context, id: []const u8) ![]const u8 {
 /// `resources/list` advertises this URI, so it has to be readable: a listed
 /// resource that `resources/read` rejects is a client-visible contract break
 /// (PROTO-1).
-fn allPatternsText(ctx: *registry.Context) ![]const u8 {
+fn allPatternsText(ctx: *registry.Context, uri: []const u8) ResourceError![]const u8 {
+    _ = uri;
     const gpa = ctx.pool.allocator();
     var text: std.ArrayList(u8) = .empty;
     for (ctx.corpus.patterns) |*pattern| {
@@ -224,7 +279,8 @@ fn allPatternsText(ctx: *registry.Context) ![]const u8 {
     return text.toOwnedSlice(gpa);
 }
 
-fn rulesText(ctx: *registry.Context) ![]const u8 {
+fn rulesText(ctx: *registry.Context, uri: []const u8) ResourceError![]const u8 {
+    _ = uri;
     const gpa = ctx.pool.allocator();
     var text: std.ArrayList(u8) = .empty;
     for (ctx.corpus.rules) |*rule| {
@@ -234,7 +290,8 @@ fn rulesText(ctx: *registry.Context) ![]const u8 {
     return text.toOwnedSlice(gpa);
 }
 
-fn guaranteesText(ctx: *registry.Context) ![]const u8 {
+fn guaranteesText(ctx: *registry.Context, uri: []const u8) ResourceError![]const u8 {
+    _ = uri;
     const gpa = ctx.pool.allocator();
     var text: std.ArrayList(u8) = .empty;
     for (ctx.corpus.guarantees) |guarantee| {
@@ -250,7 +307,8 @@ fn guaranteesText(ctx: *registry.Context) ![]const u8 {
     return text.toOwnedSlice(gpa);
 }
 
-fn limitsText(ctx: *registry.Context) ![]const u8 {
+fn limitsText(ctx: *registry.Context, uri: []const u8) ResourceError![]const u8 {
+    _ = uri;
     const gpa = ctx.pool.allocator();
     var text: std.ArrayList(u8) = .empty;
     try text.appendSlice(gpa, "Limits:\n");
@@ -264,7 +322,8 @@ fn limitsText(ctx: *registry.Context) ![]const u8 {
     return text.toOwnedSlice(gpa);
 }
 
-fn sourcesText(ctx: *registry.Context) ![]const u8 {
+fn sourcesText(ctx: *registry.Context, uri: []const u8) ResourceError![]const u8 {
+    _ = uri;
     const gpa = ctx.pool.allocator();
     var text: std.ArrayList(u8) = .empty;
     for (ctx.corpus.sources) |source| {
@@ -279,7 +338,7 @@ fn sourcesText(ctx: *registry.Context) ![]const u8 {
     return text.toOwnedSlice(gpa);
 }
 
-fn docsText(ctx: *registry.Context, uri: []const u8) ![]const u8 {
+fn docsText(ctx: *registry.Context, uri: []const u8) ResourceError![]const u8 {
     const gpa = ctx.pool.allocator();
 
     const snapshot = ctx.docs.snapshot();

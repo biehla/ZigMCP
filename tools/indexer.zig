@@ -1,3 +1,5 @@
+//! Doc indexer: an upstream Zig tree → JSONL records plus a status sidecar (AGENTS.md §8).
+
 const std = @import("std");
 const Ast = std.zig.Ast;
 const Node = Ast.Node;

@@ -10,85 +10,9 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const schema = @import("advice_schema");
 
 // ---------------------------------------------------------------- corpus ---
-
-const Evidence = enum { fact, result, synthesis, guidance };
-
-const Fact = struct {
-    text: []const u8,
-    source: []const u8,
-    evidence: Evidence,
-};
-
-const Pattern = struct {
-    id: []const u8,
-    name: []const u8,
-    what_data_controls: []const u8,
-    mechanism: ?[]const u8 = null,
-    facts: []const Fact,
-    candidate_uses: []const []const u8,
-    boundaries: []const []const u8,
-    checks: []const []const u8,
-    evidence: Evidence,
-    sources: []const []const u8,
-};
-
-const PatternsFile = struct {
-    version: u32,
-    source_research_date: []const u8,
-    patterns: []const Pattern,
-};
-
-const Rule = struct {
-    id: []const u8,
-    condition: []const u8,
-    then: struct {
-        consider: []const []const u8,
-        and_only_if: ?[]const u8 = null,
-    },
-    evidence: Evidence,
-};
-
-const RulesFile = struct {
-    version: u32,
-    rules: []const Rule,
-};
-
-const Guarantee = struct {
-    id: []const u8,
-    claim: []const u8,
-    evidence: Evidence,
-    guidance: ?[]const u8 = null,
-    sources: []const []const u8,
-};
-
-const GuaranteesFile = struct {
-    version: u32,
-    guarantees: []const Guarantee,
-};
-
-const LimitsFile = struct {
-    version: u32,
-    limits: []const []const u8,
-    evidence_legend: []const struct {
-        label: []const u8,
-        meaning: []const u8,
-    },
-};
-
-const Source = struct {
-    id: []const u8,
-    author: []const u8,
-    title: []const u8,
-    kind: []const u8,
-    url: []const u8,
-};
-
-const SourcesFile = struct {
-    version: u32,
-    sources: []const Source,
-};
 
 const CorpusCounts = struct {
     patterns: ?usize = null,
@@ -124,11 +48,11 @@ fn countOne(comptime T: type, io: std.Io, gpa: std.mem.Allocator, path: []const 
 
 fn loadCorpusCounts(io: std.Io, gpa: std.mem.Allocator) CorpusCounts {
     var counts: CorpusCounts = .{};
-    counts.patterns = countOne(PatternsFile, io, gpa, "data/advice/patterns.zon", .patterns);
-    counts.rules = countOne(RulesFile, io, gpa, "data/advice/rules.zon", .rules);
-    counts.sources = countOne(SourcesFile, io, gpa, "data/advice/sources.zon", .sources);
-    counts.guarantees = countOne(GuaranteesFile, io, gpa, "data/advice/guarantees.zon", .guarantees);
-    counts.limits = countOne(LimitsFile, io, gpa, "data/advice/limits.zon", .limits);
+    counts.patterns = countOne(schema.PatternsFile, io, gpa, "data/advice/patterns.zon", .patterns);
+    counts.rules = countOne(schema.RulesFile, io, gpa, "data/advice/rules.zon", .rules);
+    counts.sources = countOne(schema.SourcesFile, io, gpa, "data/advice/sources.zon", .sources);
+    counts.guarantees = countOne(schema.GuaranteesFile, io, gpa, "data/advice/guarantees.zon", .guarantees);
+    counts.limits = countOne(schema.LimitsFile, io, gpa, "data/advice/limits.zon", .limits);
     return counts;
 }
 
