@@ -313,6 +313,40 @@ test "IDX-4: doc_get returns every record sharing a symbol" {
     try std.testing.expectEqualStrings("", matches[1].object.get("container").?.string);
 }
 
+test "doc_get: a miss names the stored path-qualified symbols" {
+    // PROTO-15: the index stores path-qualified symbols, so the readme's own
+    // unqualified example found nothing and gave the caller no next step.
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const harness = try startHarnessWithIndex(gpa,
+        \\{"project":"zig_std","commit":"c","path":"lib/std/mem.zig","line":238,"kind":"fn","symbol":"lib.std.mem.copyForwards","container":"lib.std.mem","doc":"Copies source into dest.","doc_hash":"5b9b51d9a8c4c3a5174688eb4c984931a3874fe30db40b99c862e57c26ef97fa"}
+        \\{"project":"zig_std","commit":"c","path":"lib/std/std.zig","line":48,"kind":"container","symbol":"lib.std.std.ArrayList","container":"","doc":"Copies source into dest.","doc_hash":"5b9b51d9a8c4c3a5174688eb4c984931a3874fe30db40b99c862e57c26ef97fa"}
+    );
+
+    var args: std.json.ObjectMap = .{};
+    try args.put(gpa, "project", .{ .string = "zig_std" });
+    try args.put(gpa, "symbol", .{ .string = "mem.copyForwards" });
+
+    const unqualified = try tools.docGet(&harness.ctx, .{ .object = args });
+    try std.testing.expect(unqualified.is_error);
+    const unqualified_structured = unqualified.structured.?.object;
+    try std.testing.expect(!unqualified_structured.get("found").?.bool);
+    const candidates = unqualified_structured.get("candidates").?.array.items;
+    try std.testing.expect(candidates.len >= 1);
+    try std.testing.expectEqualStrings("lib.std.mem.copyForwards", candidates[0].string);
+    try std.testing.expect(std.mem.indexOf(u8, unqualified.text, "lib.std.mem.copyForwards") != null);
+    try std.testing.expect(std.mem.indexOf(u8, unqualified.text, "doc_search") != null);
+
+    // A container-only name still reaches the type through its tokens.
+    try args.put(gpa, "symbol", .{ .string = "ArrayList.append" });
+    const container_miss = try tools.docGet(&harness.ctx, .{ .object = args });
+    try std.testing.expect(container_miss.is_error);
+    const container_candidates = container_miss.structured.?.object.get("candidates").?.array.items;
+    try std.testing.expectEqualStrings("lib.std.std.ArrayList", container_candidates[0].string);
+}
+
 test "PROTO-14: a separator spelling reaches the records" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

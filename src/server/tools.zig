@@ -28,6 +28,10 @@ pub const advice_lookup_input = registry.Schema{ .fields = &.{
 /// How many pattern records question mode returns before it truncates.
 pub const max_advice_matches: usize = 5;
 
+/// How many path-qualified symbol suggestions a `doc_get` miss reports. The
+/// list is a next step, not a result set, so it stays small.
+pub const max_get_candidates: usize = 5;
+
 pub const advice_lookup_output = registry.Schema{
     .fields = &.{
         .{ .name = "query", .kind = .string },
@@ -63,7 +67,7 @@ pub const doc_search_output = registry.Schema{ .fields = &.{
 
 pub const doc_get_input = registry.Schema{ .fields = &.{
     .{ .name = "project", .kind = .string, .description = "Project key, e.g. zig_std. Case and - vs _ are forgiven when the spelling names exactly one indexed project." },
-    .{ .name = "symbol", .kind = .string, .description = "Fully qualified symbol path, e.g. mem.copyForwards." },
+    .{ .name = "symbol", .kind = .string, .description = "Path-qualified symbol as the index stores it, e.g. lib.std.mem.copyForwards. Case is ignored; a miss lists the closest stored symbols." },
 } };
 
 pub const doc_get_output = registry.Schema{
@@ -74,6 +78,9 @@ pub const doc_get_output = registry.Schema{
         .{ .name = "project", .kind = .string, .required = false },
         .{ .name = "symbol", .kind = .string, .required = false },
         .{ .name = "matches", .kind = .array, .required = false, .description = "Every record sharing the symbol path, ordered by path then line." },
+        // PROTO-15: a miss used to be a dead end, so an unqualified spelling
+        // (the readme's own example) looked like an absent symbol.
+        .{ .name = "candidates", .kind = .string_array, .required = false, .description = "Path-qualified symbols the index holds that resemble `symbol`; present, possibly empty, only when `found` is false." },
     },
 };
 
@@ -107,12 +114,22 @@ fn emptySearchResult(gpa: std.mem.Allocator, query: []const u8) !std.json.Value 
     return .{ .object = object };
 }
 
-/// `doc_get`'s shape with no result (PROTO-12).
-fn emptyGetResult(gpa: std.mem.Allocator, project: []const u8, symbol: []const u8) !std.json.Value {
+/// `doc_get`'s shape with no result (PROTO-12). `candidates` is present here
+/// and absent from a `found: true` result, which the schema allows because the
+/// member is optional (PROTO-15).
+fn emptyGetResult(
+    gpa: std.mem.Allocator,
+    project: []const u8,
+    symbol: []const u8,
+    candidates: []const []const u8,
+) !std.json.Value {
     var object: std.json.ObjectMap = .{};
     try object.put(gpa, "found", .{ .bool = false });
     try object.put(gpa, "project", .{ .string = project });
     try object.put(gpa, "symbol", .{ .string = symbol });
+    var array: std.json.Array = json_array.init(gpa);
+    for (candidates) |candidate| try json_array.append(&array, gpa, .{ .string = candidate });
+    try object.put(gpa, "candidates", .{ .array = array });
     return .{ .object = object };
 }
 
@@ -472,6 +489,74 @@ pub fn docSearch(ctx: *Context, args: std.json.Value) ToolError!ToolOutcome {
     };
 }
 
+/// The stored symbols closest to a spelling that matched nothing.
+///
+/// A miss is only a miss for the spelling that was tried: the index stores
+/// path-qualified symbols, so `mem.copyForwards` finds nothing while
+/// `lib.std.mem.copyForwards` is a record. The suggestions come from the same
+/// scorer `doc_search` uses, so a suggestion always agrees with what a
+/// follow-up `doc_search` call returns; they are deduplicated because several
+/// records can share a symbol path.
+fn closestSymbols(
+    gpa: std.mem.Allocator,
+    index: *const docs_columnar.Columnar,
+    project: []const u8,
+    symbol: []const u8,
+) ![]const []const u8 {
+    if (symbol.len == 0) return &.{};
+
+    const tokens = try text_util.tokenize(gpa, symbol);
+    // `doc_search` rejects a query over the token bound (-32602); a suggestion
+    // list instead keeps the substring signal and drops the surplus tokens.
+    const bounded = tokens[0..@min(tokens.len, registry.max_query_tokens)];
+
+    const matches = try docs_search.searchWithTokens(
+        gpa,
+        index,
+        symbol,
+        bounded,
+        project,
+        max_get_candidates,
+    );
+
+    var symbols: std.ArrayList([]const u8) = .empty;
+    for (matches) |match| {
+        const stored = index.symbolAt(match.record_index);
+        var seen = false;
+        for (symbols.items) |existing| {
+            if (std.mem.eql(u8, existing, stored)) {
+                seen = true;
+                break;
+            }
+        }
+        if (!seen) try symbols.append(gpa, stored);
+    }
+    return symbols.toOwnedSlice(gpa);
+}
+
+/// The message for a symbol that matched nothing: the two rules a caller cannot
+/// see from outside (path-qualified spelling, documented declarations only),
+/// the closest stored symbols, and the tool that finds the spelling.
+fn symbolMissMessage(
+    gpa: std.mem.Allocator,
+    symbol: []const u8,
+    project: []const u8,
+    candidates: []const []const u8,
+) ![]const u8 {
+    var text: std.ArrayList(u8) = .empty;
+    try text.print(
+        gpa,
+        "No indexed symbol '{s}' in project '{s}'. Symbols are stored path-qualified, and only declarations that carry a comment are indexed.",
+        .{ symbol, project },
+    );
+    if (candidates.len > 0) {
+        try text.appendSlice(gpa, "\nClosest indexed symbols:");
+        for (candidates) |candidate| try text.print(gpa, "\n  {s}", .{candidate});
+    }
+    try text.appendSlice(gpa, "\nUse doc_search with a shorter query to find the stored spelling.");
+    return text.toOwnedSlice(gpa);
+}
+
 /// `doc_get`: the full documentation of a symbol. Several records can share a
 /// symbol path — a `//!` container record and a declaration from the sibling
 /// `<dir>.zig` can both produce `std.os` — so every match is returned (IDX-4);
@@ -492,15 +577,18 @@ pub fn docGet(ctx: *Context, args: std.json.Value) ToolError!ToolOutcome {
     var resolved_project = project;
     switch (try docs_projects.resolve(gpa, columnar, project)) {
         .found => |key| resolved_project = key,
+        // A project that does not resolve leaves nothing to suggest from, so
+        // the array is empty rather than absent: every `found: false` result
+        // carries the member.
         .missing => return toolFailure(
             gpa,
             try projectMissMessage(gpa, columnar, project),
-            try emptyGetResult(gpa, project, symbol),
+            try emptyGetResult(gpa, project, symbol, &.{}),
         ),
         .ambiguous => |candidates| return toolFailure(
             gpa,
             try ambiguousProjectMessage(gpa, project, candidates),
-            try emptyGetResult(gpa, project, symbol),
+            try emptyGetResult(gpa, project, symbol, &.{}),
         ),
     }
 
@@ -514,10 +602,11 @@ pub fn docGet(ctx: *Context, args: std.json.Value) ToolError!ToolOutcome {
     }
 
     if (records.items.len == 0) {
+        const candidates = try closestSymbols(gpa, columnar, resolved_project, symbol);
         return toolFailure(
             gpa,
-            try std.fmt.allocPrint(gpa, "No indexed symbol '{s}' in project '{s}'.", .{ symbol, project }),
-            try emptyGetResult(gpa, project, symbol),
+            try symbolMissMessage(gpa, symbol, project, candidates),
+            try emptyGetResult(gpa, project, symbol, candidates),
         );
     }
 

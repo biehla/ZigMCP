@@ -642,6 +642,24 @@ test "a tool with no match still answers with structuredContent" {
     const get_structured = get_result.get("structuredContent").?.object;
     try std.testing.expect(!get_structured.get("found").?.bool);
     try std.testing.expectEqualStrings("zig_std", get_structured.get("project").?.string);
+    // PROTO-15: the project above does not resolve, so the hint list is empty
+    // but the member is there — every `found: false` result carries it.
+    try std.testing.expectEqual(@as(usize, 0), get_structured.get("candidates").?.array.items.len);
+
+    // The stored spelling is path-qualified, so the unqualified one is a miss
+    // that names the symbol the index actually holds.
+    try harness.send(
+        "{\"jsonrpc\":\"2.0\",\"id\":16,\"method\":\"tools/call\",\"params\":{\"name\":\"doc_get\",\"arguments\":{\"project\":\"fixture\",\"symbol\":\"comments.plain\"}}}",
+    );
+    const unqualified = try harness.receive();
+    defer unqualified.deinit();
+    const unqualified_result = unqualified.value.object.get("result").?.object;
+    try std.testing.expect(unqualified_result.get("isError").?.bool);
+    const unqualified_structured = unqualified_result.get("structuredContent").?.object;
+    try std.testing.expect(!unqualified_structured.get("found").?.bool);
+    const wire_candidates = unqualified_structured.get("candidates").?.array.items;
+    try std.testing.expect(wire_candidates.len >= 1);
+    try std.testing.expectEqualStrings("lib.std.comments.plain", wire_candidates[0].string);
 
     try harness.send(
         "{\"jsonrpc\":\"2.0\",\"id\":14,\"method\":\"tools/call\",\"params\":{\"name\":\"advice_lookup\",\"arguments\":{\"question\":\"zzzznotpresent\"}}}",

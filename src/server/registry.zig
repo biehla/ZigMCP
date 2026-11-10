@@ -295,7 +295,7 @@ pub const tool_specs = [_]ToolSpec{
     },
     .{
         .name = "doc_get",
-        .description = "Fetch the documentation comments (/// and //!) of one indexed symbol. The index holds comment text only: no signature, body or type information is stored or returned.",
+        .description = "Fetch the documentation comments of one indexed symbol, given its path-qualified spelling (e.g. lib.std.mem.copyForwards). Comments are /// doc comments, //! container comments, or a declaration's plain // run. The index holds comment text only: no signature, body or type information is stored or returned.",
         .input = tools_module.doc_get_input,
         .output = tools_module.doc_get_output,
         .handler = tools_module.docGet,
@@ -309,7 +309,7 @@ pub const tool_specs = [_]ToolSpec{
     },
     .{
         .name = "doc_search",
-        .description = "Search imported documentation comments (/// and //!) by symbol, path or comment text. The index holds comment text only, not signatures or bodies.",
+        .description = "Search imported documentation comments (/// doc comments, //! container comments and plain // runs) by symbol, path or comment text. The index holds comment text only, not signatures or bodies.",
         .input = tools_module.doc_search_input,
         .output = tools_module.doc_search_output,
         .handler = tools_module.docSearch,
