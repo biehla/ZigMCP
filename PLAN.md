@@ -468,7 +468,7 @@ detached under the lock and freed after unlocking.
 
 |Id|Option|Commit|Verification|
 |---|---|---|---|
-|SRV-5|(a) move the free outside the lock|`HEAD`|unit test: the last release frees the retired index (the testing allocator would flag a leak) and the store's `retired` list is empty; `zig build test`, `test-regressions` and `bench` all pass|
+|SRV-5|(a) move the free outside the lock|`330386d`|unit test: the last release frees the retired index (the testing allocator would flag a leak) and the store's `retired` list is empty; `zig build test`, `test-regressions` and `bench` all pass|
 
 
 
