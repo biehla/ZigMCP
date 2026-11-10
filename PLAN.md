@@ -2,8 +2,8 @@
 
 Status: open backlog. Twenty-two items were fixed on 2026-11-09 and three on
 2026-11-10 — the option chosen for each, its commit and its verification are in §13
-and §14. Two sources: a read-through of
-the tree on 2026-11-09, and a breakage campaign the same day that fuzzed the stdio
+and §14. Two sources: a read-through of the tree on 2026-11-09, and a breakage
+campaign the same day that fuzzed the stdio
 surface and the indexer, profiled the hot paths, and inspected a `ReleaseSafe` PE
 with REA — method, measurements and negative results in §12.
 `AGENTS.md` remains the spec of record for behaviour; the accepted gaps are summarised
@@ -534,4 +534,16 @@ Two items changed shape while being fixed, both recorded in `AGENTS.md`:
 every `uses:` in the tree runs on a deprecated node20 runtime. `ci.yml` pins the older
 v1.7.7, which does not report it, so the gate stays green while the deprecation is
 tracked rather than silently ignored.
+
+## 14. Resolved on 2026-11-10
+
+Three items, one commit (`20784b3`): the schema module, the table dispatch and the
+module headers touch the same three tools and the same two docs, so splitting them
+would have meant staging halves of one file.
+
+|Id|Option|Commit|Verification|
+|---|---|---|---|
+|GUIDE-3|(a) one shared `src/advice/schema.zig` imported as the `advice_schema` module|`20784b3`|`zig build check` + `zig build bench` compile both tools against it; `grep -n "const Pattern = struct" src tools` prints one line; `corpus.zig` pins type identity at comptime|
+|GUIDE-2|(a) a `handler` in `PromptSpec`/`ResourceSpec` (and `cache` in resources)|`20784b3`|regression tests: every prompt spec dispatches through its handler, both resource families read through the table|
+|GUIDE-1|(a) add the `//!` headers|`20784b3`|`src/root.zig` lint test names every headerless `src/**`/`tools/**` file (both tools before the fix) and passes after|
 

@@ -468,9 +468,10 @@ runs the cross-cutting handler tests on their own (below).
 |Workflow consistency|`src/util/workflow.zig` (logic, tested in the main suite) and `tools/workflow_check.zig` (CLI) — `zig build workflows`|
 
 **Backlog rule:** a commit that fixes an item must add the test its layer owns, delete
-the item from `PLAN.md`, and record the chosen option in `PLAN.md` §13. Never weaken an
-expectation to match the code — pick the option in `PLAN.md` first, then make the test
-match the chosen behaviour.
+the item from `PLAN.md`, and record the chosen option in `PLAN.md`'s resolved table
+(§13 for 2026-11-09, §14 for 2026-11-10). Never weaken an expectation to match the
+code — pick the option in `PLAN.md` first, then make the test match the chosen
+behaviour.
 
 **Semantics the tests pin:** doc text verbatim except prefix stripping and line
 joining; the attachment rule; `tools/list` sorted by name and the index sorted by
