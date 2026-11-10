@@ -1,8 +1,8 @@
 # PLAN.md — defects, edge cases, limitations, and guideline deviations
 
-Status: open backlog. Twenty-two items were fixed on 2026-11-09, thirty-two on
+Status: open backlog. Twenty-two items were fixed on 2026-11-09, thirty-three on
 2026-11-10, and five more were closed that day because they were already done — the
-option chosen for each, its commit and its verification are in §13–§25. Two sources: a read-through
+option chosen for each, its commit and its verification are in §13–§26. Two sources: a read-through
 of the tree on 2026-11-09, and a breakage campaign the same day that fuzzed the
 stdio surface and the indexer, profiled the hot paths, and inspected a `ReleaseSafe`
 PE with REA — method, measurements and negative results in §12.
@@ -94,15 +94,6 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri"
   the `zig fetch` package cache; (c) shallow clones (`--depth 1`) plus
   `git fetch --depth 1 <sha>`. Verify: compare run times.
 
-- **CI-9 — every `uses:` runs on a deprecated node20 runtime.** `actions/checkout@v4`,
-  `actions/upload-artifact@v4` and `softprops/action-gh-release@v2` are node20
-  actions; actionlint ≥ 1.17 reports the deprecation for all four workflows, and the
-  removal date it names has passed. Options: (a) bump to the node24 majors
-  (`checkout@v5`, `upload-artifact@v5`, and whatever `action-gh-release` ships);
-  (b) pin the older actionlint (v1.7.7, which `ci.yml` runs) and accept the risk;
-  (c) keep and document. Verify: actionlint 1.17+ reports no `runtime "node20"`
-  finding.
-
 ---
 
 ## 2. Protocol / MCP surface
@@ -193,7 +184,6 @@ must own its test, because no such layer exists yet.
 |REL-1|—|local HTTP server counting requests|
 |REL-2|—|black-hole address plus quit; timing-based|
 |REL-6|—|integration: URL index with no sidecar|
-|CI-9|—|actionlint 1.17+ over `.github/workflows/`; no local test|
 |DOC-4|—|`inspect_pe_resources` on a `ReleaseSafe` artifact (packaging smoke test)|
 
 Every item above that names a handler can use the `Harness` in
@@ -472,6 +462,17 @@ on the Unix binary having an extension.
 |Id|Option|Commit|Verification|
 |---|---|---|---|
 |CI-8|(a)|`7db2cee`|local smoke: tar the ReleaseSafe binary + `data/advice`, unpack into an empty directory, run with EOF → exit 0 with all five corpus files present; `zig build workflows`, `zig fmt` and actionlint 1.7.7 pass|
+
+## 26. Resolved on 2026-11-10, twelfth chunk
+
+One CI item, one commit (`f7fb720`): the actions moved to their node24 majors.
+`mlugg/setup-zig@v2` is the one remaining node20 action — upstream's latest tag is
+v2.2.1 and no node24 release exists — so it is kept and documented (option c for
+that one).
+
+|Id|Option|Commit|Verification|
+|---|---|---|---|
+|CI-9|(a), plus (c) for `setup-zig`|`f7fb720`|each action.yml declares `runs.using`: `checkout@v5`, `upload-artifact@v6`, `setup-go@v6`, `action-gh-release@v3` = node24; `setup-zig@v2` = node20 (upstream, no v3). `zig build workflows`, `zig fmt --check` and actionlint 1.7.7 pass|
 
 
 
