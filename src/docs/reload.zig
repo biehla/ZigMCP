@@ -301,32 +301,50 @@ pub const Store = struct {
         return .{ .store = self, .index = self.current };
     }
 
-    fn release(self: *Store) void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        std.debug.assert(self.readers > 0);
-        self.readers -= 1;
-        if (self.readers == 0) self.reclaimLocked();
+    /// Indexes detached from the store, to be freed outside the spin lock.
+    const Detached = struct {
+        list: std.ArrayList(*Index) = .empty,
+        overflow: ?*Index = null,
+    };
+
+    /// Takes ownership of the retired list under the lock. The caller frees it
+    /// after unlocking: `Index.deinit` releases an arena, and every other
+    /// reader would spin for its duration if the free ran under the lock
+    /// (SRV-5).
+    fn detachLocked(self: *Store) Detached {
+        var detached: Detached = .{};
+        std.mem.swap(std.ArrayList(*Index), &detached.list, &self.retired);
+        detached.overflow = self.overflow;
+        self.overflow = null;
+        return detached;
     }
 
-    fn reclaimLocked(self: *Store) void {
-        for (self.retired.items) |old| {
+    fn freeDetached(self: *Store, detached: *Detached) void {
+        for (detached.list.items) |old| {
             old.deinit();
             self.gpa.destroy(old);
         }
-        self.retired.clearRetainingCapacity();
-        if (self.overflow) |old| {
+        detached.list.deinit(self.gpa);
+        if (detached.overflow) |old| {
             old.deinit();
             self.gpa.destroy(old);
-            self.overflow = null;
         }
+    }
+
+    fn release(self: *Store) void {
+        self.mutex.lock();
+        std.debug.assert(self.readers > 0);
+        self.readers -= 1;
+        var detached = if (self.readers == 0) self.detachLocked() else Detached{};
+        self.mutex.unlock();
+
+        self.freeDetached(&detached);
     }
 
     /// Replaces the active index. The old index is retired and reclaimed once
     /// no reader holds it.
     pub fn swap(self: *Store, replacement: *Index) void {
         self.mutex.lock();
-        defer self.mutex.unlock();
 
         const old = self.current;
         self.current = replacement;
@@ -336,7 +354,10 @@ pub const Store = struct {
             // so it waits in the overflow slot instead.
             self.overflow = old;
         };
-        if (self.readers == 0) self.reclaimLocked();
+        var detached = if (self.readers == 0) self.detachLocked() else Detached{};
+        self.mutex.unlock();
+
+        self.freeDetached(&detached);
     }
 };
 
@@ -596,6 +617,36 @@ test "a snapshot keeps the old index alive across a swap" {
     try std.testing.expectEqualStrings("new", store.current.columnar.symbolAt(0));
 
     snapshot.deinit();
+}
+
+test "the last release frees the retired index outside the lock" {
+    // SRV-5: `reclaimLocked` freed the arena while holding the spin lock, so
+    // every other reader spun for the duration. The store now detaches the
+    // retired list under the lock and frees it after unlocking; the testing
+    // allocator proves the free still happens.
+    const gpa = std.testing.allocator;
+
+    const first = try gpa.create(Index);
+    first.* = try index_module.load(gpa,
+        \\{"project":"p","commit":"a","path":"x.zig","line":1,"kind":"fn","symbol":"old","doc":"d","doc_hash":"18ac3e7343f016890c510e93f935261169d9e3f565436429830faf0934f4f8e4"}
+    );
+    const second = try gpa.create(Index);
+    second.* = try index_module.load(gpa,
+        \\{"project":"p","commit":"b","path":"x.zig","line":1,"kind":"fn","symbol":"new","doc":"d","doc_hash":"18ac3e7343f016890c510e93f935261169d9e3f565436429830faf0934f4f8e4"}
+    );
+
+    var store = Store.init(gpa, first);
+
+    const snapshot = store.snapshot();
+    store.swap(second);
+    // The old index is detached but not freed: the reader still holds it.
+    try std.testing.expectEqualStrings("old", snapshot.index.columnar.symbolAt(0));
+    snapshot.deinit();
+
+    try std.testing.expectEqual(@as(usize, 0), store.retired.items.len);
+    try std.testing.expectEqualStrings("new", store.current.columnar.symbolAt(0));
+
+    store.deinit();
 }
 
 test "an index location is classified as a file or a URL" {

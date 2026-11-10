@@ -130,10 +130,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri"
 
 ## 3. Server runtime
 
-- **SRV-5 — index reclamation runs under the spin lock.** `reclaimLocked` frees an
-  index while holding the store lock, so readers spin for the duration. Options:
-  (a) move the free outside the lock into an owner thread; (b) accept it (index free
-  is short); (c) use a mutex instead of spinning. Verify: bench under a reload loop.
+No open items.
 
 ---
 
@@ -255,7 +252,6 @@ must own its test, because no such layer exists yet.
 |CI-6|—|rerun the workflow; no local test|
 |CI-7|—|timing only|
 |CI-8|—|unpack a release and run it from an empty directory (CI smoke test)|
-|SRV-5|—|benchmark only, not deterministic|
 |IDX-5|—|indexer CLI harness: fixture with a 0xFF byte in a comment|
 |IDX-6|—|`modulePath` is private; export it for a unit test|
 |IDX-7|—|fixture with a nested declaration inside an error set|
@@ -463,6 +459,16 @@ their `PLAN.md` deletions overlap, so they share a commit.
 |REL-3|(a) strip `file://` into a path|`e9624fb`|unit test: `file:///tmp/i.jsonl` → `/tmp/i.jsonl`, `file:///C:/x` → `C:/x`, neither is a URL|
 |REL-5|(a) a `--max-index-bytes` flag|`e9624fb`|unit test: `an artifact larger than the ceiling is rejected` (the golden index, 10-byte limit); CLI accepts the flag|
 |REL-7|(b) also compare the metadata-change time|`e9624fb`|the watcher compares `ctime` as well as size and `mtime`, so an equal-size, equal-mtime rewrite is still detected|
+
+## 18. Resolved on 2026-11-10, fourth chunk
+
+One item, one commit: `reclaimLocked` freed an index's arena while holding the
+store's spin lock, so readers spun for the whole free. The retired list is now
+detached under the lock and freed after unlocking.
+
+|Id|Option|Commit|Verification|
+|---|---|---|---|
+|SRV-5|(a) move the free outside the lock|`HEAD`|unit test: the last release frees the retired index (the testing allocator would flag a leak) and the store's `retired` list is empty; `zig build test`, `test-regressions` and `bench` all pass|
 
 
 
