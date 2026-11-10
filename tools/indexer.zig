@@ -545,7 +545,7 @@ fn indexFile(gpa: std.mem.Allocator, project: []const u8, commit: []const u8, re
         var i: usize = 0;
         var lines = std.ArrayList([]const u8).empty;
         while (i < tags.len and tags[@intCast(i)] == .container_doc_comment) : (i += 1) {
-            try lines.append(gpa, stripPrefix3(tree.tokenSlice(@intCast(i)), "//!"));
+            try lines.append(gpa, try stripPrefix3(gpa, tree.tokenSlice(@intCast(i)), "//!"));
         }
         const doc = try std.mem.join(gpa, "\n", lines.items);
         const sym = try modulePath(gpa, rel);
@@ -566,7 +566,7 @@ fn indexFile(gpa: std.mem.Allocator, project: []const u8, commit: []const u8, re
     try walkDecls(gpa, &tree, &line_table, tree.rootDecls(), mod_path, project, commit, rel, records, unattached);
 }
 
-fn stripPrefix3(slice: []const u8, prefix: []const u8) []const u8 {
+fn stripPrefix3(gpa: std.mem.Allocator, slice: []const u8, prefix: []const u8) ![]const u8 {
     var result = slice;
     if (result.len >= prefix.len and std.mem.eql(u8, result[0..prefix.len], prefix)) {
         result = result[prefix.len..];
@@ -577,7 +577,38 @@ fn stripPrefix3(slice: []const u8, prefix: []const u8) []const u8 {
     if (result.len > 0 and result[result.len - 1] == '\r') {
         result = result[0 .. result.len - 1];
     }
-    return result;
+    return sanitizeUtf8(gpa, result);
+}
+
+/// The JSON writer falls back to an array of bytes for invalid UTF-8, and the
+/// loader then rejects the record's `doc` as the wrong type (IDX-5). Replace
+/// each invalid byte with U+FFFD; the caller hashes the sanitized text, so the
+/// `doc_hash` the loader recomputes still matches.
+fn sanitizeUtf8(gpa: std.mem.Allocator, s: []const u8) ![]const u8 {
+    if (std.unicode.utf8ValidateSlice(s)) return s;
+    var out: std.ArrayList(u8) = .empty;
+    var i: usize = 0;
+    while (i < s.len) {
+        const b = s[i];
+        const len: usize = if (b < 0x80)
+            1
+        else if (b & 0xE0 == 0xC0)
+            2
+        else if (b & 0xF0 == 0xE0)
+            3
+        else if (b & 0xF8 == 0xF0)
+            4
+        else
+            0;
+        if (len > 0 and i + len <= s.len and std.unicode.utf8ValidateSlice(s[i .. i + len])) {
+            try out.appendSlice(gpa, s[i .. i + len]);
+            i += len;
+        } else {
+            try out.appendSlice(gpa, "\u{FFFD}");
+            i += 1;
+        }
+    }
+    return out.toOwnedSlice(gpa);
 }
 
 fn modulePath(gpa: std.mem.Allocator, rel: []const u8) ![]const u8 {
@@ -611,7 +642,7 @@ fn collectDoc(gpa: std.mem.Allocator, tree: *Ast, first_tok: TokenIndex, unattac
     var lines = std.ArrayList([]const u8).empty;
     var i = start;
     while (i < first_tok) : (i += 1) {
-        try lines.append(gpa, stripPrefix3(tree.tokenSlice(i), "///"));
+        try lines.append(gpa, try stripPrefix3(gpa, tree.tokenSlice(i), "///"));
     }
     const joined: []const u8 = try std.mem.join(gpa, "\n", lines.items);
     return joined;
@@ -693,7 +724,7 @@ fn handleFn(gpa: std.mem.Allocator, tree: *Ast, line_table: *const LineTable, de
             var i = first_doc;
             const toks = tree.tokens.items(.tag);
             while (i < toks.len and toks[i] == .doc_comment) : (i += 1) {
-                try lines.append(gpa, stripPrefix3(tree.tokenSlice(i), "///"));
+                try lines.append(gpa, try stripPrefix3(gpa, tree.tokenSlice(i), "///"));
             }
             const doc = try std.mem.join(gpa, "\n", lines.items);
             const sym = try prefixJoin(gpa, fsym, tree.tokenSlice(nt));
@@ -767,7 +798,7 @@ fn handleErrorSet(gpa: std.mem.Allocator, tree: *Ast, line_table: *const LineTab
         var lines = std.ArrayList([]const u8).empty;
         var j = start;
         while (j < i) : (j += 1) {
-            try lines.append(gpa, stripPrefix3(tree.tokenSlice(j), "///"));
+            try lines.append(gpa, try stripPrefix3(gpa, tree.tokenSlice(j), "///"));
         }
         const doc = try std.mem.join(gpa, "\n", lines.items);
         const name = tree.tokenSlice(i);

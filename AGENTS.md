@@ -342,7 +342,7 @@ them, so a schema change is one edit and all three targets recompile.
 |`kind`|`fn` / `var` / `field` / `container` / `error` / `param`|
 |`symbol`|Syntactic container path; module path is the file path with `/` → `.` and `.zig` stripped|
 |`container`|Enclosing symbol (`""` for a module's `//!` record)|
-|`doc`|`///` or `//!` stripped (the space after it is kept), lines joined with `\n`|
+|`doc`|`///` or `//!` stripped (the space after it is kept), lines joined with `\n`; an invalid UTF-8 byte becomes U+FFFD before hashing (IDX-5)|
 |`doc_hash`|Lowercase hex SHA-256 of `doc`; recomputed and compared at load, so a mismatch rejects the artifact (REL-9)|
 
 Key order is fixed. Records are sorted by `(project, symbol)`, ties by `(path, line)`.

@@ -468,3 +468,54 @@ test "an --exclude pattern removes matching files from the index" {
         try std.testing.expectEqual(run.want_c, got_c);
     }
 }
+
+test "invalid UTF-8 in a doc comment is replaced, not emitted as a byte array" {
+    // IDX-5: the JSON writer falls back to a byte array for invalid UTF-8, so
+    // the record's `doc` stops being a string and the loader rejects the whole
+    // index. Replace the bad byte with U+FFFD and hash the sanitized text.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const gpa = std.testing.allocator;
+
+    try writeFixture(tmp.dir, "bad.zig", "/// bad \xff byte\npub const x = 1;\n");
+
+    const root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}", .{&tmp.sub_path});
+    defer gpa.free(root);
+    const output = try std.fmt.allocPrint(gpa, "{s}/index.jsonl", .{root});
+    defer gpa.free(output);
+    const source = try std.fmt.allocPrint(gpa, "p=c={s}", .{root});
+    defer gpa.free(source);
+
+    var child = try std.process.spawn(io, .{
+        .argv = &.{ options.indexer_exe, "--out", output, "--source", source },
+        .stdin = .ignore,
+        .stdout = .ignore,
+        .stderr = .ignore,
+    });
+    switch (try child.wait(io)) {
+        .exited => |code| try std.testing.expectEqual(@as(u8, 0), code),
+        else => return error.UnexpectedExit,
+    }
+
+    const produced = try std.Io.Dir.cwd().readFileAllocOptions(
+        io,
+        output,
+        gpa,
+        .limited(16 * 1024 * 1024),
+        .of(u8),
+        null,
+    );
+    defer gpa.free(produced);
+
+    try std.testing.expect(std.unicode.utf8ValidateSlice(produced));
+    // A string, not the byte array the JSON writer falls back to.
+    try std.testing.expect(std.mem.indexOf(u8, produced, "\"doc\":\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, produced, "\"doc\":[") == null);
+    try std.testing.expect(std.mem.indexOf(u8, produced, " bad \u{fffd} byte") != null);
+
+    // The hash the loader will recompute is over the sanitized text.
+    var digest: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(" bad \u{fffd} byte", &digest, .{});
+    const hex = std.fmt.bytesToHex(digest, .lower);
+    try std.testing.expect(std.mem.indexOf(u8, produced, &hex) != null);
+}
