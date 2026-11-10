@@ -636,6 +636,12 @@ zig fmt --check . --exclude tests/fixtures   # the fixture tree is deliberately 
   environment. An unknown argument or a missing option value prints one line and the usage
   block to stderr and exits 2 — never a bare Zig error name, a stack trace or exit 1
   (SRV-8).
+- **Doc-only edits and the run cache.** The doc-invariant tests in `src/root.zig` read
+  `AGENTS.md`, `PLAN.md`, `readme.md` and `client-config.json` at **runtime**, while
+  `zig build test` caches a successful run step on the test binary's hash — so a
+  docs-only change can report a cached green. Force a real run with
+  `zig build test --cache-dir .zig-cache-docs --summary all`. A cached green after a
+  docs-only edit has already happened here once.
 - **Interrupted builds** can orphan `zig.exe` compiler children that hold the cache lock;
   the next build then looks hung. Kill them before timing anything.
 - **Formatting gate with `upstream/` present:** `zig fmt` walks the working tree, not git,

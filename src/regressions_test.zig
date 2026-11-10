@@ -388,6 +388,9 @@ test "PROTO-16: only a dotted tail of one stored symbol resolves" {
         "lib.std.mem.copyForwards",
         upper_structured.get("matches").?.array.items[0].object.get("symbol").?.string,
     );
+    // The two hints are exclusive: a hit reports how it resolved, a miss reports
+    // what it could have been — never both.
+    try std.testing.expect(upper_structured.get("candidates") == null);
 
     // A leading dot is the separator, not part of the tail; a trailing dot names
     // nothing stored.
@@ -395,7 +398,11 @@ test "PROTO-16: only a dotted tail of one stored symbol resolves" {
         try args.put(gpa, "symbol", .{ .string = spelling });
         const miss = try tools.docGet(&harness.ctx, .{ .object = args });
         try std.testing.expect(miss.is_error);
-        try std.testing.expect(!miss.structured.?.object.get("found").?.bool);
+        const miss_structured = miss.structured.?.object;
+        try std.testing.expect(!miss_structured.get("found").?.bool);
+        // A miss never claims a resolution, and never carries `matches`.
+        try std.testing.expect(miss_structured.get("resolved_from") == null);
+        try std.testing.expect(miss_structured.get("matches") == null);
     }
 
     // The last component on its own is a tail, so it resolves.

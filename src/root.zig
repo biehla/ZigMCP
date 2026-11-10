@@ -133,16 +133,46 @@ const SectionScan = struct {
     bad: usize = 0,
 };
 
+const Doc = enum { agents, plan };
+
 /// Which document a section number belongs to.
 ///
 /// The tree writes both `` `AGENTS.md` §5 `` and "§14 of `AGENTS.md`", and
-/// `PLAN.md` cites its own sections the same way, so the document name may come
-/// before the sign or after it.
-fn citationTarget(around: []const u8, path: []const u8) enum { agents, plan } {
-    if (std.mem.indexOf(u8, around, "AGENTS.md") != null) return .agents;
-    if (std.mem.indexOf(u8, around, "PLAN.md") != null) return .plan;
-    if (std.mem.eql(u8, path, "AGENTS.md")) return .agents;
-    return .plan;
+/// `PLAN.md` cites its own sections the same way, so the name may come before the
+/// sign or after it. The *nearest* name wins: a sentence that mentions one
+/// document and then cites another must not lend its name to the citation.
+fn citationTarget(text: []const u8, pos: usize, path: []const u8) Doc {
+    const names = [_]struct { needle: []const u8, doc: Doc }{
+        .{ .needle = "AGENTS.md", .doc = .agents },
+        .{ .needle = "PLAN.md", .doc = .plan },
+    };
+
+    var best_distance: usize = 32;
+    var target: ?Doc = null;
+
+    const back = text[pos - @min(pos, 32) .. pos];
+    for (names) |name| {
+        const at = std.mem.lastIndexOf(u8, back, name.needle) orelse continue;
+        const distance = back.len - (at + name.needle.len);
+        if (distance <= best_distance) {
+            best_distance = distance;
+            target = name.doc;
+        }
+    }
+
+    const forward = text[pos..@min(text.len, pos + 32)];
+    for (names) |name| {
+        const at = std.mem.indexOf(u8, forward, name.needle) orelse continue;
+        if (at < best_distance) {
+            best_distance = at;
+            target = name.doc;
+        }
+    }
+
+    if (target) |doc| return doc;
+    // A bare number in a code comment means the rulebook; in PLAN.md it means
+    // PLAN's own sections.
+    return if (std.mem.eql(u8, path, "AGENTS.md")) .agents else .plan;
 }
 
 const DecisionScan = struct {
@@ -230,9 +260,7 @@ test "every AGENTS.md section citation resolves" {
                     cursor = i;
                     continue;
                 };
-                const window_start = pos - @min(pos, 24);
-                const window_end = @min(text.len, i + 16);
-                const target = citationTarget(text[window_start..window_end], path);
+                const target = citationTarget(text, pos, path);
                 const numbers = switch (target) {
                     .agents => state.agents,
                     .plan => state.plan,
@@ -250,7 +278,10 @@ test "every AGENTS.md section citation resolves" {
             }
         }
     }.visit);
-    try std.testing.expect(scan.citations >= 60);
+    // Measured on 2026-11-10: 113 citations in the tree. The floor is below it
+    // so a doc trim does not fail the build, and high enough that losing the
+    // scan itself (a broken walk, a changed spelling) is caught.
+    try std.testing.expect(scan.citations >= 90);
     if (scan.bad != 0) return error.DanglingSectionCitation;
 }
 
@@ -298,7 +329,8 @@ test "every decision reference resolves to a §3 row" {
             }
         }
     }.visit);
-    try std.testing.expect(scan.refs >= 10);
+    // Measured on 2026-11-10: 46 decision references.
+    try std.testing.expect(scan.refs >= 35);
 }
 
 test "PLAN.md knows every id the tree cites" {
@@ -336,7 +368,8 @@ test "PLAN.md knows every id the tree cites" {
             }
         }
     }.visit);
-    try std.testing.expect(scan.checked >= 30);
+    // Measured on 2026-11-10: 257 per-file id mentions across the tree.
+    try std.testing.expect(scan.checked >= 200);
 }
 
 test "PLAN.md's ledger has one row per id" {
