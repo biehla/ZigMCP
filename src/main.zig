@@ -36,8 +36,16 @@ pub fn main(init: std.process.Init) !void {
     const gpa = init.gpa;
 
     const options = parseOptions(init) catch |err| {
-        logStderr(init.io, "zigmcp: cannot parse arguments ({s})\n", .{@errorName(err)});
-        return err;
+        // A bad command line is a usage error: one line, the usage block, and
+        // exit 2. Returning the error instead printed a bare Zig error name, a
+        // Debug stack trace and exit 1, and never offered `--help` (SRV-8).
+        logStderr(init.io, "zigmcp: {s}\n", .{switch (err) {
+            error.UnknownArgument => "unknown argument",
+            error.MissingArgument => "missing value for an option",
+            else => @errorName(err),
+        }});
+        printUsage(init.io) catch {};
+        std.process.exit(2);
     };
 
     if (options.help) {

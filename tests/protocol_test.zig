@@ -281,6 +281,28 @@ test "an oversized line is a parse error and the server keeps serving" {
     try harness.stop();
 }
 
+test "a bad command line prints usage and exits 2" {
+    // SRV-8: an unknown argument printed a bare Zig error name, a Debug stack
+    // trace and exit 1, and never offered `--help`.
+    var child = try std.process.spawn(io, .{
+        .argv = &.{ options.server_exe, "--bogus" },
+        .stdin = .ignore,
+        .stdout = .ignore,
+        .stderr = .pipe,
+    });
+
+    var buffer: [4096]u8 = undefined;
+    var reader = child.stderr.?.readerStreaming(io, &buffer);
+    const text = try reader.interface.allocRemaining(std.testing.allocator, .limited(64 * 1024));
+    defer std.testing.allocator.free(text);
+
+    const term = try child.wait(io);
+    try std.testing.expectEqual(@as(u8, 2), term.exited);
+    try std.testing.expect(std.mem.indexOf(u8, text, "unknown argument") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "Usage: zigmcp") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "UnknownArgument") == null);
+}
+
 test "a malformed envelope is an invalid request" {
     const harness = try Harness.start();
     defer {

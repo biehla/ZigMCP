@@ -493,7 +493,9 @@ zig fmt --check . --exclude tests/fixtures   # the fixture tree is deliberately 
   `.minimum_zig_version = "0.17.1"`; global cache `C:\Users\Sethticles\AppData\Local\zig`.
 - **Server options:** `--index <path-or-url>` / `ZIGMCP_INDEX`; `--advice-dir <path>`
   / `ZIGMCP_ADVICE_DIR` (default `data/advice`, relative to the working directory);
-  `--help`. Flags override the environment. Unknown arguments are fatal.
+  `--help`. Flags override the environment. An unknown argument or a missing option
+  value prints one line and the usage block to stderr and exits 2 — never a bare Zig
+  error name, a stack trace or exit 1 (SRV-8).
 - **Interrupted builds** can orphan `zig.exe` compiler children that hold the cache
   lock; the next build then looks hung. Kill them before timing anything.
 - **ZLS** is wired through `lsp.json`. Keep it on the toolchain's minor version
