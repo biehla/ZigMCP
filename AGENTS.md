@@ -165,11 +165,13 @@ server would put upstream-parse failure modes on the request path.
 |`src/docs/search.zig`|Scored symbol/path/doc search, limit clamp|
 |`src/util/arena_pool.zig`|Per-request scratch arena|
 |`src/util/text.zig`|Tokenizer + case-insensitive helpers|
+|`src/util/workflow.zig`|Workflow trigger/expression consistency (CI-1)|
 |`src/util/sleep.zig`|Thread sleep that does not share the server's `Io`|
 |`data/advice/`|`patterns.zon` (P01–P12), `rules.zon` (R01–R12), `guarantees.zon`, `limits.zon` (+ evidence legend), `sources.zon` (S01–S24)|
 |`data/sources.zon`|Upstream projects: url, hash, branch, commit, scope (the pin home, D6)|
 |`tools/indexer.zig`|Upstream tree → JSONL + `.status.json` sidecar|
 |`tools/advice_check.zig`|Corpus validator (`zig build check`)|
+|`tools/workflow_check.zig`|CLI for the workflow check (`zig build workflows`)|
 |`tools/bench.zig`|Verification report (`zig build bench`)|
 |`tests/protocol_test.zig`|Protocol + end-to-end layers: the built binary over pipes|
 |`tests/indexer_test.zig`|Golden layer: byte-for-byte against `tests/golden/index.jsonl`|
@@ -457,12 +459,12 @@ protocol layer alone; `zig build test-regressions` runs the open-bug tests (belo
 |Protocol|`tests/protocol_test.zig` — the built binary over pipes: discover, legacy `initialize`, every error code, `tools/list` order, cache hints on all six methods, missing resource, prompts, clean EOF exit. Writing one request and blocking on the reply pins the flush rule|
 |End-to-end|same file — discover → list tools → call every tool → read a resource → get a prompt|
 |Corpus validation|`zig build check` (§12)|
-|Backlog regressions|`src/regressions_test.zig` — one test per `PLAN.md` item that a pure function or handler can reach. **Red by design**: each test asserts the wanted behaviour, so it passes only once its item is fixed. Not imported by `src/root.zig`; `PLAN.md` §10 maps every other id to the layer that must own its test|
+|Cross-cutting handler tests|`src/regressions_test.zig` — the tests that need the real corpus and a loaded doc index at once. Part of `zig build test` (`src/root.zig` imports it) and runnable alone as `zig build test-regressions`|
+|Workflow consistency|`src/util/workflow.zig` (logic, tested in the main suite) and `tools/workflow_check.zig` (CLI) — `zig build workflows`|
 
-**Backlog rule:** a commit that fixes an item must flip its regression test green
-and delete that test's row from `PLAN.md` §10 (or move it into the main suite). Do
-not add a failing test to `src/root.zig`, and do not "fix" a regression test by
-weakening its expectation — pick the option in `PLAN.md` first, then make the test
+**Backlog rule:** a commit that fixes an item must add the test its layer owns, delete
+the item from `PLAN.md`, and record the chosen option in `PLAN.md` §13. Never weaken an
+expectation to match the code — pick the option in `PLAN.md` first, then make the test
 match the chosen behaviour.
 
 **Semantics the tests pin:** doc text verbatim except prefix stripping and line

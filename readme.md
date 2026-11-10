@@ -153,8 +153,8 @@ explanation; that is an answer, not a failure.
 |`advice_lookup`|`concept` (e.g. `"P03"`) **or** `question` (free text)|The full advice record(s): what the paradigm controls, facts with their labels and sources, candidate uses, boundaries, checks. A question returns up to 5 best matches|
 |`recommend_approach`|`signals`: list of observations about your system (required, non-empty); `constraints`: any object (optional, currently unused)|The decision rules your signals match, best first, each with the paradigms to consider, the "only if" constraint, its `GUIDANCE` label and a match score|
 |`doc_search`|`query` (required); `project` (optional); `limit` (optional, default 20, max 100)|Matching doc records with `path:line`, symbol, kind and doc text. Exact symbol matches rank first, then partial symbol matches, then path matches, then matches in the doc text|
-|`doc_get`|`project`, `symbol` (both required; case-insensitive)|The full documentation of one symbol, with its source location and upstream commit|
-|`doc_import_status`|none|What the index holds: per project, the upstream commit, record count and, for a local index with a status file, how many source files were only partly parseable|
+|`doc_get`|`project`, `symbol` (both required; the project key is exact, the symbol is case-insensitive)|The full documentation of one symbol, with its source location and upstream commit. `found` is always present, so a miss is still shaped like the tool's output schema|
+|`doc_import_status`|none|What the index holds: `index_state` (`ok`, `unloaded` or `reload_failed`, with `index_error` when a load failed), and per project the upstream commit, record count and, for a local index with a status file, how many source files were only partly parseable|
 
 Examples of arguments:
 
@@ -174,6 +174,7 @@ using the wrong type is rejected as invalid parameters.
 |URI|Content|
 |---|---|
 |`advice://overview`|All 12 paradigms in one table, with evidence labels|
+|`advice://patterns`|All 12 paradigms in one document|
 |`advice://patterns/P01` … `advice://patterns/P12`|One paradigm in full|
 |`advice://rules`|The 12 decision rules|
 |`advice://guarantees`|Cross-cutting guarantees|
@@ -316,8 +317,9 @@ Errors follow JSON-RPC:
 zig build                  # server, indexer and bench into zig-out/bin
 zig build test             # unit, protocol and golden tests
 zig build test-protocol    # only the tests that drive the server binary over pipes
-zig build test-regressions # open-bug tests from PLAN.md (red by design)
+zig build test-regressions # cross-cutting handler tests (also part of `test`)
 zig build check            # validate the advice corpus
+zig build workflows        # workflow trigger/expression consistency
 zig build bench            # verification report (see below)
 zig fmt --check . --exclude tests/fixtures
 ```
@@ -382,15 +384,9 @@ release can be rebuilt exactly from its tag.
 The complete, itemised list — including defects and their proposed fixes — is in
 [`PLAN.md`](PLAN.md). The user-facing summary follows.
 
-- **The doc index is not yet published as a download.** The index workflow uploads it
-  as a build artifact, but no workflow attaches it to a GitHub Release, and the index
-  workflow currently runs only when started manually. Build an index locally (see
-  above) until this is fixed.
 - Only the first `include` path of each project in `data/sources.zon` is used by CI,
   and `exclude` patterns are not applied yet.
 - `docs://{project}/index` returns the whole listing at once (no pagination).
-- `advice://patterns` (without an id) appears in the resource list but cannot be
-  read; use `advice://patterns/P01` … `P12`.
 - `doc_import_status` does not compare the index against the upstream branch's
   newest commit.
 - The `constraints` argument of `recommend_approach` is accepted but ignored.
