@@ -413,8 +413,7 @@ fn sidecarProject(value: std.json.Value, name: []const u8) ?std.json.ObjectMap {
 
 /// `doc_import_status`: what the index currently holds.
 pub fn docImportStatus(ctx: *Context, args: std.json.Value) ToolError!ToolOutcome {
-    _ = args;
-    registry.validate(doc_import_status_input, null) catch return error.InvalidParams;
+    registry.validate(doc_import_status_input, args) catch return error.InvalidParams;
     const gpa = ctx.pool.allocator();
 
     const snapshot = ctx.docs.snapshot();
