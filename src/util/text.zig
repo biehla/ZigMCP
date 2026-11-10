@@ -3,26 +3,27 @@
 const std = @import("std");
 
 /// Splits text into lowercase alphanumeric tokens of at least three characters.
+///
+/// Tokens are accumulated in a growable buffer rather than a fixed array: a
+/// fixed buffer silently dropped everything past its end, so a 200-character
+/// identifier matched as its first 128 (GUIDE-6).
 pub fn tokenize(gpa: std.mem.Allocator, text: []const u8) ![][]const u8 {
     var tokens: std.ArrayList([]const u8) = .empty;
-    var buffer: [128]u8 = undefined;
-    var length: usize = 0;
+    var current: std.ArrayList(u8) = .empty;
+    defer current.deinit(gpa);
 
     for (text) |c| {
         if (std.ascii.isAlphanumeric(c)) {
-            if (length < buffer.len) {
-                buffer[length] = std.ascii.toLower(c);
-                length += 1;
-            }
+            try current.append(gpa, std.ascii.toLower(c));
             continue;
         }
-        if (length >= 3) {
-            try tokens.append(gpa, try gpa.dupe(u8, buffer[0..length]));
+        if (current.items.len >= 3) {
+            try tokens.append(gpa, try gpa.dupe(u8, current.items));
         }
-        length = 0;
+        current.clearRetainingCapacity();
     }
-    if (length >= 3) {
-        try tokens.append(gpa, try gpa.dupe(u8, buffer[0..length]));
+    if (current.items.len >= 3) {
+        try tokens.append(gpa, try gpa.dupe(u8, current.items));
     }
 
     return tokens.toOwnedSlice(gpa);
@@ -64,6 +65,21 @@ test "tokenizer drops short tokens and lowercases" {
     try std.testing.expectEqual(@as(usize, 4), tokens.len);
     try std.testing.expectEqualStrings("repeated", tokens[0]);
     try std.testing.expectEqualStrings("changing", tokens[2]);
+}
+
+test "a token longer than 128 characters is kept whole" {
+    // GUIDE-6: the helper used to buffer 128 bytes and drop the remainder
+    // without a signal, so a 200-character identifier matched as its first 128.
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    var buffer: [200]u8 = undefined;
+    @memset(&buffer, 'a');
+
+    const tokens = try tokenize(gpa, &buffer);
+    try std.testing.expectEqual(@as(usize, 1), tokens.len);
+    try std.testing.expectEqual(@as(usize, 200), tokens[0].len);
 }
 
 test "case-insensitive helpers" {

@@ -113,17 +113,3 @@ test "PROTO-6: advice_lookup rejects concept and question together" {
         tools.adviceLookup(&harness.ctx, .{ .object = args }),
     );
 }
-
-test "GUIDE-6: a long token is not silently truncated" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const gpa = arena.allocator();
-
-    var buffer: [200]u8 = undefined;
-    @memset(&buffer, 'a');
-
-    const tokens = try text_util.tokenize(gpa, &buffer);
-    try std.testing.expectEqual(@as(usize, 1), tokens.len);
-    // The helper buffers 128 bytes and drops the rest without a signal.
-    try std.testing.expectEqual(@as(usize, 200), tokens[0].len);
-}
