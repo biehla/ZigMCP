@@ -291,7 +291,9 @@ fn docsText(ctx: *registry.Context, uri: []const u8) ![]const u8 {
         const project = rest[0 .. rest.len - "/index".len];
         var text: std.ArrayList(u8) = .empty;
         for (0..columnar.count()) |record| {
-            if (!text_util.eqlIgnoreCase(columnar.projectAt(record), project)) continue;
+            // Project keys are exact identifiers (PROTO-13): `Fixture` and
+            // `fixture` are different projects and different URIs.
+            if (!std.mem.eql(u8, columnar.projectAt(record), project)) continue;
             try text.print(gpa, "{s}:{d} {s}\n", .{
                 columnar.pathAt(record),
                 columnar.lines[record],
@@ -307,7 +309,9 @@ fn docsText(ctx: *registry.Context, uri: []const u8) ![]const u8 {
         const project = rest[0..position];
         const symbol = rest[position + marker.len ..];
         for (0..columnar.count()) |record| {
-            if (!text_util.eqlIgnoreCase(columnar.projectAt(record), project)) continue;
+            // Project keys are exact identifiers (PROTO-13): `Fixture` and
+            // `fixture` are different projects and different URIs.
+            if (!std.mem.eql(u8, columnar.projectAt(record), project)) continue;
             if (!text_util.eqlIgnoreCase(columnar.symbolAt(record), symbol)) continue;
             return std.fmt.allocPrint(gpa, "{s}:{d} {s}\n\n{s}\n", .{
                 columnar.pathAt(record),

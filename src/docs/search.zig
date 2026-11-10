@@ -78,7 +78,10 @@ pub fn search(
 
     for (0..index.count()) |record| {
         if (project) |wanted| {
-            if (!text_util.eqlIgnoreCase(index.projectAt(record), wanted)) continue;
+            // Project keys are opaque identifiers: two projects that differ
+            // only in case are two projects, and a case-insensitive filter
+            // silently returned the union (PROTO-13).
+            if (!std.mem.eql(u8, index.projectAt(record), wanted)) continue;
         }
         const score = scoreRecord(index, record, query, tokens);
         if (score <= 0) continue;
@@ -234,6 +237,54 @@ test "a project filter narrows the results" {
     const matches = try search(gpa, &index, "alpha", "mcp-zig", 20);
     try std.testing.expectEqual(@as(usize, 1), matches.len);
     try std.testing.expectEqual(@as(usize, 1), matches[0].record_index);
+}
+
+test "projects differing only in case are not conflated" {
+    // PROTO-13: the filter compared with `eqlIgnoreCase`, so a scoped search
+    // returned records from both `Fixture` and `fixture`.
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    var builder = columnar.Builder.init(gpa);
+    try builder.append(.{
+        .project = "Fixture",
+        .commit = "c1",
+        .path = "A.zig",
+        .line = 1,
+        .kind = .function,
+        .symbol = "a",
+        .container = "",
+        .doc = "alpha docs",
+        .doc_hash = "h1",
+    });
+    try builder.append(.{
+        .project = "fixture",
+        .commit = "c2",
+        .path = "b.zig",
+        .line = 2,
+        .kind = .function,
+        .symbol = "b",
+        .container = "",
+        .doc = "alpha docs",
+        .doc_hash = "h2",
+    });
+    const index = try builder.finish();
+
+    const upper = try search(gpa, &index, "alpha", "Fixture", 20);
+    defer gpa.free(upper);
+    try std.testing.expectEqual(@as(usize, 1), upper.len);
+    try std.testing.expectEqual(@as(usize, 0), upper[0].record_index);
+
+    const lower = try search(gpa, &index, "alpha", "fixture", 20);
+    defer gpa.free(lower);
+    try std.testing.expectEqual(@as(usize, 1), lower.len);
+    try std.testing.expectEqual(@as(usize, 1), lower[0].record_index);
+
+    // Unscoped, both are still found.
+    const all = try search(gpa, &index, "alpha", null, 20);
+    defer gpa.free(all);
+    try std.testing.expectEqual(@as(usize, 2), all.len);
 }
 
 test "the result count is clamped" {

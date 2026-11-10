@@ -337,7 +337,9 @@ pub fn docGet(ctx: *Context, args: std.json.Value) ToolError!ToolOutcome {
 
     var found: ?usize = null;
     for (0..columnar.count()) |record| {
-        if (!text_util.eqlIgnoreCase(columnar.projectAt(record), project)) continue;
+        // Project keys are exact identifiers; only symbols are matched
+        // case-insensitively (PROTO-13).
+        if (!std.mem.eql(u8, columnar.projectAt(record), project)) continue;
         if (!text_util.eqlIgnoreCase(columnar.symbolAt(record), symbol)) continue;
         found = record;
         break;

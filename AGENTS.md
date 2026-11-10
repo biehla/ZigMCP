@@ -225,7 +225,9 @@ wrong type) are `-32602`.
 |`docs://{project}/symbols/{symbol}`|index|One record; exposed as a **resource template** (unbounded space)|
 
 `resources/list` itself carries the **index** cache hint because its contents depend
-on the loaded index. Every listed resource is readable (PROTO-1).
+on the loaded index. Every listed resource is readable (PROTO-1). Project keys in
+`docs://` URIs are exact identifiers — `Fixture` and `fixture` are two projects — while
+symbol paths are matched case-insensitively (PROTO-13).
 
 ### Prompts (sorted by name; one required argument each)
 

@@ -36,12 +36,18 @@ const Harness = struct {
 };
 
 fn startHarness(gpa: std.mem.Allocator) !*Harness {
+    return startHarnessWithIndex(gpa, "");
+}
+
+/// A harness whose doc index holds `jsonl` instead of being empty. The JSONL is
+/// loaded from bytes, so a test never needs a scratch file.
+fn startHarnessWithIndex(gpa: std.mem.Allocator, jsonl: []const u8) !*Harness {
     const harness = try gpa.create(Harness);
     harness.corpus = try corpus_module.load(std.testing.io, gpa, "data/advice");
     harness.matcher = try rules_module.Matcher.init(gpa, &harness.corpus);
 
     const index = try gpa.create(docs_index.Index);
-    index.* = try docs_index.load(gpa, "");
+    index.* = try docs_index.load(gpa, jsonl);
     harness.store = docs_reload.Store.init(gpa, index);
     harness.pool = try pool_module.ArenaPool.init(gpa);
 
@@ -112,4 +118,33 @@ test "PROTO-6: advice_lookup rejects concept and question together" {
         error.InvalidParams,
         tools.adviceLookup(&harness.ctx, .{ .object = args }),
     );
+}
+
+test "PROTO-13: projects differing only in case stay distinct" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const harness = try startHarnessWithIndex(gpa,
+        \\{"project":"Fixture","commit":"c1","path":"A.zig","line":1,"kind":"fn","symbol":"a","container":"","doc":"alpha docs","doc_hash":"h1"}
+        \\{"project":"fixture","commit":"c2","path":"b.zig","line":2,"kind":"fn","symbol":"b","container":"","doc":"alpha docs","doc_hash":"h2"}
+    );
+
+    // A project-scoped URI lists only that project's records: the two keys are
+    // distinct identifiers, not the same project spelled differently.
+    const lower = try resources.read(&harness.ctx, "docs://fixture/index");
+    const lower_text = lower.value.object.get("contents").?.array.items[0].object.get("text").?.string;
+    try std.testing.expectEqualStrings("b.zig:2 b\n", lower_text);
+
+    const upper = try resources.read(&harness.ctx, "docs://Fixture/index");
+    const upper_text = upper.value.object.get("contents").?.array.items[0].object.get("text").?.string;
+    try std.testing.expectEqualStrings("A.zig:1 a\n", upper_text);
+
+    // A project-scoped search does the same.
+    var args: std.json.ObjectMap = .{};
+    try args.put(gpa, "query", .{ .string = "alpha" });
+    try args.put(gpa, "project", .{ .string = "fixture" });
+    const outcome = try tools.docSearch(&harness.ctx, .{ .object = args });
+    const structured = outcome.structured.?.object;
+    try std.testing.expectEqual(@as(i64, 1), structured.get("count").?.integer);
 }
