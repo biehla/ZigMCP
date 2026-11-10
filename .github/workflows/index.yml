@@ -43,8 +43,11 @@ jobs:
         run: |
           while IFS='|' read -r name repo _branch commit _includes _excludes; do
             echo "fetching $name @ $commit"
-            git clone --filter=blob:none --no-checkout "$repo" "upstream/$name"
-            git -C "upstream/$name" checkout --detach "$commit"
+            # CI-7: fetch just the pinned commit, not the branch's history.
+            git init -q "upstream/$name"
+            git -C "upstream/$name" remote add origin "$repo"
+            git -C "upstream/$name" fetch -q --depth 1 origin "$commit"
+            git -C "upstream/$name" checkout -q --detach FETCH_HEAD
           done < upstream/plan.tsv
 
       - name: Download the published index (the previous version)
