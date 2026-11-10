@@ -48,10 +48,10 @@ corpus, so point `ZIGMCP_ADVICE_DIR` or `--advice-dir` at one. An optimised buil
 {
   "mcpServers": {
     "zigmcp": {
-      "command": "/absolute/path/to/ZigMCP/zig-out/bin/zigmcp",
-      "args": ["--index", "/absolute/path/to/index.jsonl"],
+      "command": "/path/to/ZigMCP/zig-out/bin/zigmcp",
+      "args": ["--index", "/path/to/index.jsonl"],
       "env": {
-        "ZIGMCP_ADVICE_DIR": "/absolute/path/to/ZigMCP/data/advice"
+        "ZIGMCP_ADVICE_DIR": "/path/to/ZigMCP/data/advice"
       }
     }
   }
@@ -356,7 +356,7 @@ rebuilt exactly from its tag.
 | `zig build` hangs after an interrupted build | Leftover `zig` processes hold the cache lock; end them and rebuild |
 | The client shows legacy-style responses | It sends no `params._meta`; the server then answers as `2025-06-18` — intended |
 
-## Limitations
+## Known limitations
 
 [`PLAN.md`](PLAN.md) is the canonical, itemised list of known limitations and defects,
 with the options considered and a verification step for each, plus the resolved tables
