@@ -1,26 +1,62 @@
-# PLAN.md — defects, edge cases, limitations, and guideline deviations
+# PLAN.md — the remediation backlog
 
-Status: one open item (§1, CI-13). Twenty-two items were fixed on 2026-11-09 and
-forty-two on 2026-11-10, and five more were closed that day because they were already
-done — the option chosen for each, its commit and its verification are in §13–§33.
-Two more were closed on 2026-11-10 as PROTO-14 and DOC-5; see §34. PROTO-15, DOC-7
-and DOC-8 followed the same day from evaluation feedback; see §35.
-Two sources: a read-through of the tree on 2026-11-09, and a breakage campaign the
-same day that fuzzed the stdio surface and the indexer, profiled the hot paths, and
-inspected a `ReleaseSafe` PE with REA — method, measurements and negative results in
-§12.
-`AGENTS.md` remains the spec of record for behaviour; the accepted gaps are summarised
-in its §14, which this file expands.
+**Status:** one open item — [CI-13](#1-open-items). Every other id is closed, with the
+option chosen, the commit and the check that was run, in [§4](#4-resolved-ledger);
+[§5](#5-batch-log) records how the work was batched.
 
-IDs are stable — reference them in commits (`fix(ci): CI-1`). Each item is one
-sentence of problem plus 2–3 options; "Verify" is the cheapest check that the fix
-worked. §10 maps every id to a regression test, or says which layer must own it.
+This is the canonical backlog. [`AGENTS.md`](AGENTS.md) §14 points here and keeps no
+copy; `AGENTS.md` remains the spec of record for behaviour, so an entry is a gap between
+the tree and that spec. Two sources: a read-through of the tree on 2026-11-09, and a
+breakage campaign the same day that fuzzed the stdio surface and the indexer, profiled
+the hot paths and inspected a `ReleaseSafe` PE with REA — method, measurements and
+negative results in [§3](#3-breakage-campaign-2026-11-09).
+
+**Ids are stable** and commits cite them (`fix(ci): CI-1`, `feat(tools): PROTO-15`). An
+entry states the problem in one sentence, gives 2–3 options, and names the cheapest check
+that the fix worked. [§2](#2-verification) lists the gates and the recipes that check
+performs, and [§2.3](#23-where-each-check-lives) maps an id to the test layer that owns
+it.
+
+*Reorganised on 2026-11-10: the per-chunk sections that were §13–§35 are now one ledger
+([§4](#4-resolved-ledger)) and one batch log ([§5](#5-batch-log)). No id changed; an old
+commit that cites "PLAN §23" is citing a batch that now appears as its rows and its
+batch-log line.*
 
 ---
 
-## 0. How to verify
+## 1. Open items
 
-### Gates (run after every change)
+### CI/CD
+
+**CI-13 — `main` exists but is not the default branch, so `index.yml` ignores the line
+of development.** `index.yml` triggers on `push: branches: [main]` and `bump-master.yml`
+opens its PR with `--base main`; `main` was created on the remote at `1a3704e`, but the
+repository's **default** branch is still
+`autoresearch/data-driven-programming-best-practices-for-build-20261109`. A push to the
+branch work actually lands on therefore never rebuilds the index, and `main` is a
+snapshot rather than the development line the bump PR would merge into.
+
+Options: (a) make `main` the default branch and merge the current default into it;
+(b) read the branch from `${{ github.event.repository.default_branch }}` in both
+workflows; (c) accept dispatch-only for the index and keep `main` as the PR target on
+purpose.
+
+Verify: `gh run list --workflow index.yml` shows a run with `event: push` after a
+`data/sources.zon` change lands on the default branch.
+
+### Closed areas
+
+Nothing else is open. Each area this file has carried — the protocol surface, the server
+runtime, the indexer, index loading and hot reload, guideline deviations, test coverage,
+documentation and packaging, and the environment — is clean, and its evidence is the
+ledger row in [§4](#4-resolved-ledger) rather than an empty section here. New work starts
+from a fresh read-through or a breakage campaign, not from this list.
+
+---
+
+## 2. Verification
+
+### 2.1 Gates
 
 | Command | Proves |
 |---|---|
@@ -30,17 +66,17 @@ worked. §10 maps every id to a regression test, or says which layer must own it
 | `zig build bench` | the server starts, answers every tool, and prints latencies |
 | `zig build test-protocol` | protocol layer alone (fastest signal for wire changes) |
 
-All gates run on this machine (Zig 0.17.1, Windows, 2026-11-09): `test` green,
-`check` green, `workflows` green, `bench` prints startup 18.2 ms, peak RSS 7.6 MB,
-0 tool errors. `test-regressions` is **green**: the red-by-design suite is gone, its
-pure-function tests moved into `registry.zig` and `text.zig`, and the handler tests
-that remain run in `zig build test` as well. See §16 for why builds previously
-produced a 0-byte binary.
+Every gate runs on this machine (Zig 0.17.1, Windows, 2026-11-09): `test` green, `check`
+green, `workflows` green, `bench` prints startup 18.2 ms, peak RSS 7.6 MB, 0 tool errors.
+`test-regressions` is green: the red-by-design suite is gone, its pure-function tests
+moved into `registry.zig` and `text.zig`, and the handler tests that remain run in
+`zig build test` as well. ENV-1 in [§4.6](#46-tests-guidelines-docs-and-environment)
+records why a build once produced a 0-byte binary.
 
-### Recipes
+### 2.2 Recipes
 
-On Windows every `zig-out/bin/<tool>` below is `zig-out/bin/<tool>.exe`, and the
-blocks assume a POSIX shell.
+On Windows every `zig-out/bin/<tool>` below is `zig-out/bin/<tool>.exe`, and the blocks
+assume a POSIX shell.
 
 ```bash
 # wire format: one request per line, response on the next line
@@ -60,7 +96,7 @@ git commit --allow-empty -m x && git push   # push path (CI-1)
 # oversized line (SRV-1): 70 KiB of spaces then EOF — one -32700, then a clean exit
 python -c "print(' '*70000)" | zig-out/bin/zigmcp; echo "exit=$?"
 
-# nesting past the reader buffer (SRV-1; bounds depth, §16): 100k nested arrays
+# nesting past the reader buffer (SRV-1; bounds depth, §3): 100k nested arrays
 python -c "print('{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"x\",\"params\":'+'['*100000+']'*100000+'}')" | zig-out/bin/zigmcp
 ```
 
@@ -83,95 +119,20 @@ printf '%s\n' '{"project":"Fixture","commit":"c1","path":"A.zig","line":1,"kind"
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"docs://fixture/index"}}' | zig-out/bin/zigmcp --index .probe/case.jsonl   # lists one record
 ```
 
----
-
-## 1. CI/CD
-
-- **CI-13 — `main` exists but is not the default branch, so `index.yml` ignores the
-  line of development.** `index.yml` triggers on `push: branches: [main]` and
-  `bump-master.yml` opens its PR with `--base main`; `main` was created on the remote
-  at `1a3704e`, but the repository's **default** branch is still
-  `autoresearch/data-driven-programming-best-practices-for-build-20261109`, so a push
-  to the branch work actually lands on never rebuilds the index, and `main` is a
-  snapshot rather than the development line the bump PR would merge into. Options:
-  (a) make `main` the default branch and merge the current default into it; (b) read
-  the branch from `${{ github.event.repository.default_branch }}` in both workflows;
-  (c) accept dispatch-only for the index and keep `main` as the PR target on purpose.
-  Verify: `gh run list --workflow index.yml` shows a run with `event: push` after a
-  `data/sources.zon` change lands on the default branch.
-
----
-
-## 2. Protocol / MCP surface
-
----
-
-## 3. Server runtime
-
-No open items.
-
----
-
-## 4. Indexer
-
----
-
-## 5. Index loading and hot reload
-
----
-
-## 6. Guideline deviations
-
-Rules being broken are in `AGENTS.md` §5, §11, §12 (code/corpus conventions) and D8
-(table-driven capabilities).
-
-No open items. GUIDE-8 is resolved in §19.
-
----
-
-## 7. Test coverage gaps
-
-No open items: every gap this section listed now has its test. The last two are
-`PROTO-2: doc_import_status rejects unknown arguments` and `PROTO-1: every listed
-resource can be read`, both in `src/regressions_test.zig` (recorded in §16).
-
----
-
-## 8. Documentation and packaging
-
----
-
-## 9. Environment
-
-No open items. The one entry this section held — a build that "succeeded" while
-writing a 0-byte binary because the disk was full — was resolved on 2026-11-09 and is
-recorded in §16. The symptom and its check stay in the readme troubleshooting table.
-
----
-
-## 10. Test coverage map
+### 2.3 Where each check lives
 
 `src/regressions_test.zig` (run as `zig build test-regressions`, and as part of
-`zig build test`) holds the cross-cutting handler tests that need the real corpus
-and a loaded doc index. It is no longer a red-by-design suite: the items it covered
-are fixed (§13). Every closed id now has the test its layer owns, recorded with its
-commit in §13–§33. The one open item, CI-13, has no test layer at all: its check is a
-live dispatch — `gh run list --workflow index.yml` must show a run with `event: push`
-once a `data/sources.zon` change lands on the default branch.
+`zig build test`) holds the cross-cutting handler tests that need the real corpus and a
+loaded doc index. It is no longer a red-by-design suite; every closed id has the test its
+layer owns, named in its [ledger](#4-resolved-ledger) row. CI-13 has no test layer at
+all: its check is a live dispatch, as its entry says.
 
-New tests for a handler can use the `Harness` in `src/regressions_test.zig` — it
-builds a real corpus and an empty index, so a new test is a few lines.
-
-## 11. Suggested order
-
-The queue holds one item: CI-13, the branch the index and bump workflows name while the
-repository's default branch is a different one. Everything else this file listed is
-resolved in §13–§33; new work starts from a fresh read-through or a breakage campaign,
-not from this list.
+A new handler test can use the `Harness` in `src/regressions_test.zig` — it builds a real
+corpus and an empty index, so the test is a few lines.
 
 ---
 
-## 12. Breakage campaign, 2026-11-09
+## 3. Breakage campaign, 2026-11-09
 
 Everything below was executed on this machine: Zig 0.17.1, Windows 10.0.26100, x64,
 `ReleaseSafe` unless a line says otherwise.
@@ -209,352 +170,200 @@ Everything below was executed on this machine: Zig 0.17.1, Windows 10.0.26100, x
 - **Wire robustness.** Duplicate keys, a BOM, raw invalid UTF-8, lone surrogates, NUL
   escapes, `params` of every wrong type, `id` as float/bool/overflowing integer, and
   every wrong-typed tool argument answered `-32700`, `-32600` or `-32602` — the one
-  exception is the known PROTO-2 hole, which answers a successful result.
-  Notifications never produced a reply, and no case crashed: the only process exits
-  were SRV-1's clean stdin failure on lines of 65 536 bytes or more.
+  exception is the known PROTO-2 hole, which answers a successful result. Notifications
+  never produced a reply, and no case crashed: the only process exits were SRV-1's clean
+  stdin failure on lines of 65 536 bytes or more.
 - **Index encoding.** A `doc` holding a raw `0xFF`, a truncated `0xC3` or a `\ud800`
   escape is rejected by the loader, so invalid UTF-8 never reaches the wire; records
   carrying U+0000 and U+001F escapes load and still produce a valid JSON response.
 - **No format-string path.** `docs://{s}/index`, `docs://%/symbols/%s`, a 60 KB URI and
   an empty URI all return `-32602` and no crash.
-- **SRV-4 is unreachable behind SRV-1.** 10 000 nested arrays answer `-32602`;
-  100 000 exceed the reader buffer and hit SRV-1 first, which bounds JSON depth.
+- **SRV-4 is unreachable behind SRV-1.** 10 000 nested arrays answer `-32602`; 100 000
+  exceed the reader buffer and hit SRV-1 first, which bounds JSON depth.
 - **Reload is leak-free.** Twelve swaps alternating 5 000/5 200 records held RSS at
-  7.2–7.8 MB, and a truncated write left the previous index serving (5 200 records,
-  old commit) — REL-4's degradation works.
+  7.2–7.8 MB, and a truncated write left the previous index serving (5 200 records, old
+  commit) — REL-4's degradation works.
 - **Indexer resilience.** 4 MiB doc comments, NUL-only files, empty files and unclosed
-  error sets are all handled; only nesting depth (IDX-8) and declaration count
-  (IDX-9) hurt.
-- **Release dependencies.** `ntdll.dll` (65), `KERNEL32.dll` (1), `CRYPT32.dll` (9),
-  no delay imports — no third-party runtime dependency (D1).
-- **Corpus loading is fail-fast, not fail-open.** A truncated or empty
-  `patterns.zon`, an unknown `.evidence` tag and a missing `rules.zon` each stop
-  start-up with exit 1 and a `file:line` diagnostic, and no handler is ever reached
-  with a broken tree. Parseable-but-invalid corpora are the opposite problem: they
-  serve silently (CI-3).
+  error sets are all handled; only nesting depth (IDX-8) and declaration count (IDX-9)
+  hurt.
+- **Release dependencies.** `ntdll.dll` (65), `KERNEL32.dll` (1), `CRYPT32.dll` (9), no
+  delay imports — no third-party runtime dependency (D1).
+- **Corpus loading is fail-fast, not fail-open.** A truncated or empty `patterns.zon`,
+  an unknown `.evidence` tag and a missing `rules.zon` each stop start-up with exit 1 and
+  a `file:line` diagnostic, and no handler is ever reached with a broken tree.
+  Parseable-but-invalid corpora are the opposite problem: they serve silently (CI-3).
 - **Corpus not embedded.** A pattern name from `patterns.zon` does not appear in the
   binary, confirming CI-8: a release needs `data/advice` beside it.
 
-The drivers and fixture trees lived in `.probe/` (gitignored). The crash and timing
-items have recipes in §0; the rest carry a `Verify:` line naming the exact command or
-tool, and REL-9/REL-10 are single-record edits over the PROTO-13 fixture.
+The drivers and fixture trees lived in `.probe/` (gitignored). The crash and timing items
+have recipes in [§2.2](#22-recipes); the rest carry a `Verify:` line naming the exact
+command or tool, and REL-9/REL-10 are single-record edits over the PROTO-13 fixture.
 
 ---
 
-## 13. Resolved on 2026-11-09
+## 4. Resolved ledger
 
-Twenty-two items, one commit each. "Option" is the letter from the item's own list;
-"Verification" is what was actually run, not what was inspected.
+How to read a row: **Option** is the letter from the item's own list with the decision it
+chose in a phrase, or the decision alone where the item had no list; **Commit** is the
+commit that carries the change, `—` where the entry was closed without one; **Verification**
+is what was actually run, not what was inspected. A `—` commit means the entry was already
+done when the backlog was re-read, and its Verification column is the evidence that closed
+it.
+
+### 4.1 Protocol and the MCP surface
+
+|Id|Option|Commit|Verification|
+|---|---|---|---|
+|PROTO-1|(a) serve the list|`9381888`|handler test: every listed resource reads|
+|PROTO-2|(a) validate the real arguments|`e152999`|handler test: `{"bogus":1}` → `-32602`|
+|PROTO-3|(b) `-32601` plus `data.supportedVersions`|`e9624fb`|protocol test: `initialize` on the current revision names `server/discover` and both supported versions|
+|PROTO-4|(a) implement the notification stream|`e9624fb`|protocol tests: an unknown `logLevel` is `-32602`; a reload failure reaches the client that asked for logs as `notifications/message`|
+|PROTO-5|(a) fold constraint text into the signal tokens|`e9624fb`|regression test: a constraint naming the bottleneck matches R03 while the echoed `signals` stay exactly what the caller sent|
+|PROTO-6|(a) `-32602` when both are present|`6871df4`|handler test|
+|PROTO-7|(a) return `match_count` and `truncated`|`e9624fb`|`advice_lookup` reports both in every result; the truncation marker names the hidden count|
+|PROTO-8|(b) keep rejecting and document|`e9624fb`|protocol test: an array envelope → `-32600` with a null id; MCP has no batching|
+|PROTO-9|(a) accept integral floats|`5c5ccdd`|`registry.zig` test: `20.0` accepted, `20.5` and `1e300` rejected|
+|PROTO-10|(b) cap and append a truncation marker|`e9624fb`|unit test: `appendIndexListing` with a cap of 2 renders two lines plus `truncated: 1 more records`; the policy constant is 5 000|
+|PROTO-11|(a) type-check each echoed value|`5cf1b72`|[§2.2](#22-recipes) mistyped sidecar → all three members absent; unit test|
+|PROTO-12|(a) always emit `structuredContent`|`74691aa`|protocol test: no-match `doc_search`, `doc_get` and `advice_lookup` all carry it|
+|PROTO-13|(a) exact project keys|`e29796a`|[§2.2](#22-recipes) case-colliding index → one record per URI; handler test|
+|PROTO-14|(a) resolve the argument exactly first, then ignoring case and `_` vs `-`, and only when that names one project|`f2e3844`|handler tests: `project: "zig-std"` reaches the `zig_std` records and `doc_get` echoes `ZIG_STD` back; `FIXTURE` over `Fixture`+`fixture` is `isError` with both keys named and no merging; `nope` lists `Known projects: mcp_zig, zig_std`; the PROTO-13 test still passes|
+|PROTO-15|the miss reports the closest stored symbols in the message and a `candidates` array|`8a33da8`|regression test `doc_get: a miss names the stored path-qualified symbols`: `mem.copyForwards` → `candidates[0] == "lib.std.mem.copyForwards"`, and `ArrayList.append` → `lib.std.std.ArrayList`; protocol test: `fixture`/`comments.plain` → `candidates[0] == "lib.std.comments.plain"`|
+
+### 4.2 Server runtime and the wire
+
+|Id|Option|Commit|Verification|
+|---|---|---|---|
+|SRV-1|(a) `-32700`, discard, continue|`8d7cc1d`|protocol test: 70 KiB line → `-32700`, next request answered, exit 0|
+|SRV-2|(a) refuse a non-object result with `-32603`|`e9624fb`|unit test in `src/protocol/response.zig`: a string result is `NonObjectResult` instead of an unchecked `.object`|
+|SRV-3|(a) reply `-32603` when the failure is OOM|`e9624fb`|unit test on `errors.outOfMemory`; the serve loop answers `-32603` from a fresh pool instead of dropping the request|
+|SRV-4|closed as unreachable: the 64 KiB reader cap bounds JSON nesting, and the indexer's own recursion hazard was IDX-8 (`6836304`)|—|the [§2.2](#22-recipes) nesting recipe at the maximum depth a 64 KiB line allows — 32 726 nested arrays in 65 499 bytes — answers `-32602` and exits 0; 10 000 nested arrays do the same|
+|SRV-5|(a) move the free outside the lock|`330386d`|unit test: the last release frees the retired index (the testing allocator would flag a leak) and the store's `retired` list is empty; `zig build test`, `test-regressions` and `bench` all pass|
+|SRV-6|(b) `std.math.cast`, drop the count|`bf0bdf0`|[§2.2](#22-recipes) sidecar recipe exits 0 with no `files_degraded`; unit test|
+|SRV-7|(a) cap the query and return `-32602`|`e9624fb`|regression + protocol tests: a 60 KiB query and a 65-token query are both `-32602`|
+|SRV-8|(a) usage block, exit 2|`173e11a`|protocol test: `--bogus` → exit 2, `Usage: zigmcp`, no Zig error name|
+
+### 4.3 Indexer
+
+|Id|Option|Commit|Verification|
+|---|---|---|---|
+|IDX-1|(a) degrade with a reason|`61d0865`|indexer test: 65 MiB file → rc 0, `files_degraded: 1`, other records intact|
+|IDX-2|(a) strip a trailing `/**` in `matchesInclude`|`aa7021b`|indexer test: `--include 'lib/std/**'` and `--include lib/std` produce identical, non-empty output|
+|IDX-3|(a) cross-check the sidecar count|`6be0038`|indexer test: sidecar 5 vs 2 records → re-indexed; 2 vs 2 → carried over|
+|IDX-4|(a) `doc_get` returns every match|`aa7021b`|regression test: two records sharing `mod.dup` → `matches.len == 2` in `(path, line)` order|
+|IDX-5|(a) replace an invalid byte with U+FFFD before hashing|`feba2d2`|indexer test `invalid UTF-8 in a doc comment is replaced, not emitted as a byte array`: a temp file with 0xFF; the output is valid UTF-8, `doc` is a string with U+FFFD, and `doc_hash` is the SHA-256 of the sanitized text|
+|IDX-6|(a) reject a parent escape, keep a dotfile|`1d0a99a`|indexer unit test `modulePath keeps dotfiles distinct and rejects a parent escape`: `x.zig`/`./x.zig` → `x`, `.hidden.zig` → `.hidden`, `lib/std/mem.zig` → `lib.std.mem`, `../x.zig` and `lib/../x.zig` → `error.PathEscapesRoot`; the golden index is unchanged|
+|IDX-7|(a) keep: error sets are flat by grammar, so a nested declaration is invalid Zig and degrades the file|`4d33172`|indexer test `a nested declaration in an error set degrades the file instead of inventing a member`: exit 0, no `kind:error` record for the nested name, `bad.zig` listed as degraded; the `if`/`struct`/`@import`/string variants were probed too (all exit 0, no records, never a misattributed member)|
+|IDX-8|(a) depth pre-scan, limit 256|`6836304`|indexer test: 2 000 nested parens → rc 0 + degraded reason|
+|IDX-9|(a) a line-start table, binary-searched|`fbc7026`|`lineOf agrees with findLineColumn at every offset` (unit test); the golden index is still byte-identical, and it pins every `line`; Debug ladder 5k/10k/25k = 0.109/0.119/0.296 s (was 1.17/4.63/29.65 s), ReleaseSafe 0.035/0.033/0.071 s|
+
+### 4.4 Index loading and hot reload
+
+|Id|Option|Commit|Verification|
+|---|---|---|---|
+|REL-1|(a) make the poll interval a server option|`4ea4509`|`REL-1: the poll interval is configurable and clamped` (unit test): defaults 1000/60000, an explicit 250 wins for both source kinds, 0 clamps to 100; `zig build test`, `check`, `workflows` and `zig fmt --check` pass|
+|REL-2|(c), plus removing the startup block|`9b19761`|protocol test `REL-2: a black-holed index URL does not block startup`: with `--index http://10.255.255.1/...` the server answers `server/discover`; before the fix the same probe hung (reproduced: still running 3 s after EOF). `zig build test`, `check`, `workflows` and `zig fmt --check` pass|
+|REL-3|(a) strip `file://` into a path|`e9624fb`|unit test: `file:///tmp/i.jsonl` → `/tmp/i.jsonl`, `file:///C:/x` → `C:/x`, neither is a URL|
+|REL-4|(a) expose the load state|`e6e2009`|protocol test: `--index missing.jsonl` → `reload_failed` + `FileNotFound`|
+|REL-5|(a) a `--max-index-bytes` flag|`e9624fb`|unit test: `an artifact larger than the ceiling is rejected` (the golden index, 10-byte limit); CLI accepts the flag|
+|REL-6|(c) local-only sidecar rule, stated in AGENTS.md §5|`8e047c1`|unit test `REL-6: a URL index has no local status sidecar`: `http(s)` paths are remote, a relative path and `file://` are not; `zig build test` passes|
+|REL-7|(b) also compare the metadata-change time|`e9624fb`|the watcher compares `ctime` as well as size and `mtime`, so an equal-size, equal-mtime rewrite is still detected|
+|REL-8|(a) propagate the underlying error|`6eaa06e`|`--index missing.jsonl` → `FileNotFound`, `--index tests` → `IsDir`|
+|REL-9|(a) verify at load|`977695b`|tampered `doc` → `MalformedRecord`; the golden index still loads 25 records|
+|REL-10|(a) reject out-of-order artifacts|`8b965e4`|swapped golden lines → `MalformedRecord`; unit test|
+
+### 4.5 CI/CD, docs and packaging
 
 |Id|Option|Commit|Verification|
 |---|---|---|---|
 |CI-1|(b) drop the `if:`|`f2cf5ec`|`zig build workflows` fails on the pre-fix file (`index.yml:25`) and passes now; actionlint clean|
 |CI-2|(a) rolling `index` release|`80171d2`|`zig build workflows` + actionlint; `gh release view index` after a run (no remote here)|
 |CI-3|(a) add `zig build check`|`b33cb93`|`tests/advice_check_test.zig` (the validator fails closed) plus the `ci.yml` step|
-|PROTO-1|(a) serve the list|`9381888`|handler test: every listed resource reads|
-|PROTO-2|(a) validate the real arguments|`e152999`|handler test: `{"bogus":1}` → `-32602`|
-|PROTO-6|(a) `-32602` when both are present|`6871df4`|handler test|
-|PROTO-9|(a) accept integral floats|`5c5ccdd`|`registry.zig` test: `20.0` accepted, `20.5` and `1e300` rejected|
-|SRV-1|(a) `-32700`, discard, continue|`8d7cc1d`|protocol test: 70 KiB line → `-32700`, next request answered, exit 0|
-|IDX-1|(a) degrade with a reason|`61d0865`|indexer test: 65 MiB file → rc 0, `files_degraded: 1`, other records intact|
-|IDX-3|(a) cross-check the sidecar count|`6be0038`|indexer test: sidecar 5 vs 2 records → re-indexed; 2 vs 2 → carried over|
-|REL-4|(a) expose the load state|`e6e2009`|protocol test: `--index missing.jsonl` → `reload_failed` + `FileNotFound`|
-|SRV-6|(b) `std.math.cast`, drop the count|`bf0bdf0`|§0 sidecar recipe exits 0 with no `files_degraded`; unit test|
-|SRV-8|(a) usage block, exit 2|`173e11a`|protocol test: `--bogus` → exit 2, `Usage: zigmcp`, no Zig error name|
-|IDX-8|(a) depth pre-scan, limit 256|`6836304`|indexer test: 2 000 nested parens → rc 0 + degraded reason|
-|PROTO-11|(a) type-check each echoed value|`5cf1b72`|§0 mistyped sidecar → all three members absent; unit test|
-|PROTO-12|(a) always emit `structuredContent`|`74691aa`|protocol test: no-match `doc_search`, `doc_get` and `advice_lookup` all carry it|
-|PROTO-13|(a) exact project keys|`e29796a`|§0 case-colliding index → one record per URI; handler test|
-|REL-8|(a) propagate the underlying error|`6eaa06e`|`--index missing.jsonl` → `FileNotFound`, `--index tests` → `IsDir`|
-|REL-9|(a) verify at load|`977695b`|tampered `doc` → `MalformedRecord`; the golden index still loads 25 records|
-|REL-10|(a) reject out-of-order artifacts|`8b965e4`|swapped golden lines → `MalformedRecord`; unit test|
+|CI-4|(a)+(b) one parser over the ZON AST, and honour `exclude`|`c4994bc`|indexer test `an --exclude pattern removes matching files from the index` (bare prefix vs `**`, one run per form); CLI check: the fixture's two `lib/std/nested/container.zig` records vanish under `--exclude lib/std/nested` and no other record changes|
+|CI-5|(a)+(b) emit every include and exclude from `data/sources.zon`|`c4994bc`|`src/util/sources.zig` unit test parses a reformatted, one-line, no-scope ZON file and gets every include and exclude; `zig build plan-sources` prints both real sources; `zig build test`, `check`, `workflows`, `zig fmt` and actionlint 1.7.7 pass|
+|CI-6|(a) put the run id in the branch name|`a02c46b`|branch is `bump/upstream-<date>-${GITHUB_RUN_ID}`, unique per run; `zig build workflows` and the pinned actionlint pass. The live twice-a-day rerun is a CI-only check (the layer [§2.3](#23-where-each-check-lives) names)|
+|CI-7|(c) fetch exactly the pinned commit|`93c6094`|the form `git init` + `remote add` + `fetch --depth 1 origin <sha>` + `checkout --detach FETCH_HEAD` was run against GitHub and resolved `FETCH_HEAD` to the pinned SHA; `zig build workflows` and the pinned actionlint pass. A before/after run-time comparison is a CI-only check|
+|CI-8|(a) ship the corpus in the tarball|`7db2cee`|local smoke: tar the ReleaseSafe binary + `data/advice`, unpack into an empty directory, run with EOF → exit 0 with all five corpus files present; `zig build workflows`, `zig fmt` and actionlint 1.7.7 pass|
+|CI-9|(a) node24 majors, plus (c) for `setup-zig`|`f7fb720`|each action.yml declares `runs.using`: `checkout@v5`, `upload-artifact@v6`, `setup-go@v6`, `action-gh-release@v3` = node24; `setup-zig@v2` = node20 (upstream, no v3). `zig build workflows`, `zig fmt --check` and actionlint 1.7.7 pass|
+|CI-10|(a) stop pre-seeding `generated/`|`e9dabc4`|`index.yml` "Build the index" → "Merge and sort" → "Merge the status sidecars": pre-fix aborts with `JSONDecodeError` on the empty `index.status.json` (run `42801043827`'s exact failure), post-fix exits 0 with two projects and two records|
+|CI-11|(a) run `zig fetch --save` inside `scratch`|`e9dabc4`|`bump-master.yml` "Re-resolve the tracked branches": pre-fix aborts with `no dependency block` (run `42800551557`'s exact failure), post-fix writes both pins with the resolved commit and `scratch/build.zig.zon` carries the dependency|
+|CI-12|(a) `# shellcheck disable=SC2016`, the backticks being literal markdown|`e9dabc4`|`actionlint -shellcheck shellcheck 0.11.0`: pre-fix reports the same three `SC2016` findings on `release.yml:51` and exits 1, post-fix exits 0; the generated `release-notes.md` is byte-identical before and after|
+|DOC-1|(a) add `lsp.json` to `.paths`|`891a0a3`|`build.zig.zon` ships `lsp.json` and `client-config.json`; `zig build test` still passes|
+|DOC-2|(a) one snippet in a file both read|`891a0a3`|`DOC-2: the readme embeds client-config.json verbatim` (unit test); `release.yml` cats the same file into the release body|
+|DOC-3|(a) this file is canonical|`891a0a3`|covered by GUIDE-8's test; §14 of `AGENTS.md` and the readme's Known limitations are pointers|
+|DOC-4|(b) manifest plus version resource|`e9c8057`|pefile on the Debug and ReleaseSafe images: resource types `RT_MANIFEST` + `RT_VERSION`, with `CompanyName`/`FileDescription`/`FileVersion`/`ProductName`/`ProductVersion` = ZigMCP / ZigMCP MCP server / 0.1.0 / ZigMCP / 0.1.0; `zig build test` passes|
+|DOC-5|(a) state "documentation comments only" in the tool descriptions and the readme|`f2e3844`|`tools/list` description text from a live server; readme "The doc index" paragraph|
+|DOC-6|add `LICENSE` (MIT), `build.zig.zon` `paths`, and the release tarball copy|`f2e3844`|`head -1 LICENSE`; the `paths` entry in `build.zig.zon`; the packaging step copies it into `dist/pkg`|
+|DOC-7|examples and descriptions use the stored spelling|`85d4871`|readme `doc_get` example and record example carry `lib.std.mem.copyForwards`; `tools/list` descriptions name `///`, `//!` and plain `//`; `server/discover` instructions state the rule|
+|DOC-8|document the per-poll re-download|`85d4871`|readme "How updates land" names the full re-download and the local-file alternative|
+
+The last check for CI-10, CI-11 and CI-12 is a live dispatch after the push: the replica
+proves the shell logic, not GitHub's environment.
+
+### 4.6 Tests, guidelines, docs and environment
+
+|Id|Option|Commit|Verification|
+|---|---|---|---|
+|GUIDE-1|(a) add the `//!` headers|`20784b3`|`src/root.zig` lint test names every headerless `src/**`/`tools/**` file (both tools before the fix) and passes after|
+|GUIDE-2|(a) a `handler` in `PromptSpec`/`ResourceSpec` (and `cache` in resources)|`20784b3`|regression tests: every prompt spec dispatches through its handler, both resource families read through the table|
+|GUIDE-3|(a) one shared `src/advice/schema.zig` imported as the `advice_schema` module|`20784b3`|`zig build check` + `zig build bench` compile both tools against it; one `const Pattern = struct` left in `src` and `tools`; `corpus.zig` pins type identity at comptime|
+|GUIDE-4|(a) cap at 4 KiB and return `-32602`|`e9624fb`|`registry.zig` test: 4 KiB accepted, 4 KiB + 1 rejected, 64 array items accepted, 65 rejected, 4 nesting levels accepted, 5 rejected|
 |GUIDE-5|(a) `null` means `{}`|`b0eb235`|`registry.zig` test: a required field is rejected for absent arguments|
 |GUIDE-6|(b) growable token buffer|`94b0dd3`|`text.zig` test: a 200-character token is kept whole|
+|GUIDE-7|closed: CI-3 wired `zig build check` in, so the validator runs where the claim says it does|—|`.github/workflows/ci.yml`: `- name: Validate the advice corpus` → `run: zig build check`, in both the blocking and the canary job|
+|GUIDE-8|(a) this file is canonical and the others link to it|`891a0a3`|`GUIDE-8: the limitation lists live only in PLAN.md` (unit test): neither section restates the backlog|
+|TEST-1|dropped as stale: already covered|—|`tests/protocol_test.zig`: `an oversized line is a parse error and the server keeps serving`|
+|TEST-2|closed by IDX-4|`aa7021b`|`IDX-4: doc_get returns every record sharing a symbol`|
+|TEST-3|closed: the test exists|—|`src/regressions_test.zig`: `PROTO-2: doc_import_status rejects unknown arguments`|
+|TEST-4|closed: the test exists|—|`src/regressions_test.zig`: `PROTO-1: every listed resource can be read`|
+|TEST-5|dropped as stale: already covered|—|`ci.yml` runs `zig build workflows` and `go run …/actionlint@v1.7.7` in both jobs|
+|TEST-6|the `--include` half; `--previous`/`--status` were already covered|`aa7021b`|`an --include glob selects the same files as its directory prefix`; `a truncated --previous index is not reused` already asserts `skipped` and the derived `.status.json`|
+|ENV-1|resolved on 2026-11-09 — the disk was full, not the toolchain|—|`zig build test` exits 0 and `zig-out/bin/zigmcp.exe` is non-zero; the symptom and its check live in the readme troubleshooting table|
 
-Two items changed shape while being fixed, both recorded in `AGENTS.md`:
+Two entries changed shape while being fixed, both recorded in `AGENTS.md`:
 
 - **PROTO-12** adds `found` to `doc_get`'s output schema and makes the record fields
-  optional. A no-match result cannot satisfy a schema whose every member is required,
-  so the alternative was to stop advertising the schema.
+  optional. A no-match result cannot satisfy a schema whose every member is required, so
+  the alternative was to stop advertising the schema.
 - **REL-10**'s test exposed a pre-existing leak: `load`'s error path destroyed the
   `ArenaAllocator` struct without freeing its pages, so every rejected artifact leaked
   its partial index. Fixed in the same commit.
 
-`CI-9` was added during the pass: the scoop-installed actionlint (1.17.1) reports that
-every `uses:` in the tree runs on a deprecated node20 runtime. `ci.yml` pins the older
-v1.7.7, which does not report it, so the gate stays green while the deprecation is
-tracked rather than silently ignored.
+**CI-9** was added during the first pass, not found by it: the scoop-installed actionlint
+(1.17.1) reports that every `uses:` in the tree runs on a deprecated node20 runtime, and
+`ci.yml` pins the older v1.7.7, which does not report it. The gate stays green while the
+deprecation is tracked rather than silently ignored.
 
-## 14. Resolved on 2026-11-10
+---
 
-Three items, one commit (`20784b3`): the schema module, the table dispatch and the
-module headers touch the same three tools and the same two docs, so splitting them
-would have meant staging halves of one file.
+## 5. Batch log
 
-|Id|Option|Commit|Verification|
-|---|---|---|---|
-|GUIDE-3|(a) one shared `src/advice/schema.zig` imported as the `advice_schema` module|`20784b3`|`zig build check` + `zig build bench` compile both tools against it; `grep -n "const Pattern = struct" src tools` prints one line; `corpus.zig` pins type identity at comptime|
-|GUIDE-2|(a) a `handler` in `PromptSpec`/`ResourceSpec` (and `cache` in resources)|`20784b3`|regression tests: every prompt spec dispatches through its handler, both resource families read through the table|
-|GUIDE-1|(a) add the `//!` headers|`20784b3`|`src/root.zig` lint test names every headerless `src/**`/`tools/**` file (both tools before the fix) and passes after|
+A batch is a commit (or a pair) that closed several ids at once, and a sync commit that
+moved the resolved tables. Each row says what it carried and why those items shared a
+commit; the ids themselves are in [§4](#4-resolved-ledger), with their commits.
 
-## 15. Resolved on 2026-11-10, second chunk
-
-Four items plus two stale entries, one commit (`aa7021b`): the `--include` glob and
-`doc_get`'s duplicate handling are two independent defects, but their tests, their
-doc rows and their `PLAN.md` deletions overlap, so they landed together.
-
-|Id|Option|Commit|Verification|
-|---|---|---|---|
-|IDX-2|(a) strip a trailing `/**` in `matchesInclude`|`aa7021b`|indexer test: `--include 'lib/std/**'` and `--include lib/std` produce identical, non-empty output|
-|IDX-4|(a) `doc_get` returns every match|`aa7021b`|regression test: two records sharing `mod.dup` → `matches.len == 2` in `(path, line)` order|
-|TEST-2|— closed by IDX-4|`aa7021b`|`IDX-4: doc_get returns every record sharing a symbol`|
-|TEST-6|`--include` half; `--previous`/`--status` were already covered|`aa7021b`|`an --include glob selects the same files as its directory prefix`; `a truncated --previous index is not reused` already asserts `skipped` and the derived `.status.json`|
-|TEST-1|already covered; removed as stale|—|`tests/protocol_test.zig`: `an oversized line is a parse error and the server keeps serving`|
-|TEST-5|already covered; removed as stale|—|`ci.yml` runs `zig build workflows` and `go run …/actionlint@v1.7.7` in both jobs|
-
-## 16. Closed as already done, 2026-11-10
-
-No code change: each item below was already finished when the backlog was re-read,
-either by an earlier commit or by construction. They were deleted from §1–§10 instead
-of being left as phantom tasks; the evidence is what was checked, not assumed.
-
-|Id|Why it is no longer a task|Evidence|
+|Date|Commit(s)|What it carried, and why together|
 |---|---|---|
-|SRV-4|Not reachable: the 64 KiB reader cap bounds JSON nesting, and the indexer's own recursion hazard was IDX-8 (`6836304`)|the §0 nesting recipe at the maximum depth a 64 KiB line allows — 32 726 nested arrays in 65 499 bytes — answers `-32602` and exits 0; 10 000 nested arrays do the same|
-|GUIDE-7|CI-3 wired `zig build check` in, so the validator runs where the claim in §9 says it does|`.github/workflows/ci.yml`: `- name: Validate the advice corpus` → `run: zig build check`, in both the blocking and the canary job|
-|TEST-3|The test exists|`src/regressions_test.zig`: `PROTO-2: doc_import_status rejects unknown arguments`|
-|TEST-4|The test exists|`src/regressions_test.zig`: `PROTO-1: every listed resource can be read`|
-|ENV-1|Resolved on 2026-11-09 — the disk was full, not the toolchain; the symptom and its check live in the readme troubleshooting table|`zig build test` exits 0 and `zig-out/bin/zigmcp.exe` is non-zero|
-
-## 17. Resolved on 2026-11-10, third chunk
-
-Thirteen items, one commit (`e9624fb`): the protocol surface, the input bounds, the
-reload predicates and the index ceiling all landed in the same tree — their tests and
-their `PLAN.md` deletions overlap, so they share a commit.
-
-|Id|Option|Commit|Verification|
-|---|---|---|---|
-|PROTO-3|(b) `-32601` plus `data.supportedVersions`|`e9624fb`|protocol test: `initialize` on the current revision names `server/discover` and both supported versions|
-|PROTO-4|(a) implement the notification stream|`e9624fb`|protocol tests: an unknown `logLevel` is `-32602`; a reload failure reaches the client that asked for logs as `notifications/message`|
-|PROTO-5|(a) fold constraint text into the signal tokens|`e9624fb`|regression test: a constraint naming the bottleneck matches R03 while the echoed `signals` stay exactly what the caller sent|
-|PROTO-7|(a) return `match_count` and `truncated`|`e9624fb`|`advice_lookup` reports both in every result; the truncation marker names the hidden count|
-|PROTO-8|(b) keep rejecting and document|`e9624fb`|protocol test: an array envelope → `-32600` with a null id; MCP has no batching|
-|PROTO-10|(b) cap and append a truncation marker|`e9624fb`|unit test: `appendIndexListing` with a cap of 2 renders two lines plus `truncated: 1 more records`; the policy constant is 5 000|
-|SRV-2|(a) refuse a non-object result with `-32603`|`e9624fb`|unit test in `src/protocol/response.zig`: a string result is `NonObjectResult` instead of an unchecked `.object`|
-|SRV-3|(a) reply `-32603` when the failure is OOM|`e9624fb`|unit test on `errors.outOfMemory`; the serve loop answers `-32603` from a fresh pool instead of dropping the request|
-|SRV-7|(a) cap the query and return `-32602`|`e9624fb`|regression + protocol tests: a 60 KiB query and a 65-token query are both `-32602`|
-|GUIDE-4|(a) cap at 4 KiB and return `-32602`|`e9624fb`|`registry.zig` test: 4 KiB accepted, 4 KiB + 1 rejected, 64 array items accepted, 65 rejected, 4 nesting levels accepted, 5 rejected|
-|REL-3|(a) strip `file://` into a path|`e9624fb`|unit test: `file:///tmp/i.jsonl` → `/tmp/i.jsonl`, `file:///C:/x` → `C:/x`, neither is a URL|
-|REL-5|(a) a `--max-index-bytes` flag|`e9624fb`|unit test: `an artifact larger than the ceiling is rejected` (the golden index, 10-byte limit); CLI accepts the flag|
-|REL-7|(b) also compare the metadata-change time|`e9624fb`|the watcher compares `ctime` as well as size and `mtime`, so an equal-size, equal-mtime rewrite is still detected|
-
-## 18. Resolved on 2026-11-10, fourth chunk
-
-One item, one commit: `reclaimLocked` freed an index's arena while holding the
-store's spin lock, so readers spun for the whole free. The retired list is now
-detached under the lock and freed after unlocking.
-
-|Id|Option|Commit|Verification|
-|---|---|---|---|
-|SRV-5|(a) move the free outside the lock|`330386d`|unit test: the last release frees the retired index (the testing allocator would flag a leak) and the store's `retired` list is empty; `zig build test`, `test-regressions` and `bench` all pass|
-
-## 19. Resolved on 2026-11-10, fifth chunk
-
-Four documentation/packaging items, one commit (`891a0a3`): a canonical client
-snippet and a canonical backlog. They share a theme — a second copy that drifts —
-so they landed together, with a test per copy.
-
-|Id|Option|Commit|Verification|
-|---|---|---|---|
-|DOC-1|(a) add `lsp.json` to `.paths`|`891a0a3`|`build.zig.zon` ships `lsp.json` and `client-config.json`; `zig build test` still passes|
-|DOC-2|(a) one snippet in a file both read|`891a0a3`|`DOC-2: the readme embeds client-config.json verbatim` (unit test); `release.yml` cats the same file into the release body|
-|DOC-3|(a) this file is canonical|`891a0a3`|covered by GUIDE-8's test; §14 and the readme's Known limitations are pointers|
-|GUIDE-8|(a) this file is canonical and the others link to it|`891a0a3`|`GUIDE-8: the limitation lists live only in PLAN.md` (unit test): neither section restates the backlog|
-
-## 20. Resolved on 2026-11-10, sixth chunk
-
-Two CI items, one commit (`c4994bc`): the workflow-local copies of the
-`data/sources.zon` parser are gone, replaced by one parser over the ZON AST, and
-the indexer finally honours the `exclude` scope it was given.
-
-|Id|Option|Commit|Verification|
-|---|---|---|---|
-|CI-4|(a)+(b)|`c4994bc`|indexer test `an --exclude pattern removes matching files from the index` (bare prefix vs `**`, one run per form); CLI check: the fixture's two `lib/std/nested/container.zig` records vanish under `--exclude lib/std/nested` and no other record changes|
-|CI-5|(a)+(b)|`c4994bc`|`src/util/sources.zig` unit test parses a reformatted, one-line, no-scope ZON file and gets every include and exclude; `zig build plan-sources` prints both real sources; `zig build test`, `check`, `workflows`, `zig fmt` and actionlint 1.7.7 pass|
-
-## 21. Resolved on 2026-11-10, seventh chunk
-
-One indexer item, one commit (`fbc7026`): record line numbers no longer rescan
-from byte 0. `tools/line_table.zig` records the line starts once per file and
-binary-searches them, which turned a clean n² ladder into a linear one.
-
-|Id|Option|Commit|Verification|
-|---|---|---|---|
-|IDX-9|(a)|`fbc7026`|`lineOf agrees with findLineColumn at every offset` (unit test); the golden index is still byte-identical, and it pins every `line`; Debug ladder 5k/10k/25k = 0.109/0.119/0.296 s (was 1.17/4.63/29.65 s), ReleaseSafe 0.035/0.033/0.071 s|
-
-## 22. Resolved on 2026-11-10, eighth chunk
-
-One indexer item, one commit (`feba2d2`): invalid UTF-8 in a doc comment no
-longer turns `doc` into a byte array that the loader rejects.
-
-|Id|Option|Commit|Verification|
-|---|---|---|---|
-|IDX-5|(a)|`feba2d2`|indexer test `invalid UTF-8 in a doc comment is replaced, not emitted as a byte array`: a temp file with 0xFF; the output is valid UTF-8, `doc` is a string with U+FFFD, and `doc_hash` is the SHA-256 of the sanitized text|
-
-## 23. Resolved on 2026-11-10, ninth chunk
-
-One indexer item, one commit (`1d0a99a`): `modulePath` no longer strips every
-leading dot, so a parent path cannot collapse onto a sibling's symbol and a
-dotfile keeps its name.
-
-|Id|Option|Commit|Verification|
-|---|---|---|---|
-|IDX-6|(a)|`1d0a99a`|indexer unit test `modulePath keeps dotfiles distinct and rejects a parent escape`: `x.zig`/`./x.zig` → `x`, `.hidden.zig` → `.hidden`, `lib/std/mem.zig` → `lib.std.mem`, `../x.zig` and `lib/../x.zig` → `error.PathEscapesRoot`; the golden index is unchanged|
-
-## 24. Resolved on 2026-11-10, tenth chunk
-
-One indexer item, one commit (`4d33172`), resolved with option (a): error sets are
-flat by grammar, so `handleErrorSet` only ever receives a valid set. A nested
-declaration is invalid Zig; the parser recovers it and the file is degraded. The new
-test pins that no error member is invented.
-
-|Id|Option|Commit|Verification|
-|---|---|---|---|
-|IDX-7|(a) keep|`4d33172`|indexer test `a nested declaration in an error set degrades the file instead of inventing a member`: exit 0, no `kind:error` record for the nested name, `bad.zig` listed as degraded; the `if`/`struct`/`@import`/string variants were probed too (all exit 0, no records, never a misattributed member)|
-
-## 25. Resolved on 2026-11-10, eleventh chunk
-
-One CI item, one commit (`7db2cee`): the release tarball now contains the binary
-and the advice corpus it loads at startup, and the raw-binary name no longer depends
-on the Unix binary having an extension.
-
-|Id|Option|Commit|Verification|
-|---|---|---|---|
-|CI-8|(a)|`7db2cee`|local smoke: tar the ReleaseSafe binary + `data/advice`, unpack into an empty directory, run with EOF → exit 0 with all five corpus files present; `zig build workflows`, `zig fmt` and actionlint 1.7.7 pass|
-
-## 26. Resolved on 2026-11-10, twelfth chunk
-
-One CI item, one commit (`f7fb720`): the actions moved to their node24 majors.
-`mlugg/setup-zig@v2` is the one remaining node20 action — upstream's latest tag is
-v2.2.1 and no node24 release exists — so it is kept and documented (option c for
-that one).
-
-|Id|Option|Commit|Verification|
-|---|---|---|---|
-|CI-9|(a), plus (c) for `setup-zig`|`f7fb720`|each action.yml declares `runs.using`: `checkout@v5`, `upload-artifact@v6`, `setup-go@v6`, `action-gh-release@v3` = node24; `setup-zig@v2` = node20 (upstream, no v3). `zig build workflows`, `zig fmt --check` and actionlint 1.7.7 pass|
-
-## 27. Resolved on 2026-11-10, thirteenth chunk
-
-One CI item, one commit (`a02c46b`): the bump branch carries the run id, so a second
-run the same day cannot collide with the first run's branch. The diff gate runs
-before the branch, so a no-op rerun still creates nothing.
-
-|Id|Option|Commit|Verification|
-|---|---|---|---|
-|CI-6|(a)|`a02c46b`|branch is `bump/upstream-<date>-${GITHUB_RUN_ID}`, unique per run; `zig build workflows` and the pinned actionlint pass. The live twice-a-day rerun is a CI-only check (the layer §10 named)|
-
-## 28. Resolved on 2026-11-10, fourteenth chunk
-
-One limitation, one commit (`4ea4509`): a remote index is still re-fetched on every
-poll (the stdlib client has no conditional GET), but the cadence is now a server option
-instead of a constant, so its bandwidth is the operator's call.
-
-|Id|Option|Commit|Verification|
-|---|---|---|---|
-|REL-1|(a)|`4ea4509`|`REL-1: the poll interval is configurable and clamped` (unit test): defaults 1000/60000, an explicit 250 wins for both source kinds, 0 clamps to 100; `zig build test`, `check`, `workflows` and `zig fmt --check` pass|
-
-## 29. Resolved on 2026-11-10, fifteenth chunk
-
-One limitation, one commit (`9b19761`): a remote index is no longer fetched before
-the server starts. The stdlib HTTP client exposes no request timeout, so a black-holed
-origin blocked `main` and stdin EOF could not stop it. The watcher now owns the fetch
-and polls immediately. The residue — a fetch still in flight keeps the process alive
-until it is killed — is option (c), documented in AGENTS.md §8.
-
-|Id|Option|Commit|Verification|
-|---|---|---|---|
-|REL-2|(c), plus removing the startup block|`9b19761`|protocol test `REL-2: a black-holed index URL does not block startup`: with `--index http://10.255.255.1/...` the server answers `server/discover`; before the fix the same probe hung (reproduced: still running 3 s after EOF). `zig build test`, `check`, `workflows` and `zig fmt --check` pass|
-
-## 30. Resolved on 2026-11-10, sixteenth chunk
-
-One packaging item, one commit (`e9c8057`): the Windows binary carries a manifest
-(asInvoker, supported OS) and a version resource, so Explorer shows a product and
-version and Windows applies no compatibility heuristics.
-
-|Id|Option|Commit|Verification|
-|---|---|---|---|
-|DOC-4|(b)|`e9c8057`|pefile on the Debug and ReleaseSafe images: resource types `RT_MANIFEST` + `RT_VERSION`, with `CompanyName`/`FileDescription`/`FileVersion`/`ProductName`/`ProductVersion` = ZigMCP / ZigMCP MCP server / 0.1.0 / ZigMCP / 0.1.0; `zig build test` passes|
-
-## 31. Resolved on 2026-11-10, seventeenth chunk
-
-One limitation, one commit (`8e047c1`), resolved with option (c): a remote index has
-no status sidecar, so `doc_import_status` omits its degraded counts. Fetching a remote
-sidecar would also require the publisher to ship one; the local-only rule stays stated
-in AGENTS.md §5.
-
-|Id|Option|Commit|Verification|
-|---|---|---|---|
-|REL-6|(c)|`8e047c1`|unit test `REL-6: a URL index has no local status sidecar`: `http(s)` paths are remote, a relative path and `file://` are not; `zig build test` passes|
-
-## 32. Resolved on 2026-11-10, eighteenth chunk
-
-One CI item, one commit (`93c6094`): both workflows fetch exactly the pinned commit
-instead of cloning the branch and checking the pin out, so a runner downloads no
-history it will not use.
-
-|Id|Option|Commit|Verification|
-|---|---|---|---|
-|CI-7|(c)|`93c6094`|the form `git init` + `remote add` + `fetch --depth 1 origin <sha>` + `checkout --detach FETCH_HEAD` was run against GitHub and resolved `FETCH_HEAD` to the pinned SHA; `zig build workflows` and the pinned actionlint pass. A before/after run-time comparison is a CI-only check|
-
-## 33. Resolved on 2026-11-10, nineteenth chunk
-
-Three CI items, one code commit (`e9dabc4`), recorded here in the follow-up. All three
-were found by the first dispatches of workflows that had never run, so none was ever
-listed in §1–§10 and nothing was deleted — the runs are the evidence, not a source
-read. Each was reproduced by extracting the failing step's `run:` body from the YAML
-and executing it in a replica tree with stub `zig`/`python3` binaries that reproduce
-the real ones' effects.
-
-|Id|Option|Commit|Verification|
-|---|---|---|---|
-|CI-10|(a) stop pre-seeding `generated/`|`e9dabc4`|`index.yml` "Build the index" → "Merge and sort" → "Merge the status sidecars": pre-fix aborts with `JSONDecodeError` on the empty `index.status.json` (run `42801043827`'s exact failure), post-fix exits 0 with two projects and two records|
-|CI-11|(a) run `zig fetch --save` inside `scratch`|`e9dabc4`|`bump-master.yml` "Re-resolve the tracked branches": pre-fix aborts with `no dependency block` (run `42800551557`'s exact failure), post-fix writes both pins with the resolved commit and `scratch/build.zig.zon` carries the dependency|
-|CI-12|(a) `# shellcheck disable=SC2016`, the backticks being literal markdown|`e9dabc4`|`actionlint -shellcheck shellcheck 0.11.0`: pre-fix reports the same three `SC2016` findings on `release.yml:51` and exits 1, post-fix exits 0; the generated `release-notes.md` is byte-identical before and after|
-
-The last check for each is a live dispatch after the push: the replica proves the
-shell logic, not GitHub's environment.
-
-## 34. Resolved on 2026-11-10, reviewer suggestions
-
-Two protocol/doc items and a packaging gap, one commit (`f2e3844`). An external review
-of the published repository found that the doc tools rejected a project spelling that
-differed by case or by `_` vs `-` with an unexplained "nothing matched", and that the
-same tools promised "the full documentation" of a symbol while a record holds only its
-comment text. The same review noticed the repository had no license file at all, which
-is packaging rather than a defect, so it landed with the docs commit that updates the
-tool descriptions.
-
-|Id|Option|Commit|Verification|
-|---|---|---|---|
-|PROTO-14|(a) resolve the argument exactly first, then ignoring case and `_` vs `-`, and only when that names one project|`f2e3844`|handler tests: `project: "zig-std"` reaches the `zig_std` records and `doc_get` echoes `ZIG_STD` back; `FIXTURE` over `Fixture`+`fixture` is `isError` with both keys named and no merging; `nope` lists `Known projects: mcp_zig, zig_std`; the PROTO-13 test still passes|
-|DOC-5|(a) state "documentation comments only" in the tool descriptions and the readme|`f2e3844`|`tools/list` description text from a live server; readme "The doc index" paragraph|
-|DOC-6|add `LICENSE` (MIT), `build.zig.zon` `paths`, and the release tarball copy|`f2e3844`|`head -1 LICENSE`; `grep '"LICENSE"' build.zig.zon`; the packaging step copies it into `dist/pkg`|
-
-## 35. Resolved on 2026-11-10, evaluation feedback
-
-`TODO.md` recorded an evaluation that asked `doc_get` for `mem.copyForwards` — the
-readme's own example — and got `found:false`, because the index stores
-`lib.std.mem.copyForwards`. The tool now answers a miss with the closest stored
-symbols, and every example and description uses the spelling the indexer produces. The
-URL-index cost (a full re-download per poll) is documented; the transport is unchanged.
-Two commits: the behaviour change (`8a33da8`) and the docs that follow it (`85d4871`).
-
-|Id|Option|Commit|Verification|
-|---|---|---|---|
-|PROTO-15|the miss reports the closest stored symbols in the message and a `candidates` array|`8a33da8`|regression test `doc_get: a miss names the stored path-qualified symbols`: `mem.copyForwards` → `candidates[0] == "lib.std.mem.copyForwards"`, and `ArrayList.append` → `lib.std.std.ArrayList`; protocol test: `fixture`/`comments.plain` → `candidates[0] == "lib.std.comments.plain"`|
-|DOC-7|examples and descriptions use the stored spelling|`85d4871`|readme `doc_get` example and record example carry `lib.std.mem.copyForwards`; `tools/list` descriptions name `///`, `//!` and plain `//`; `server/discover` instructions state the rule|
-|DOC-8|document the per-poll re-download|`85d4871`|readme "How updates land" names the full re-download and the local-file alternative|
-
-
-
-
+|2026-11-09|22 commits|The first pass, one commit per item: each fix's test and its pending deletion were reviewable on their own|
+|2026-11-09|—|Five entries were already done when the backlog was re-read; deleted rather than left as phantom tasks (§4 rows with no commit)|
+|2026-11-10|`20784b3`|Schema module, table dispatch and module headers: three items touch the same three tools and the same two docs, so splitting would have meant staging halves of one file|
+|2026-11-10|`aa7021b`|The `--include` glob and `doc_get`'s duplicate handling are independent defects, but their tests, their doc rows and their deletions overlap|
+|2026-11-10|`e9624fb`|Thirteen items: the protocol surface, the input bounds, the reload predicates and the index ceiling all landed in the same tree, with overlapping tests and deletions|
+|2026-11-10|`330386d`|`reclaimLocked` freed an index's arena while holding the lock, so readers spun for the whole free; the retired list is now detached under the lock and freed after unlocking|
+|2026-11-10|`891a0a3`|Four documentation/packaging items sharing one theme — a second copy that drifts — each with a test per copy|
+|2026-11-10|`c4994bc`|The workflow-local copies of the `data/sources.zon` parser, replaced by one parser over the ZON AST, and the `exclude` scope the indexer ignored|
+|2026-11-10|`fbc7026`|Record line numbers no longer rescan from byte 0; `tools/line_table.zig` records the line starts once per file and binary-searches them|
+|2026-11-10|`feba2d2`|Invalid UTF-8 in a doc comment no longer turns `doc` into a byte array the loader rejects|
+|2026-11-10|`1d0a99a`|`modulePath` no longer strips every leading dot, so a parent path cannot collapse onto a sibling's symbol and a dotfile keeps its name|
+|2026-11-10|`4d33172`|An error set was kept as option (a) rather than made tolerant: no error member is invented for a nested declaration|
+|2026-11-10|`7db2cee`|The release tarball gained the advice corpus, and the raw-binary name stopped depending on the Unix binary having an extension|
+|2026-11-10|`f7fb720`|The actions moved to their node24 majors; `mlugg/setup-zig@v2` stays on node20 because upstream has no release for it|
+|2026-11-10|`a02c46b`|The bump branch carries the run id, so a second run the same day cannot collide; the diff gate still runs before the branch|
+|2026-11-10|`4ea4509`|A remote index is still re-fetched on every poll, but the cadence became a server option instead of a constant|
+|2026-11-10|`9b19761`|A remote index is no longer fetched before startup: the watcher owns the fetch and polls immediately, since the stdlib client has no request timeout|
+|2026-11-10|`e9c8057`|The Windows binary carries a manifest (asInvoker, supported OS) and a version resource, so Windows applies no compatibility heuristics|
+|2026-11-10|`8e047c1`|A remote index has no sidecar and none is fetched: the local-only rule is stated in `AGENTS.md` §5 rather than worked around|
+|2026-11-10|`93c6094`|Both workflows fetch exactly the pinned commit instead of cloning the branch and checking the pin out|
+|2026-11-10|`e9dabc4`|Three CI defects found by the first dispatches of workflows that had never run: each was reproduced by extracting the failing step's `run:` body and executing it in a replica tree with stub binaries|
+|2026-11-10|`f2e3844`|An external review of the published repository: a project spelling that differed by case or `_` vs `-`, tool text that promised a signature the index never holds, and a missing `LICENSE`|
+|2026-11-10|`8a33da8`, `85d4871`|An evaluation asking `doc_get` for the readme's own unqualified spelling: the miss now names the closest stored symbols, and every example uses the spelling the indexer produces|

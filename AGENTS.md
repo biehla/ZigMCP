@@ -562,10 +562,10 @@ runs the cross-cutting handler tests on their own (below).
 |Workflow consistency|`src/util/workflow.zig` (logic, tested in the main suite) and `tools/workflow_check.zig` (CLI) — `zig build workflows`|
 
 **Backlog rule:** a fix adds the test its layer owns, in the same commit as the fix.
-The `PLAN.md` bookkeeping — deleting the resolved item and recording the chosen option
-in the resolved table (§13 for 2026-11-09, §14–§16 for 2026-11-10) — lands in one
-`docs(plan)` commit per chunk of fixes, which keeps each fix commit's diff to code and
-its test. Both halves are mandatory; only the batching is a choice, and it is the one
+The `PLAN.md` bookkeeping — deleting the resolved entry from its open set and recording
+the chosen option in the resolved ledger (`PLAN.md` §4, one table per area) — lands in
+one `docs(plan)` commit per chunk of fixes, which keeps each fix commit's diff to code
+and its test. Both halves are mandatory; only the batching is a choice, and it is the one
 the history uses (30 such commits in the first 109). Never weaken an expectation to
 match the code — pick the option in `PLAN.md` first, then make the test match the
 chosen behaviour.
@@ -839,8 +839,8 @@ bounded inputs and outputs; version provenance (record `commit`, corpus `version
 `PLAN.md` is the canonical, itemised backlog: every known defect, limitation and edge
 case, with the options considered and a verification step for each, plus the resolved
 tables for everything closed. This section deliberately keeps no second copy — a copy
-drifts. Read `PLAN.md` §1–§6 for the current open set before assuming a gap still
-exists, and do not restate it here.
+drifts. Read `PLAN.md` §1 for the current open set, and §4 for what is already closed,
+before assuming a gap still exists; do not restate either here.
 
 ### Risks
 
