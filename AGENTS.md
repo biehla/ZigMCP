@@ -1,83 +1,88 @@
 # AGENTS.md — ZigMCP
 
-This is the **single spec of record and rulebook** for AI agents working in this
-repository. It is self-contained: the former specification was folded into it.
-The itemised remediation backlog — every known defect, edge case, limitation and
-guideline deviation, with options and a verification command each — is `PLAN.md`.
-Source comments cite this file as `AGENTS.md §N` (sections below) and `Dn`
-(decisions in §3); keep those numbers stable — renumbering a section means updating
-every citation (`grep "AGENTS.md §"`).
+The **single spec of record and rulebook** for agents working in this repository. It is
+self-contained; the former specification was folded into it. Human-facing documentation
+(install, configure, use) is `readme.md`; the itemised backlog is `PLAN.md`.
 
-Human-facing documentation (install, configure, use) lives in `readme.md`. When you
-change user-visible behaviour, update both files.
+**Section numbers are load-bearing.** Source comments cite this file as `AGENTS.md §N`
+and decisions as `Dn`. Thirty-five files carry a citation, so a new topic goes *inside
+the section that owns it* — a new `## N.` heading means a renumber sweep over the whole
+tree in the same commit. Check with `rg -l 'AGENTS\.md §'` before and after
+(`grep "AGENTS.md §"` on a machine without ripgrep).
 
-**Read order for a new task:** §1 → §3 (decisions — never contradict one without
-the user's say-so) → the section for the area you touch → §11 (Zig API traps) →
-§15 (working discipline) → §16 (failure catalogue) before touching a parser, a loader
-or a protocol surface.
+**Read order for a new task:** §1 → §3 (decisions: never contradict one without the
+user's say-so) → the section for the area you touch → §11 (Zig API traps) → §15 (working
+discipline) → §16 (failure catalogue) before touching a parser, a loader or a protocol
+surface.
+
+|§|Section|Read it when|
+|---|---|---|
+|1|Project overview|first|
+|2|Architecture and request flow|tracing a request|
+|3|Decisions and triggers|before proposing a design|
+|4|Repository layout|looking for a file|
+|5|MCP surface|adding or changing a tool, resource or prompt|
+|6|Protocol rules|touching the wire, versions, errors or caching|
+|7|Data model|touching an artifact format|
+|8|Doc import pipeline and CI|touching the indexer, the reloader or a workflow|
+|9|Verification and test layers|before claiming anything works|
+|10|Commands and toolchain|any build, lint or pin task|
+|11|Zig 0.17.1 API facts|writing Zig against the stdlib|
+|12|Code and corpus conventions|writing or reviewing code|
+|13|How the advice applies here|justifying a design with the corpus|
+|14|Risks and open questions|deciding what to do next|
+|15|Working discipline|framing a commit|
+|16|Failure catalogue|writing a parser, loader or protocol surface|
 
 ---
 
 ## 1. Project overview
 
 **ZigMCP** is a Model Context Protocol server written in Zig 0.17.1. It serves two
-read-only corpora to an AI coding agent over stdio:
+read-only corpora to a coding agent over stdio:
 
-1. **Systems-programming advice** — the content of
-   `systems_programming_context_v1.md` (paradigms P01–P12, decision rules R01–R12,
-   guarantees, limits, source registry S01–S24), exposed as MCP tools, resources
-   and prompts with **evidence labels intact**.
+1. **Systems-programming advice** — the content of `systems_programming_context_v1.md`
+   (paradigms P01–P12, rules R01–R12, guarantees, limits, sources S01–S24), served as
+   MCP tools, resources and prompts with **evidence labels intact**.
 2. **Documentation imported from other Zig projects** — extracted from Zig's own doc
-   syntax (`///` declaration comments, `//!` container comments) by a build-time
-   indexer and served as searchable MCP tools/resources.
+   syntax (`///` declaration comments, `//!` container comments, and a declaration's
+   plain `//` run when it has neither) by a build-time indexer and served as searchable
+   tools and resources.
 
-**The governing idea:** the server binary is a stable, thin host. Everything that
-changes — advice corpus, doc index, upstream pins — is **data**, replaced by CI and
-loaded at runtime. Never embed the index in the binary (D3).
+**The governing idea:** the binary is a stable, thin host. Everything that changes —
+advice corpus, doc index, upstream pins — is **data**, replaced by CI and loaded at
+runtime. Never embed the index in the binary (D3).
 
 ### Goals
 
 |#|Goal|Acceptance signal|
 |---|---|---|
 |G1|Serve the advice with evidence labels and source ids intact|Every advice record exposes `evidence` (`FACT`/`RESULT`/`SYNTHESIS`/`GUIDANCE`) and `sources` (`S01`…`S24`)|
-|G2|Import docs from other Zig projects using Zig's doc syntax|The indexer extracts `///`/`//!` — and, for a declaration with no doc comment, its `//` run — from arbitrary upstream trees with symbol paths and `path:line`|
+|G2|Import docs from other Zig projects using Zig's doc syntax|The indexer extracts `///`, `//!` and the `//` fallback from arbitrary upstream trees, with symbol paths and `path:line`|
 |G3|Stay current without hand-edits|A scheduled CI job re-pins upstream branches and republishes the index; no source change|
 |G4|Protocol correctness against MCP `2026-07-28`|`server/discover`; `_meta` validated; `resultType` + `serverInfo` on every current-revision result; cache hints on the six cacheable methods|
-|G5|Correct under failure and load|The §9 verification layers run and the §9 report is produced|
+|G5|Correct under failure and load|The §9 layers run and the §9 report is produced|
 
 ### Non-goals (v1)
 
 - Not an MCP **client**.
-- No Streamable HTTP transport — stdio only. HTTP adds an auth surface
-  (`-32020`/`-32021`) this server has no use for.
-- No learned indexes, PGO, or learned policies (§13 exclusions).
-- Not a replacement for `zig std` / `-femit-docs` HTML; this is machine-readable,
-  cross-project retrieval.
+- No Streamable HTTP transport — stdio only. HTTP adds an auth surface (`-32020`/`-32021`)
+  this server has no use for.
+- No learned indexes, PGO or learned policies (§13 exclusions).
+- Not a replacement for `zig std` / `-femit-docs` HTML: machine-readable, cross-project
+  retrieval.
 
-### Current state (2026-11-09)
+### State claims
 
-Implemented: protocol core, advice corpus, doc indexer, columnar index, hot reload
-(local file and HTTP(S) URL), incremental re-index, all test layers, verification
-report, the four CI workflows. Open items are listed in §14. `generated/` is
-CI-produced and gitignored.
+Two paragraphs in this file can go stale, and only two kinds exist: a dated snapshot, and
+a command. Nothing else is allowed.
 
-**State claims are dated on purpose.** A paragraph like the one above is the only kind
-of statement in this file that can go stale, so it carries the date it was checked and
-must be re-verified with `git log --oneline -5` before it is quoted.
-
-The rule is measurable, not stylistic. In the first 109 commits, **11** are
-`docs(agents)` repairs: line pins replaced by symbol citations (twice), a branch/remote
-claim, a present-today inventory, a surface table that had drifted. That is the evidence.
-
-A further **30** are `docs(plan)` records, and they argue the other way: not rot, but
-cost. They are the bookkeeping the §9 backlog rule asks for, batched one commit per
-chunk of fixes. Counting them as decay would misread a deliberate process as a defect —
-but a process cost nobody decided to pay is still a cost, so §9 states the form
-explicitly. Both numbers come from
-`git log --format='%s' | grep -c '^docs(agents)'` (and the same for `docs(plan)`); run
-them before quoting, because this paragraph is itself a state claim. The command counts
-the whole log, so it reads 12 the moment the commit carrying this paragraph lands: the
-snapshot above is the 109 commits before it.
+- **Implemented (checked 2026-11-09):** protocol core, advice corpus, doc indexer,
+  columnar index, hot reload (local file and `http(s)` URL), incremental re-index, every
+  test layer, the verification report, the four CI workflows. `generated/` is
+  CI-produced and gitignored.
+- **Open work:** `PLAN.md` §1, never here — a second copy drifts.
+- **Re-verify a date before quoting it:** `git log --oneline -5`.
 
 A rule survives a refactor; a fact about the tree does not. When a sentence here can be
 falsified by the tree, either date it or turn it into a command.
@@ -129,8 +134,8 @@ stdin line (newline-framed JSON)
   → stdin EOF                 stop the watcher, exit 0
 ```
 
-Corpora are parsed **once at startup** into flat, arena-owned structures. Each
-request gets a scratch arena from `util/arena_pool.zig`, reset after every message.
+Corpora are parsed **once at startup** into flat, arena-owned structures. Each request
+gets a scratch arena from `util/arena_pool.zig`, reset after every message.
 
 ---
 
@@ -138,7 +143,7 @@ request gets a scratch arena from `util/arena_pool.zig`, reset after every messa
 
 |ID|Decision|Rationale|Rejected alternative|
 |---|---|---|---|
-|D1|MCP wire layer **in-repo** (JSON-RPC 2.0 over stdio); zero third-party runtime deps|`mcp.zig` tracks a newer Zig than our floor; a dependency couples our release cadence to theirs. Our surface is eight methods|`mcp.zig` 0.0.9 — revisit only if HTTP/OAuth/tasks become requirements|
+|D1|MCP wire layer **in-repo** (JSON-RPC 2.0 over stdio); zero third-party runtime deps|`mcp.zig` tracks a newer Zig than our floor; a dependency couples our release cadence to theirs. Our surface is nine methods|`mcp.zig` 0.0.9 — revisit only if HTTP/OAuth/tasks become requirements|
 |D2|Advice corpus is **data** (ZON), not code|P01 applied to ourselves: editing advice never touches a handler|Hardcoded Zig structs|
 |D3|Doc index is a **runtime artifact**, never embedded, **hot-reloaded** by validate-then-atomic-swap|CI republishes; the running server picks it up with no rebuild or restart|`@embedFile` (rebuild per upstream commit); load-only-at-startup (restart per commit)|
 |D4|Index canonical form is **JSONL**, one record per line|Diffable: the bump PR's diff shows changed doc text, keeping bot updates auditable|A binary blob|
@@ -151,24 +156,17 @@ request gets a scratch arena from `util/arena_pool.zig`, reset after every messa
 
 ### Decision triggers
 
-Thresholds, so a decision is not reinvented mid-task. Each one is derived from a row
-above; crossing one needs a new row in the table, not a judgement call.
+Thresholds, so a decision is not reinvented mid-task. Each derives from a row above;
+crossing one needs a new row, not a judgement call.
 
-- **Add a runtime dependency** only when the alternative is security-sensitive code we
-  would have to own (TLS, crypto, compression) **and** it can be pinned by hash.
-  Otherwise write it in-repo (D1).
-- **Add a second code path** only when both paths are observable by a client. A
-  different input shape is one path with a flag, not two implementations (D10).
-- **Add a background thread** only when its work can block longer than a request may
-  stall. It owns its data, sleeps on its own clock rather than the server's `Io` (§11),
-  and its shutdown lives in the same commit (D3).
-- **Add a cache or an index** only after measuring the exact baseline it replaces, and
-  publish the numbers beside the code (P11 exclusion, §13).
-- **Change the on-disk format** only with a version field, a reader that rejects what it
-  does not understand, and a test for each rejection (D4, §7).
-- **Add a learned component** (PGO, learned index, learned policy) only with a measured
-  exact baseline and a measurable objective; otherwise it is unverifiable complexity
-  (§13).
+| Trigger | Condition | Consequence |
+|---|---|---|
+| Runtime dependency | Only when the alternative is security-sensitive code we would own (TLS, crypto, compression) **and** it can be pinned by hash | Otherwise write it in-repo (D1) |
+| Second code path | Only when both paths are observable by a client | A different input shape is one path with a flag, not two implementations (D10) |
+| Background thread | Only when its work can block longer than a request may stall | It owns its data, sleeps on its own clock rather than the server's `Io` (§11), and its shutdown lives in the same commit (D3) |
+| Cache or index | Only after measuring the exact baseline it replaces | Publish the numbers beside the code (P11 exclusion, §13; the current baseline is PERF-1 in `PLAN.md`) |
+| On-disk format | Only with a version field, a reader that rejects what it does not understand, and a test per rejection | D4, §7 |
+| Learned component (PGO, learned index, learned policy) | Only with a measured exact baseline and a measurable objective | Otherwise it is unverifiable complexity (§13) |
 
 ### Update models considered (why D3 looks the way it does)
 
@@ -177,10 +175,10 @@ above; crossing one needs a new row in the table, not a judgement call.
 |A. Embed everything in the binary|Every upstream commit becomes a release; no stable host|
 |B. Server clones upstream at startup|Query latency depends on a network clone; breaks when upstream is mid-breakage; indexing paid per launch; no auditable diff|
 |C. CI builds the index, server downloads once at startup|Works, but every update needs a client restart|
-|**D. CI builds the index, server hot-reloads it (chosen)**|Stable binary, update = data swap, freshness bounded by short TTL + poll; a broken upstream cannot take the server down (last good index keeps serving)|
+|**D. CI builds the index, server hot-reloads it (chosen)**|Stable binary, update = data swap, freshness bounded by short TTL + poll; a broken upstream cannot take the server down (the last good index keeps serving)|
 
-The indexer lives in CI (`tools/indexer.zig`), not in the server: shipping it in the
-server would put upstream-parse failure modes on the request path.
+The indexer lives in CI (`tools/indexer.zig`), not in the server: shipping it would put
+upstream-parse failure modes on the request path.
 
 ---
 
@@ -189,53 +187,59 @@ server would put upstream-parse failure modes on the request path.
 |Path|Responsibility|
 |---|---|
 |`src/main.zig`|Entry: parse options, load corpus, load index, start watcher, stdio loop, dispatch, response envelope|
-|`src/root.zig`|Test aggregator: pulls every module's `test` blocks into one binary|
+|`src/root.zig`|Test aggregator: pulls every module's `test` blocks into one binary; also the doc-invariant tests (GUIDE-8, DOC-2)|
+|`src/regressions_test.zig`|Cross-cutting handler tests that need the real corpus and a loaded index; `Harness` builds both|
 |`src/protocol/json_rpc.zig`|Line → `std.json.Value` → request/notification|
 |`src/protocol/meta.zig`|`_meta` parse, version resolution, legacy inference (D10)|
 |`src/protocol/errors.zig`|Error codes and error objects|
+|`src/protocol/response.zig`|The response envelope: `resultType`, `serverInfo`, cache hints|
 |`src/transport/stdio.zig`|Newline framing over streaming stdin/stdout, flush per response|
-|`src/server/registry.zig`|Tool table (sorted), schema derivation, argument validation, cache hints (D8)|
+|`src/server/registry.zig`|Tool table (sorted), schema derivation, argument validation and bounds, cache hints (D8)|
 |`src/server/discover.zig`|`server/discover`, legacy `initialize`, server `instructions`|
-|`src/server/tools.zig`|Tool handlers, `tools/list`, tool-result envelope|
-|`src/server/resources.zig`|`resources/list`, `resources/templates/list`, `resources/read`|
+|`src/server/tools.zig`|Tool handlers and their schemas, `tools/list`, tool-result envelope|
+|`src/server/resources.zig`|`resources/list`, `resources/templates/list`, `resources/read`, index listing cap|
 |`src/server/prompts.zig`|`prompts/list`, `prompts/get`|
+|`src/server/log.zig`|Client-directed `notifications/message` (PROTO-4)|
 |`src/advice/schema.zig`|The ZON record types and file schemas, shared by the server, `advice_check` and `bench`|
 |`src/advice/corpus.zig`|Loader for `data/advice/*.zon`; re-exports the schema types|
 |`src/advice/rules.zig`|Token-overlap matcher over the SELECT rules (P05)|
 |`src/advice/render.zig`|Record → structured JSON and text, labels attached|
-|`src/docs/index.zig`|JSONL loader (whole-or-nothing), configurable size ceiling|
+|`src/docs/index.zig`|JSONL loader (whole-or-nothing), configurable size ceiling, `doc_hash` and order checks|
 |`src/docs/columnar.zig`|P03 layout: one string table + parallel arrays|
+|`src/docs/projects.zig`|Project-key resolution for tool arguments (PROTO-14)|
 |`src/docs/reload.zig`|Index source (path/URL), snapshot store, watcher thread, atomic swap|
 |`src/docs/search.zig`|Scored symbol/path/doc search, limit clamp|
 |`src/util/arena_pool.zig`|Per-request scratch arena|
-|`src/util/json_array.zig`|`std.json.Array` construction/append for both toolchains (0.17.1 managed, 0.18.0-dev unmanaged)|
+|`src/util/json_array.zig`|`std.json.Array` construction/append for both toolchains (§11)|
 |`src/util/text.zig`|Tokenizer + case-insensitive helpers|
 |`src/util/workflow.zig`|Workflow trigger/expression consistency (CI-1)|
 |`src/util/sources.zig`|`data/sources.zon` parser: every include and exclude, from the ZON AST (CI-4/CI-5)|
 |`src/util/sleep.zig`|Thread sleep that does not share the server's `Io`|
 |`data/advice/`|`patterns.zon` (P01–P12), `rules.zon` (R01–R12), `guarantees.zon`, `limits.zon` (+ evidence legend), `sources.zon` (S01–S24)|
 |`data/sources.zon`|Upstream projects: url, hash, branch, commit, scope (the pin home, D6)|
-|`tools/indexer.zig`|Upstream tree → JSONL + `.status.json` sidecar|
+|`tools/indexer.zig`|Upstream tree → JSONL + status sidecar (§7)|
 |`tools/line_table.zig`|Per-file line-start table, binary-searched for record line numbers (IDX-9)|
-|`tools/sources_plan.zig`|`data/sources.zon` → one plan line per source for both workflows (`zig build plan-sources`, CI-4/CI-5)|
+|`tools/sources_plan.zig`|`data/sources.zon` → one plan line per source for both workflows (`zig build plan-sources`)|
 |`tools/advice_check.zig`|Corpus validator (`zig build check`)|
 |`tools/workflow_check.zig`|CLI for the workflow check (`zig build workflows`)|
 |`tools/bench.zig`|Verification report (`zig build bench`)|
 |`tests/protocol_test.zig`|Protocol + end-to-end layers: the built binary over pipes|
-|`tests/indexer_test.zig`|Golden layer: byte-for-byte against `tests/golden/index.jsonl`|
-|`tests/fixtures/indexer_src/`|Indexer fixture tree — contains a deliberately broken file and a warning-only file|
-|`tests/golden/`|`index.jsonl` + `index.status.json`|
+|`tests/indexer_test.zig`|Golden layer plus the indexer's own behaviour tests|
+|`tests/fixtures/indexer_src/`|Indexer fixture tree — a deliberately broken file and a warning-only file|
+|`tests/golden/`|`index.jsonl` + `index.status.json`, both byte-exact|
 |`.github/workflows/`|`ci.yml`, `bump-master.yml`, `index.yml`, `release.yml` (§8)|
 |`systems_programming_context_v1.md`|Upstream source of the advice corpus. Reference only — never edit it to change behaviour|
 |`readme.md`|User guide|
+|`PLAN.md`|The itemised backlog and the resolved ledger (§1 there)|
 |`LICENSE`|MIT license of this repository (packaged through `build.zig.zon` `paths`)|
+|`client-config.json`|The one client-configuration snippet; the readme embeds it verbatim (DOC-2)|
 |`res/zigmcp.rc`, `res/zigmcp.manifest`|Windows manifest (asInvoker, supported OS) and version resource (DOC-4)|
 |`lsp.json`|ZLS wiring (§10)|
 
-Gitignored: `zig-out/`, `.zig-cache/`, `.probe/` (API probes), `.superpowers/`
-(planning scratch), root `docs/` (`-femit-docs` output — anchored so `src/docs/` stays
-tracked), `generated/`, CI log dumps (`logs_*/`, `job-logs*.txt` — a triage download is
-never a tracked artifact), native byproducts (`*.lib`, `*.a`, `*.o`, `*.obj`).
+Gitignored: `zig-out/`, `.zig-cache/`, `.probe/` (API probes), `.superpowers/` (planning
+scratch), root `docs/` (`-femit-docs` output — anchored so `src/docs/` stays tracked),
+`generated/`, CI log dumps (`logs_*/`, `job-logs*.txt` — a triage download is never a
+tracked artifact), native byproducts (`*.lib`, `*.a`, `*.o`, `*.obj`).
 
 ---
 
@@ -245,23 +249,26 @@ never a tracked artifact), native byproducts (`*.lib`, `*.a`, `*.o`, `*.obj`).
 
 All five are read-only: annotations `readOnlyHint: true`, `destructiveHint: false`,
 `idempotentHint: true`, `openWorldHint: false`. Each declares `inputSchema` and
-`outputSchema` derived from `registry.Schema`; results carry `content` (one text
-item), `structuredContent` matching the output schema, and `isError`.
+`outputSchema` derived from `registry.Schema`; results carry `content` (one text item),
+`structuredContent` matching the output schema, and `isError`.
 
 |Tool|Input|Structured output|Notes|
 |---|---|---|---|
-|`advice_lookup`|`concept` (e.g. `P03`) **or** `question` (free text); at least one|`{query, matches[]}` — full pattern records|Question mode: token overlap over name, controls, facts, candidate uses; top 5|
-|`recommend_approach`|`signals: string[]` (non-empty), optional `constraints: object` (opaque)|`{signals, matches[{rule_id, condition, consider[], and_only_if?, evidence, score}]}`|A rule matches on ≥2 shared tokens, or 1 token covering ≥50% of its condition|
-|`doc_search`|`query`, optional `project`, optional `limit` (default 20, max 100; ≤0 → 20)|`{query, count, results[{project, commit, path, line, kind, symbol, container, doc}]}`|Score: exact symbol 100 / symbol substring 60 / token-in-symbol 40, +25 path, +10 doc substring or +5 token-in-doc; ties by symbol, path, line. `project` resolves exactly first, then ignoring case and `_` vs `-` when the spelling names exactly one project (PROTO-14). The index holds comment text only — no signature or body is stored|
-|`doc_get`|`project`, `symbol` (case-insensitive)|`{found, project?, symbol?, matches[{commit, path, line, kind, symbol, container, doc, doc_hash}], candidates?, resolved_from?}`|`symbol` is the path-qualified spelling the index stores (`lib.std.mem.copyForwards`); a shorter **dotted tail** resolves when exactly one stored symbol ends with it, and `resolved_from` then carries the argument as sent (PROTO-16) — two symbols sharing the tail stay a miss. Otherwise a miss lists the closest stored symbols in `candidates` (PROTO-15). Every record sharing the symbol path — a `//!` container record and a declaration from the sibling `<dir>.zig` can collide — comes back in `(path, line)` order; `found` is always present so a miss is still schema-shaped. `project` resolves as in `doc_search` (PROTO-14); a record holds comment text only, never a signature or body|
-|`doc_import_status`|`{}`|`{index_path?, index_state, index_error?, index_records, projects[{project, commit, records, declarations?, files_total?, files_degraded?, degraded?}]}`|`index_state` is `ok`/`unloaded`/`reload_failed`, so a client can see that the index being served is not the artifact on disk (REL-4); degraded counts come from the `.status.json` sidecar next to a **local** index, and a sidecar member whose type or sign contradicts this schema is omitted rather than echoed|
+|`advice_lookup`|`concept` (e.g. `P03`) **or** `question` (free text); at least one|`{query, matches[], match_count, truncated}` — full pattern records|Question mode: token overlap over name, controls, facts, candidate uses; top 5, and the cap is reported (PROTO-7)|
+|`recommend_approach`|`signals: string[]` (non-empty), optional `constraints: object` (opaque)|`{signals, matches[{rule_id, condition, consider[], and_only_if?, evidence, score}]}`|A rule matches on ≥2 shared tokens, or 1 token covering ≥50% of its condition; constraint text folds into the signal tokens (PROTO-5)|
+|`doc_search`|`query`, optional `project`, optional `limit` (default 20, max 100; ≤0 → 20)|`{query, count, results[{project, commit, path, line, kind, symbol, container, doc}]}`|Score: exact symbol 100 / symbol substring 60 / token-in-symbol 40, +25 path, +10 doc substring or +5 token-in-doc; ties by symbol, path, line. The index holds comment text only — no signature or body is stored|
+|`doc_get`|`project`, `symbol` (case-insensitive)|`{found, project?, symbol?, matches[{commit, path, line, kind, symbol, container, doc, doc_hash}], candidates?, resolved_from?}`|`symbol` is the path-qualified spelling the index stores (`lib.std.mem.copyForwards`); a shorter **dotted tail** resolves when exactly one stored symbol ends with it, and `resolved_from` then carries the argument as sent (PROTO-16) — two symbols sharing the tail stay a miss. Otherwise a miss lists the closest stored symbols in `candidates` (PROTO-15). Every record sharing the symbol path — a `//!` container record and a declaration from the sibling `<dir>.zig` can collide — comes back in `(path, line)` order. `found` is always present, so a miss is still schema-shaped. A record holds comment text only|
+|`doc_import_status`|`{}`|`{index_path?, index_state, index_error?, index_records, projects[{project, commit, records, declarations?, files_total?, files_degraded?, degraded?}]}`|`index_state` is `ok`/`unloaded`/`reload_failed`, so a client can see that the served index is not the artifact on disk (REL-4); the counts come from the status sidecar beside a **local** index (§7), and a sidecar member whose type or sign contradicts this schema is omitted rather than echoed (PROTO-11)|
+
+`project` is resolved exactly first, then ignoring case and `_` vs `-`, and only when
+that names exactly one project — two distinct keys are never merged, and a miss lists the
+keys the index holds (PROTO-14).
 
 "Nothing matched" is a **normal result with `isError: true`**, an explanation, and
-`structuredContent` shaped like the tool's `outputSchema` (empty `matches`/`results`,
-or `found: false`) — a typed client must be able to tell "no result" from a malformed
-response (PROTO-12).
-Unknown tool or arguments that violate the schema (missing required, unknown member,
-wrong type) are `-32602`.
+`structuredContent` shaped like the tool's `outputSchema` (empty `matches`/`results`, or
+`found: false`): a typed client must be able to tell "no result" from a malformed
+response (PROTO-12). Unknown tool or arguments that violate the schema (missing required,
+unknown member, wrong type) are `-32602`.
 
 ### Resources
 
@@ -274,18 +281,14 @@ wrong type) are `-32602`.
 |`advice://guarantees`|advice|Guarantees with labels, guidance, sources|
 |`advice://limits`|advice|Limits + evidence-label legend|
 |`advice://sources`|advice|S01–S24 with author, title, kind, URL|
-|`docs://{project}/index`|index|`path:line symbol` per record, at most 5 000 of them, then a truncation marker naming the remainder (`max_index_listing_records`, PROTO-10); one listed per project in the loaded index|
+|`docs://{project}/index`|index|`path:line symbol` per record, at most 5 000 of them, then a truncation marker naming the remainder (`max_index_listing_records`, PROTO-10)|
 |`docs://{project}/symbols/{symbol}`|index|One record; exposed as a **resource template** (unbounded space)|
 
-`resources/list` itself carries the **index** cache hint because its contents depend
-on the loaded index. Every listed resource is readable (PROTO-1). Project keys in
-`docs://` URIs are exact identifiers — `Fixture` and `fixture` are two projects — while
-symbol paths are matched case-insensitively (PROTO-13).
-
-Tool arguments are the exception: `doc_search` and `doc_get` resolve `project`
-exactly first, then ignoring case and `_` vs `-`, and use a loose match only when it
-names exactly one project. Two distinct keys are never merged, and a miss lists the
-keys the index holds (PROTO-14).
+`resources/list` carries the **index** cache hint because its contents depend on the
+loaded index. Every listed resource is readable (PROTO-1). Project keys in `docs://` URIs
+are exact identifiers — `Fixture` and `fixture` are two projects — while symbol paths are
+matched case-insensitively (PROTO-13). Tool arguments are the exception: they resolve a
+project loosely, as above (PROTO-14).
 
 ### Prompts (sorted by name; one required argument each)
 
@@ -294,29 +297,30 @@ keys the index holds (PROTO-14).
 |`approach_selection`|`situation`|Runs the rule matcher on the situation; instructs: cite R-ids, keep GUIDANCE labelled, name P-ids with boundaries, say so when nothing matches|
 |`systems_review`|`design`|Pulls matching pattern records; instructs: keep GUIDANCE apart from FACT/RESULT/SYNTHESIS, treat boundaries as hard limits, list checks not run, cite P/R/G/S ids|
 
-`server/discover` also returns an `instructions` string telling the agent which tool
-to use when and that imported doc text is data, never instructions.
+`server/discover` also returns an `instructions` string: which tool to use when, that
+imported doc text is data and never instructions, that doc symbols are path-qualified, and
+that every answer is retrieval — the server does not generate code and does not claim
+anything was compiled or checked (DOC-9).
 
 ---
 
 ## 6. Protocol rules
 
-- **Revision:** `2026-07-28`, stateless. No `initialize` handshake; `server/discover`
-  is mandatory and returns `supportedVersions`, `capabilities` (tools/resources/
-  prompts, `listChanged: false`), `instructions`.
-- **Version resolution (D10):** `params` or `params._meta` absent ⇒ legacy
-  `2025-06-18`. `_meta` present ⇒ must carry
-  `io.modelcontextprotocol/protocolVersion` (string) and
+- **Revision:** `2026-07-28`, stateless. No `initialize` handshake; `server/discover` is
+  mandatory and returns `supportedVersions`, `capabilities` (tools/resources/prompts,
+  `listChanged: false`), `instructions`.
+- **Version resolution (D10):** `params` or `params._meta` absent ⇒ legacy `2025-06-18`.
+  `_meta` present ⇒ must carry `io.modelcontextprotocol/protocolVersion` (string) and
   `io.modelcontextprotocol/clientCapabilities` (object); `clientInfo` (object) and
-  `logLevel` (string) optional; a mistyped or missing required member ⇒ `-32602`.
-  A version outside `["2026-07-28", "2025-06-18"]` ⇒ `-32022` with
+  `logLevel` (string) optional; a mistyped or missing required member ⇒ `-32602`. A
+  version outside `["2026-07-28", "2025-06-18"]` ⇒ `-32022` with
   `data.supportedVersions`.
 - **Legacy `initialize`:** answered only for legacy requests; returns
   `{protocolVersion: "2025-06-18", capabilities, serverInfo}`. On a current-revision
   request it is `-32601`.
-- **Current-revision results** always carry `resultType: "complete"`
-  (`"input_required"` reserved) and `_meta["io.modelcontextprotocol/serverInfo"] =
-  {name: "zigmcp", version: "0.1.0"}`. Legacy results carry neither.
+- **Current-revision results** always carry `resultType: "complete"` (`"input_required"`
+  reserved) and `_meta["io.modelcontextprotocol/serverInfo"] = {name: "zigmcp", version:
+  "0.1.0"}`. Legacy results carry neither.
 - **Cache hints (SEP-2549) are mandatory** on current-revision results of
   `server/discover`, `tools/list`, `prompts/list`, `resources/list`,
   `resources/templates/list`, `resources/read`: `ttlMs` + `cacheScope`. Advice data:
@@ -334,21 +338,24 @@ to use when and that imported doc text is data, never instructions.
 |Internal failure|`-32603`|
 |Tool ran but found nothing|normal result, `isError: true`|
 
-- `-32002` (legacy resource-not-found) **MUST NOT** be emitted; never return an
-  empty `contents` array. `-32020`/`-32021` are HTTP-only and not wired.
-- **stdio:** one message per line, no embedded newlines; stdout carries MCP messages
-  only; diagnostics go to stderr; **flush every response before the next read**;
-  exit 0 on EOF. Notifications are never answered. A line that does not fit the
-  64 KiB reader buffer is answered with `-32700`, the rest of the line is discarded,
-  and the server keeps serving — the cap also bounds JSON nesting (SRV-1, SRV-4).
-- **Logging:** `notifications/message` is never emitted (logLevel is parsed but no
-  log stream exists).
+- `-32002` (legacy resource-not-found) **MUST NOT** be emitted; never return an empty
+  `contents` array. `-32020`/`-32021` are HTTP-only and not wired.
+- **stdio:** one message per line, no embedded newlines; stdout carries MCP messages only;
+  diagnostics go to stderr; **flush every response before the next read**; exit 0 on EOF.
+  Notifications are never answered. A line that does not fit the 64 KiB reader buffer is
+  answered with `-32700`, the rest of the line is discarded, and the server keeps serving
+  — the cap also bounds JSON nesting (SRV-1, SRV-4).
+- **Logging:** `notifications/message` is emitted only to a client that asked for a level
+  in `_meta` (PROTO-4); there is no server-wide log stream.
 - Removed in `2026-07-28` and therefore absent: `ping`, `logging/setLevel`,
   `resources/subscribe` (replaced by `subscriptions/listen`, out of scope for v1).
 
 ---
 
 ## 7. Data model
+
+Three artifacts: the advice corpus (ZON, hand-edited), the doc index (JSONL, CI-built)
+and its status sidecar. Each has one canonical form, fixed key order and `\n` endings.
 
 ### Advice corpus (`data/advice/*.zon`)
 
@@ -392,14 +399,33 @@ them, so a schema change is one edit and all three targets recompile.
 |`path`, `line`|Source location, `/`-separated, 1-based|
 |`kind`|`fn` / `var` / `field` / `container` / `error` / `param`|
 |`symbol`|Syntactic container path; module path is the file path with `/` → `.` and `.zig` stripped, and a `..` component is rejected (IDX-6)|
-|`container`|Enclosing symbol (`""` for a module's `//!` record)|
-|`doc`|`///` or `//!` stripped (the space after it is kept), lines joined with `\n`; an invalid UTF-8 byte becomes U+FFFD before hashing (IDX-5). A declaration with no `///` run falls back to its `//` run (§8). Comment text only: no signature, body or type is stored. No field records which of the three produced the text, so a plain `//` run is indistinguishable from a `///` comment in the output: a record is the declaration's comment text, never that project's public contract for it|
+|`container`|Enclosing symbol — a **prefix** of `symbol` for a declaration, `""` for a module's `//!` record|
+|`doc`|`///` or `//!` stripped (the space after it is kept), lines joined with `\n`; an invalid UTF-8 byte becomes U+FFFD before hashing (IDX-5). A declaration with no `///` run falls back to its `//` run (§8). Comment text only: no signature, body or type is stored. No field records which of the three produced the text, so a plain `//` run is indistinguishable from a `///` comment in the output: a record is the declaration's comment text, never that project's public contract for it (DOC-10)|
 |`doc_hash`|Lowercase hex SHA-256 of `doc`; recomputed and compared at load, so a mismatch rejects the artifact (REL-9)|
 
 Key order is fixed. Records are sorted by `(project, symbol)`, ties by `(path, line)`.
 The loader rejects the **whole** artifact if any non-blank line is malformed, if a
 record's `doc_hash` is not the SHA-256 of its `doc`, or if the records are not in that
 order (REL-10).
+
+### Status sidecar (JSON, next to a local index)
+
+`<out minus .jsonl>.status.json`; the same path `deriveStatusPath` computes on both sides.
+
+```json
+{"projects":{"<project>":{"commit":"…","records":33,"declarations":42,
+  "files_total":5,"files_degraded":3,"degraded":[{"path":"…","reason?":"…",
+  "diagnostics":[{"tag":"…","line":7}]}]}}}
+```
+
+|Member|Meaning|
+|---|---|
+|`commit`|The commit the records came from; a member that disagrees with the loaded index is another run's health|
+|`records`|Records this project contributed|
+|`declarations`|Every site the walk visited that can carry a record — a fn/var/field declaration, a named parameter, an error-set member, a file's `//!` run — documented or not, so `records / declarations ≤ 1` and the ratio is the documentation rule's yield (IDX-10). **Absent** when unknown: a project carried over from `--previous` reports the count its previous sidecar recorded, and omits the member if that sidecar has none — zero beside a full record count would be a fabricated yield|
+|`files_total`, `files_degraded`|Files visited and files that did not parse cleanly|
+|`degraded[]`|One entry per degraded file: `path`, `reason` (unparsed: unreadable, oversized, too deeply nested) and `diagnostics[{tag, line}]`|
+|`skipped`, `previous_records`|Present only on an incremental run (`--previous`): the project was carried over, and this many records were reused (IDX-3)|
 
 ### Upstream sources (`data/sources.zon`)
 
@@ -412,9 +438,9 @@ order (REL-10).
 ```
 
 The plan step parses this file with `std.zig.Ast` in `.zon` mode (`src/util/sources.zig`),
-so comments, line breaks and whitespace cannot change the plan. It emits every
-`include` and `exclude` per source; both workflows pass each one through as repeated
-`--include` / `--exclude` flags. Run it as `zig build plan-sources` (CI-4/CI-5).
+so comments, line breaks and whitespace cannot change the plan. It emits every `include`
+and `exclude` per source; both workflows pass each one through as repeated `--include` /
+`--exclude` flags. Run it as `zig build plan-sources` (CI-4/CI-5).
 
 ---
 
@@ -431,52 +457,43 @@ Per `.zig` file under `root` (kept by an `--include` directory prefix, dropped b
 `--exclude` pattern; a `**` segment matches zero or more path segments, CI-4):
 
 1. Read and NUL-terminate; `std.zig.Ast.parse(gpa, source, .{ .mode = .zig })`. A file
-   that cannot be read, or exceeds the 64 MiB per-file ceiling, is recorded as
-   degraded with a `reason` and skipped — it never aborts the run (IDX-1). The same
-   happens to a file whose bracket nesting exceeds 256 levels: `Ast.parse` recurses
-   once per level and overflows the stack on a hostile file long before the bytes
-   run out (IDX-8).
-2. **Degrade, never skip:** extract from every file regardless of `tree.errors`;
-   record each diagnostic (tag + line) and mark the file **degraded** in the status
-   sidecar. No curated fatal-tag list — the stdlib has no severity field.
-3. Leading `//!` run → one `container` record, `line = 1`.
-4. Walk declarations recursively: `rootDecls()`; a `var`/`const` whose initializer
-   is a container recurses through `fullContainerDecl` members; `fn` names come from
+   that cannot be read, or exceeds the 64 MiB per-file ceiling, is recorded as degraded
+   with a `reason` and skipped — it never aborts the run (IDX-1). The same happens to a
+   file whose bracket nesting exceeds 256 levels: `Ast.parse` recurses once per level and
+   overflows the stack on a hostile file long before the bytes run out (IDX-8).
+2. **Degrade, never skip:** extract from every file regardless of `tree.errors`; record
+   each diagnostic (tag + line) and mark the file **degraded** in the sidecar (§7). No
+   curated fatal-tag list — the stdlib has no severity field.
+3. Leading `//!` run → one `container` record, `line = 1`, and one site in
+   `declarations`.
+4. Walk declarations recursively: `rootDecls()`; a `var`/`const` whose initializer is a
+   container recurses through `fullContainerDecl` members; `fn` names come from
    `fullFnProto`, and `proto.iterate` emits a `param` record for each documented
    parameter; container fields → `field`; error-set members are found by scanning
-   identifier tokens between the braces → `error`.
-5. **Attachment rule (pinned by the golden test):** a doc run attaches to the
-   declaration whose `firstToken` immediately follows it. Walk back from
-   `firstToken(decl) - 1` to the start of the contiguous `.doc_comment` run, then
-   collect forwards in source order. A blank line does not break attachment (it is
-   not a token). A run the parser flagged `.unattached_doc_comment` is dropped.
+   identifier tokens between the braces → `error`. Every visited site increments
+   `declarations`, documented or not (IDX-10).
+5. **Attachment rule (pinned by the golden test):** a doc run attaches to the declaration
+   whose `firstToken` immediately follows it. Walk back from `firstToken(decl) - 1` to
+   the start of the contiguous `.doc_comment` run, then collect forwards in source order.
+   A blank line does not break attachment (it is not a token). A run the parser flagged
+   `.unattached_doc_comment` is dropped.
    - **Plain-comment fallback:** the tokenizer emits no token for `//`, so when a
      declaration has no `///` run the indexer scans source lines: the contiguous `//`
-     lines ending on the line directly above the declaration's first token, each
-     starting with `//` but not `///` or `//!`, with the declaration beginning its own
-     line and no blank line between run and declaration. A run that is only `//` lines
-     yields nothing. Doc comments always win; the module `//!` record never falls back.
+     lines ending on the line directly above the declaration's first token, each starting
+     with `//` but not `///` or `//!`, with the declaration beginning its own line and no
+     blank line between run and declaration. A run that is only `//` lines yields nothing.
+     Doc comments always win; the module `//!` record never falls back.
 6. A declaration with neither an attached `///` run nor a `//` fallback is skipped.
-7. Output sorted (§7); status sidecar defaults to `<out minus .jsonl>.status.json`:
-   `{"projects":{"<p>":{"commit","records","declarations","files_total",
-   "files_degraded",["skipped","previous_records"],"degraded":[{"path","reason?",
-   "diagnostics":[{"tag","line"}]}]}}}`. `reason` is set when the file was not parsed
-   at all (unreadable, oversized, or too deeply nested), in which case `diagnostics` is
-   empty. `declarations` counts every site the walk visited that can carry a record — a
-   fn/var/field declaration, a named parameter, an error-set member, a file's `//!` run —
-   documented or not, so `records / declarations` never exceeds 1 and measures the yield
-   of the documentation rule (IDX-10). A project carried over from `--previous` was not
-   walked: it reports the count its previous sidecar recorded, and omits the member when
-   that sidecar has none, because zero beside a full record count would be a fabricated
-   yield.
+7. Output sorted (§7); the status sidecar is written with the members §7 lists, `<out
+   minus .jsonl>.status.json` by default or `--status <path>`.
 
 **Incremental:** with `--previous`, a project whose `(project, commit)` already has
-records there is skipped and those records are carried over verbatim — but only when
-the previous run's status sidecar, if there is one, reports exactly as many records
-for that commit as the JSONL holds. A truncated previous index is therefore
-re-indexed instead of being republished as complete (IDX-3). With no sidecar (a
-release baseline ships only the JSONL) there is no oracle, so the records are
-trusted as before.
+records there is skipped and those records are carried over verbatim — but only when the
+previous run's status sidecar, if there is one, reports exactly as many records for that
+commit as the JSONL holds. A truncated previous index is therefore re-indexed instead of
+being republished as complete (IDX-3). With no sidecar (a release baseline ships only the
+JSONL) there is no oracle, so the records are trusted as before. A carried-over project
+gets its `declarations` from that sidecar, or omits the member (§7).
 
 ### Server-side loading and hot reload (`src/docs/reload.zig`)
 
@@ -484,26 +501,28 @@ trusted as before.
   Default: `generated/index.jsonl` if it exists. None ⇒ an empty index (advice still
   served, doc tools report nothing matched).
 - Size ceiling: `--max-index-bytes <n>` or `ZIGMCP_MAX_INDEX_BYTES`, default 256 MiB
-  (`docs_index.max_index_bytes`). The same ceiling bounds the initial load, every
-  local reload and every HTTP download (REL-5).
-- A failed initial load logs to stderr and serves without an index; the watcher
-  keeps trying. The log names the underlying cause — `FileNotFound`, `IsDir`,
-  `IndexTooLarge` (past the configured ceiling) or `MalformedRecord` (one bad line) —
-  so an operator can tell a missing artifact from a corrupt one (REL-8). The same
-  state reaches clients through `doc_import_status`'s `index_state`/`index_error`,
-  so a stale index is visible without reading the server's stderr (REL-4).
-- **Local file:** polled every 1 s by mtime + size. **URL:** re-fetched every 60 s
-  with `std.http.Client.fetch` (no conditional GET in the stdlib) and compared by
-  SHA-256; downloads are capped at the configured ceiling.
-- New artifacts are parsed and validated **in full** into a fresh arena, then the
-  active pointer is swapped. Readers hold reference-counted snapshots, so the old
-  index is freed only after its last reader releases it. The watcher thread is the
-  **only writer**; a failed reload leaves the previous index serving.
-- On shutdown the watcher is stopped; if it is parked in a network read (the stdlib
-  HTTP client exposes no request timeout) it is left to the process exit and the store
-  is deliberately not freed. A remote artifact is fetched by the watcher, never before
-  the server starts, so a black-holed origin cannot block startup (REL-2); it does mean
-  a fetch still in flight keeps the process alive until it is killed.
+  (`docs_index.max_index_bytes`). The same ceiling bounds the initial load, every local
+  reload and every HTTP download (REL-5).
+- A failed initial load logs to stderr and serves without an index; the watcher keeps
+  trying. The log names the underlying cause — `FileNotFound`, `IsDir`, `IndexTooLarge`
+  (past the configured ceiling) or `MalformedRecord` (one bad line) — so an operator can
+  tell a missing artifact from a corrupt one (REL-8). The same state reaches clients
+  through `doc_import_status`'s `index_state`/`index_error`, so a stale index is visible
+  without reading stderr (REL-4).
+- **Local file:** polled every 1 s by mtime + size. **URL:** re-fetched every 60 s with
+  `std.http.Client.fetch` (no conditional GET in the stdlib) and compared by SHA-256;
+  downloads are capped at the configured ceiling, and the whole artifact is re-downloaded
+  on every poll (documented in the readme, DOC-8).
+- New artifacts are parsed and validated **in full** into a fresh arena, then the active
+  pointer is swapped. Readers hold reference-counted snapshots, so the old index is freed
+  only after its last reader releases it — and the free happens outside the lock (SRV-5).
+  The watcher thread is the **only writer**; a failed reload leaves the previous index
+  serving.
+- On shutdown the watcher is stopped; if it is parked in a network read (the stdlib HTTP
+  client exposes no request timeout) it is left to the process exit and the store is
+  deliberately not freed. A remote artifact is fetched by the watcher, never before the
+  server starts, so a black-holed origin cannot block startup (REL-2); it does mean a
+  fetch still in flight keeps the process alive until it is killed.
 
 ### CI workflows
 
@@ -514,103 +533,63 @@ trusted as before.
 |`index.yml`|push to `main` touching `data/sources.zon`, manual|Indexes the pinned trees (incremental against the rolling `index` release, rebuilt from scratch when it does not exist yet), merges and sorts, merges status sidecars, uploads `generated/` as the `index` artifact, and publishes `index.jsonl` to the rolling `index` release with `gh release upload --clobber`|
 |`release.yml`|tag `v*`|`zig build -Doptimize=ReleaseSafe` × 3 OS on 0.17.1; attaches a per-OS tarball (binary + `data/advice/`), the raw binaries (+ `generated/index.jsonl` if present) and a client-config snippet|
 
-Baseline rule: the bump diff baseline is the `index.jsonl` asset of the rolling
-**`index` release**, published by `index.yml` (`gh release upload … --clobber`), and
-never a prior workflow artifact (those expire and need run-id/token plumbing). One
-documented tag serves both baselines; `release.yml` does not produce it. A version
-release may still attach a copy when `generated/index.jsonl` happens to exist in the
-tagged checkout — that is a convenience for whoever holds that tag, never a baseline
-source. Rollback = publish the previous index; no rebuild.
+Baseline rule: the bump diff baseline is the `index.jsonl` asset of the rolling **`index`
+release**, published by `index.yml` (`gh release upload … --clobber`), never a prior
+workflow artifact (those expire and need run-id/token plumbing). One documented tag
+serves both baselines; `release.yml` does not produce it. A version release may still
+attach a copy when `generated/index.jsonl` happens to exist in the tagged checkout — a
+convenience for whoever holds that tag, never a baseline source. Rollback = publish the
+previous index; no rebuild.
 
 ### Workflow rules
 
-Each rule below is a recorded item, paid for by a run that failed. A new workflow
-satisfies all of them.
+Each rule is a recorded item, paid for by a run that failed. A new workflow satisfies all
+of them.
 
-- **A workflow triggers exactly what it reads.** A `push`-only workflow must never read
-  `github.event.pull_request.*`. `src/util/workflow.zig` checks this statically
-  (`zig build workflows`); extend the checker rather than eyeballing a diff (CI-1).
-- **One baseline, one tag.** The baseline is an asset of a release, never a workflow
-  artifact — artifacts expire, releases do not (CI-2, CI-3).
-- **Fetch exactly the commit.** `git init`, `remote add`, `fetch --depth 1 origin <sha>`,
-  `checkout --detach FETCH_HEAD`; a `--filter=blob:none` clone still downloads the tree
-  and refs (CI-7).
-- **A step never pre-seeds a file another step parses.** Every file under `generated/`
-  is written by the run that owns it; an empty placeholder that a later `json.loads`
-  reads is a failed run waiting for its first dispatch (CI-10).
-- **A branch name carries the run identity** (`…-<date>-<run>`), or a second run the
-  same day dies at `checkout -b` (CI-6).
-- **A release ships everything the binary reads at startup** — the binary alone cannot
-  start (CI-8).
-- **Lint with CI's exact toolchain.** actionlint shells out to `shellcheck` when it is
-  on `PATH`, so a local pass without it is not a pass (CI-12, §10).
-- **Reproduce the step, not the workflow.** Extract the failing `run:` body, run it in a
-  throwaway tree with stubs, and show it failing before the fix and passing after; put
-  that evidence in the commit message (CI-10, CI-11, CI-12).
+|Rule|Why|Id|
+|---|---|---|
+|A workflow triggers exactly what it reads — a `push`-only workflow never reads `github.event.pull_request.*`|`src/util/workflow.zig` checks it statically; extend the checker rather than eyeballing a diff|CI-1|
+|One baseline, one tag — a release asset, never a workflow artifact|Artifacts expire, releases do not|CI-2, CI-3|
+|Fetch exactly the commit: `git init`, `remote add`, `fetch --depth 1 origin <sha>`, `checkout --detach FETCH_HEAD`|A `--filter=blob:none` clone still downloads the tree and refs|CI-7|
+|A step never pre-seeds a file another step parses|An empty placeholder a later `json.loads` reads is a failed run waiting for its first dispatch|CI-10|
+|A branch name carries the run identity (`…-<date>-<run>`)|A second run the same day dies at `checkout -b`|CI-6|
+|A release ships everything the binary reads at startup|The binary alone cannot start|CI-8|
+|Lint with CI's exact toolchain: actionlint finds `shellcheck` on `PATH`|A body that trips a shellcheck rule is green locally and red in CI|CI-12, §10|
+|Reproduce the step, not the workflow: extract the failing `run:` body, run it in a throwaway tree with stubs, show it red then green|The evidence belongs in the commit message|CI-10, CI-11, CI-12|
 
 ---
 
 ## 9. Verification and test layers
 
 `zig build test` runs unit + protocol + golden and imports the handler suite;
-`zig build test-protocol` runs the protocol layer alone; `zig build test-regressions`
-runs the cross-cutting handler tests on their own (below).
+`zig build test-protocol` runs the protocol layer alone; `zig build test-regressions` runs
+the cross-cutting handler tests on their own.
 
 |Layer|Where|
 |---|---|
-|Unit|`test` blocks in `src/**` via `src/root.zig`, plus `tools/line_table.zig`'s own test target|
+|Unit|`test` blocks in `src/**` via `src/root.zig`, plus `tools/line_table.zig`'s own target|
 |Property (deterministic generators, not coverage-guided fuzzing)|`meta.zig` (random `_meta`), `index.zig` (mutated/truncated/invalid-UTF-8 JSONL loads whole or is rejected), `search.zig` (pathological queries never exceed the limit)|
 |Integration|`reload.zig` — a reader takes snapshots while the writer swaps; a torn read would mix versions|
-|Golden|`tests/indexer_test.zig` — indexer output over the fixture tree must equal `tests/golden/index.jsonl` **byte for byte**|
+|Golden|`tests/indexer_test.zig` — indexer output over the fixture tree must equal `tests/golden/index.jsonl` byte for byte, and the sidecar `tests/golden/index.status.json` with it|
 |Protocol|`tests/protocol_test.zig` — the built binary over pipes: discover, legacy `initialize`, every error code, `tools/list` order, cache hints on all six methods, missing resource, prompts, clean EOF exit. Writing one request and blocking on the reply pins the flush rule|
 |End-to-end|same file — discover → list tools → call every tool → read a resource → get a prompt|
 |Corpus validation|`zig build check` (§12)|
-|Cross-cutting handler tests|`src/regressions_test.zig` — the tests that need the real corpus and a loaded doc index at once. Part of `zig build test` (`src/root.zig` imports it) and runnable alone as `zig build test-regressions`|
-|Workflow consistency|`src/util/workflow.zig` (logic, tested in the main suite) and `tools/workflow_check.zig` (CLI) — `zig build workflows`|
+|Cross-cutting handler tests|`src/regressions_test.zig` — the tests that need the real corpus and a loaded index at once; the `Harness` builds both|
+|Workflow consistency|`src/util/workflow.zig` (logic, in the main suite) and `tools/workflow_check.zig` (CLI) — `zig build workflows`|
+|Doc invariants|`src/root.zig` — the readme embeds `client-config.json` verbatim (DOC-2) and the limitation sections are pointers to `PLAN.md`, not copies (GUIDE-8)|
 
-**Backlog rule:** a fix adds the test its layer owns, in the same commit as the fix.
-The `PLAN.md` bookkeeping — deleting the resolved entry from its open set and recording
-the chosen option in the resolved ledger (`PLAN.md` §4, one table per area) — lands in
-one `docs(plan)` commit per chunk of fixes, which keeps each fix commit's diff to code
-and its test. Both halves are mandatory; only the batching is a choice, and it is the one
-the history uses (30 such commits in the first 109). Never weaken an expectation to
-match the code — pick the option in `PLAN.md` first, then make the test match the
-chosen behaviour.
+### Rules the tests follow
 
-**Semantics the tests pin:** doc text verbatim except prefix stripping and line
-joining; the attachment rule; `tools/list` sorted by name and the index sorted by
-`(project, symbol)`; a degraded file still contributes records and never fails a
-start; a configurable index ceiling (default 256 MiB, candidate, not yet measured on
-the full corpus); no wall-clock deadline claims — report p50/p95/p99 instead.
-
-**Permanent-test rule:** tests must catch consumer-visible defects — behaviour,
-boundaries, invariants, transitions, precedence, errors. Not wiring, mock echoes,
-source-text assertions, or bare not-throw checks. If you change the fixture tree,
-regenerate the golden file deliberately and review the diff; never "fix" the golden
-test by editing it to match new output without understanding why it changed.
-
-**Bounded waits.** Every test that waits on a child process or a response carries a
-watchdog and a teardown that terminates the child; a hang must fail, not park the suite.
-One Windows pipe test held the whole suite until it got both (4e0f03c).
-
-**Canary parity.** One tree builds on 0.17.1 and master: select the shape at comptime
-(`src/util/json_array.zig`), never fork the tree, never weaken a gate, and run every
-gate on both before claiming support (D9; `5348ac2` is the commit that established the
-comptime shape selection).
-
-**Numbers are measured.** Any figure in a report, a commit message or a summary — line
-counts, record counts, latency, "N facts" — comes from a command that was run. A
-plausible unmeasured number is the same defect class as PROTO-11: an unvalidated value
-presented as data.
-
-**Verification report:** `zig build bench` runs `tools/bench.zig` against the built
-server with `--index tests/golden/index.jsonl` and prints build config, Zig version,
-corpus counts, index size and upstream commits, startup time, per-tool
-p50/p95/p99 latency and error counts, and peak RSS. Lifecycle note: the dominant
-preparation cost is the CI index build, paid once per upstream bump, not per request.
-
-**Before any learned-index (P11) claim:** first build and measure linear scan over
-JSONL, binary search over a sorted symbol table, and a token inverted index.
+|Rule|Detail|
+|---|---|
+|**Backlog rule**|A fix adds the test its layer owns, in the same commit as the fix. The `PLAN.md` bookkeeping — deleting the resolved entry from its open set and recording the chosen option in the resolved ledger (`PLAN.md` §4, one table per area) — lands in one `docs(plan)` commit per chunk of fixes, keeping each fix commit's diff to code and its test. Both halves are mandatory; only the batching is a choice. Never weaken an expectation to match the code: pick the option in `PLAN.md` first, then make the test match the chosen behaviour|
+|**Semantics pinned**|Doc text verbatim except prefix stripping and line joining; the attachment rule; `tools/list` sorted by name and the index sorted by `(project, symbol)`; a degraded file still contributes records and never fails a start; the index ceiling applies to load, reload and download; no wall-clock deadline claims — report p50/p95/p99|
+|**Permanent tests**|Catch consumer-visible defects: behaviour, boundaries, invariants, transitions, precedence, errors. Not wiring, mock echoes, source-text assertions or bare not-throw checks. If the fixture tree changes, regenerate the golden file deliberately and review the diff; never "fix" the golden test by editing it to match new output without understanding why it changed|
+|**Bounded waits**|Every test that waits on a child process or a response carries a watchdog and a teardown that terminates the child; a hang must fail, not park the suite (one Windows pipe test held the whole suite until it got both, `4e0f03c`)|
+|**Canary parity**|One tree builds on 0.17.1 and master: select the shape at comptime (`src/util/json_array.zig`), never fork the tree, never weaken a gate, and run every gate on both before claiming support (D9; `5348ac2` established the comptime shape selection)|
+|**Numbers are measured**|Any figure in a report, a commit message or a summary — line counts, record counts, latency, "N facts" — comes from a command that was run. A plausible unmeasured number is the same defect class as PROTO-11: an unvalidated value presented as data|
+|**Verification report**|`zig build bench` runs `tools/bench.zig` against the built server with `--index tests/golden/index.jsonl` and prints build config, Zig version, corpus counts, index size and upstream commits, startup time, per-tool p50/p95/p99 latency and error count, and peak RSS. The dominant preparation cost is the CI index build — once per upstream bump, not per request|
+|**Before any learned-index (P11) claim**|First build and measure a linear scan over JSONL, a binary search over a sorted symbol table, and a token inverted index. The measured baseline for the current corpus is PERF-1 in `PLAN.md`|
 
 ---
 
@@ -619,7 +598,7 @@ JSONL, binary search over a sorted symbol table, and a token inverted index.
 ```bash
 zig version                  # 0.17.1
 zig build                    # zig-out/bin/{zigmcp, indexer, bench}
-zig build test               # unit + protocol + golden
+zig build test               # unit + protocol + golden + handler tests
 zig build test-protocol      # protocol layer only
 zig build test-regressions   # cross-cutting handler tests (also in `test`)
 zig build check              # advice corpus validation
@@ -631,47 +610,46 @@ zig build -Doptimize=ReleaseSafe
 zig fmt --check . --exclude tests/fixtures   # the fixture tree is deliberately unformattable
 ```
 
-- **Workflow gates:** `zig build workflows` (trigger/expression consistency, CI-1)
-  and `go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7` (no file
-  arguments; actionlint discovers `.github/workflows` itself, which is portable
-  across PowerShell and bash) — the same pinned command `ci.yml` runs. The actions
-  are on their node24 majors (`checkout@v5`, `upload-artifact@v6`, `setup-go@v6`,
-  `action-gh-release@v3`); `mlugg/setup-zig@v2` is the one remaining node20 action,
-  because upstream has no node24 release yet (CI-9). actionlint 1.7.7 does not
-  inspect action metadata, so it stays silent about it.
-  actionlint also shells out to `shellcheck` for every `run:` body **when it finds
-  one on `PATH`** — the `ubuntu-latest` runner carries one, a bare Windows box does
-  not. A body that trips a shellcheck rule is therefore green here and red there
-  (CI-12), so run the gate with shellcheck 0.11.0 installed before calling it green.
+- **Workflow gates:** `zig build workflows` (trigger/expression consistency, CI-1) and
+  `go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7` (no file arguments;
+  actionlint discovers `.github/workflows` itself, which is portable across PowerShell and
+  bash) — the same pinned command `ci.yml` runs. The actions are on their node24 majors
+  (`checkout@v5`, `upload-artifact@v6`, `setup-go@v6`, `action-gh-release@v3`);
+  `mlugg/setup-zig@v2` is the one remaining node20 action, because upstream has no node24
+  release (CI-9). actionlint 1.7.7 does not inspect action metadata, so it stays silent
+  about it. It **does** shell out to `shellcheck` for every `run:` body when it finds one
+  on `PATH` — the `ubuntu-latest` runner carries one, a bare Windows box does not, so a
+  body that trips a shellcheck rule is green here and red there (CI-12). Install
+  shellcheck 0.11.0 before calling the gate green.
 - **Toolchain:** Zig 0.17.1 at `C:\Users\Sethticles\scoop\apps\zig\0.17.1`;
-  `.minimum_zig_version = "0.17.1"`; global cache `C:\Users\Sethticles\AppData\Local\zig`.
-  The CI canary leg builds with the `master` entry of
-  `https://ziglang.org/download/index.json` (currently
-  `0.18.0-dev.954+60635c2bd`); unpacking its `x86_64-windows` build under `.probe/`
-  and running the same gates reproduces the canary locally.
-- **Server options:** `--index <path-or-url>` / `ZIGMCP_INDEX`; `--advice-dir <path>`
-  / `ZIGMCP_ADVICE_DIR` (default `data/advice`, relative to the working directory);
+  `.minimum_zig_version = "0.17.1"`; global cache
+  `C:\Users\Sethticles\AppData\Local\zig`. The CI canary leg builds with the `master`
+  entry of `https://ziglang.org/download/index.json` (currently
+  `0.18.0-dev.954+60635c2bd`); unpacking its `x86_64-windows` build under `.probe/` and
+  running the same gates reproduces the canary locally.
+- **Server options:** `--index <path-or-url>` / `ZIGMCP_INDEX`; `--advice-dir <path>` /
+  `ZIGMCP_ADVICE_DIR` (default `data/advice`, relative to the working directory);
   `--max-index-bytes <n>` / `ZIGMCP_MAX_INDEX_BYTES` (default 268435456, i.e. 256 MiB);
-  `--index-poll-ms <n>` / `ZIGMCP_INDEX_POLL_MS` (default 1000 local, 60000 URL,
-  floor 100; a remote index is re-fetched on every poll, REL-1); `--help`. Flags
-  override the environment. An unknown argument or a missing option
-  value prints one line and the usage block to stderr and exits 2 — never a bare Zig
-  error name, a stack trace or exit 1 (SRV-8).
-- **Interrupted builds** can orphan `zig.exe` compiler children that hold the cache
-  lock; the next build then looks hung. Kill them before timing anything.
-- **Formatting gate with `upstream/` present:** `zig fmt` walks the working tree, not
-  git, and the local indexing checkouts the readme creates hold Zig master sources this
-  toolchain's formatter cannot parse. Add `--exclude upstream` on a machine that has
-  one; a fresh clone needs only `--exclude tests/fixtures` (what `ci.yml` runs).
-- **ZLS** is wired through `lsp.json`. Keep it on the toolchain's minor version
-  (0.17.x); stop `zls.exe` before upgrading (scoop cannot overwrite a running
-  binary). ZLS reports syntax errors at once but semantic errors only after the next
-  build — `zig build test` is the authority.
+  `--index-poll-ms <n>` / `ZIGMCP_INDEX_POLL_MS` (default 1000 local, 60000 URL, floor
+  100; a remote index is re-fetched on every poll, REL-1); `--help`. Flags override the
+  environment. An unknown argument or a missing option value prints one line and the usage
+  block to stderr and exits 2 — never a bare Zig error name, a stack trace or exit 1
+  (SRV-8).
+- **Interrupted builds** can orphan `zig.exe` compiler children that hold the cache lock;
+  the next build then looks hung. Kill them before timing anything.
+- **Formatting gate with `upstream/` present:** `zig fmt` walks the working tree, not git,
+  and the local indexing checkouts the readme creates hold Zig master sources this
+  toolchain's formatter cannot parse. Add `--exclude upstream` on a machine that has one;
+  a fresh clone needs only `--exclude tests/fixtures` (what `ci.yml` runs).
+- **ZLS** is wired through `lsp.json`. Keep it on the toolchain's minor version (0.17.x);
+  stop `zls.exe` before upgrading (scoop cannot overwrite a running binary). ZLS reports
+  syntax errors at once but semantic errors only after the next build — `zig build test`
+  is the authority.
 - **Re-pinning an upstream** by hand: in a scratch `zig init` checkout run
-  `zig fetch --save=zig_std "git+https://github.com/ziglang/zig.git#master"` (or
-  `mcp_zig` … `#main`), then copy the resolved `url`/`hash`/commit into
-  `data/sources.zon`. Pins never float: the `#<sha>` freezes the commit and `hash` is
-  the source of truth. A wrong branch name fails with `error: ref not found`.
+  `zig fetch --save=zig_std "git+https://github.com/ziglang/zig.git#master"` (or `mcp_zig`
+  … `#main`), then copy the resolved `url`/`hash`/commit into `data/sources.zon`. Pins
+  never float: the `#<sha>` freezes the commit and `hash` is the source of truth. A wrong
+  branch name fails with `error: ref not found`.
 - **Shell:** bash is for real binaries and short fact pipelines. Use the dedicated
   read/search/edit tools for file work.
 
@@ -684,6 +662,8 @@ Re-verify before relying on anything new: write a throwaway probe under `.probe/
 compile it, read the compiler's notes, delete the probe (`zig-std-api-verification`
 skill).
 
+### Process, files, threads
+
 - **`std.fs.File` is gone.** Use `std.Io.File.stdin()/stdout()/stderr()`;
   `file.writer(io, &buf)` → `.interface` is the `std.Io.Writer`. On pipes use
   `readerStreaming`/`writerStreaming` — positional I/O on a pipe silently loses bytes.
@@ -692,73 +672,82 @@ skill).
   (`*std.heap.ArenaAllocator`), `environ_map`, `preopens`, `minimal`.
 - **Arguments:** `std.process.Args.toSlice(args, arena)`; `Args.iterate` is a compile
   error on Windows.
-- **`std.json`:** `ObjectMap` keeps `put(gpa, k, v)` on both toolchains.
-  `std.json.Array` is **managed** on 0.17.1 (`.init(gpa)` + `append(v)`) and the
-  **unmanaged** `std.ArrayList(Value)` on Zig master (`.empty` + `append(gpa, v)`),
-  so JSON arrays are constructed and appended only through
-  `src/util/json_array.zig` (`init`, `append`), which selects the shape at comptime
-  via `@hasDecl(std.json.Array, "init")`. `std.ArrayList(T)` is **unmanaged**
-  (`append(gpa, v)`, `toOwnedSlice(gpa)`).
-  `std.json.Stringify.value(v, .{}, &writer)` on a `std.json.Value` uses its
-  `jsonStringify`; passing an anonymous struct serializes the struct instead — a
-  silent wire bug.
+- **`std.Io.Mutex`** needs an `Io` (`lock(io)`); for tiny critical sections prefer a spin
+  lock over `std.atomic.Value(bool)`.
+- **Sleeping:** `std.Io.sleep(io, duration, .awake)`; `std.Thread.sleep` is gone.
+  Background threads must not share the server's `Io` (`src/util/sleep.zig`).
+- **`ArenaAllocator.allocator()` is self-referential** (its `ptr` is the arena). An arena
+  copied by value leaves the copy pointing at the dead original — heap-allocate it
+  (`gpa.create(std.heap.ArenaAllocator)`) and keep the pointer.
+- **`Allocator.dupeZ` is gone** → `dupeSentinel(allocator, T, bytes, sentinel)`.
+
+### JSON, ZON
+
+- **`std.json`:** `ObjectMap` keeps `put(gpa, k, v)` on both toolchains. `std.json.Array`
+  is **managed** on 0.17.1 (`.init(gpa)` + `append(v)`) and the **unmanaged**
+  `std.ArrayList(Value)` on Zig master (`.empty` + `append(gpa, v)`), so JSON arrays are
+  constructed and appended only through `src/util/json_array.zig`, which selects the shape
+  at comptime via `@hasDecl(std.json.Array, "init")`. `std.ArrayList(T)` itself is
+  **unmanaged** (`append(gpa, v)`, `toOwnedSlice(gpa)`).
+- **`std.json.Stringify.value(v, .{}, &writer)`** on a `std.json.Value` uses its
+  `jsonStringify`; passing an anonymous struct serializes the struct instead — a silent
+  wire bug.
 - **ZON:** `std.zon.parse.fromSlice(T, .{ .gpa, .arena, .source, .diagnostics })`;
   `source` must be `[:0]const u8`; `Diagnostics = { errors: []const Error }`.
   `fromSliceAlloc`/`free` are gone.
-- **`ArenaAllocator.allocator()` is self-referential** (its `ptr` is the arena). An
-  arena copied by value leaves the copy pointing at the dead original — heap-allocate
-  it (`gpa.create(std.heap.ArenaAllocator)`) and keep the pointer.
-- **`std.Io.Mutex`** needs an `Io` (`lock(io)`); for tiny critical sections prefer a
-  spin lock over `std.atomic.Value(bool)`.
-- **Sleeping:** `std.Io.sleep(io, duration, .awake)`; `std.Thread.sleep` is gone.
-  Background threads must not share the server's `Io` (`src/util/sleep.zig`).
-- **`Allocator.dupeZ` is gone** → `dupeSentinel(allocator, T, bytes, sentinel)`.
+
+### `std.zig.Ast`
+
+- `Ast.parse(gpa, source, .{ .mode = .zig })` takes a sentinel-terminated source and
+  **never fails on malformed input**: diagnostics land in `tree.errors`, mixing warnings
+  and errors with no severity field (`tag`, `is_note`, `token_is_prev`, `token`, `extra`).
+- `///` → `.doc_comment`; `//!` → `.container_doc_comment`. `tree.tokens.items(.tag)`
+  returns `[]Token.Tag` directly. `tokenSlice(i)` takes a `u32` and includes the `///`
+  prefix.
+- `firstToken` of a `pub` decl is the `pub` keyword.
+- `fullContainerDecl(&buf, node)` (buf: `[2]Ast.Node.Index`) returns an optional; members
+  are `cd.ast.members`. Covers `container_decl*`, `container_decl_two*`,
+  `container_decl_arg*`, `tagged_union*`.
+- `Node.Index` is `enum(u32)`; use `OptionalIndex.unwrap()` instead of manual
+  `@enumFromInt`.
+- **Error-set members are not nodes:** `error_set_decl` holds only the brace tokens
+  (`nodeData(node).token_and_token`); members are `identifier` tokens.
+- `fullFnProto(&buf1, decl)` gives `name_token`; `proto.iterate(&tree)` yields
+  `Param{ first_doc_comment, name_token, … }`.
+
+### HTTP, build, platform
+
 - **HTTP:** `std.http.Client.fetch(options)` writes the body to
   `FetchOptions.response_writer`; `FetchResult` exposes only `status` — no ETag or
   conditional GET.
-- **`std.compress.zstd`** exists (unused so far).
-- **`std.zig.Ast`** (`lib/std/zig/Ast.zig`):
-  - `Ast.parse(gpa, source, .{ .mode = .zig })` takes a sentinel-terminated source and
-    **never fails on malformed input**: diagnostics land in `tree.errors`, mixing
-    warnings and errors with no severity field (`tag`, `is_note`, `token_is_prev`,
-    `token`, `extra`).
-  - `///` → `.doc_comment`; `//!` → `.container_doc_comment`.
-    `tree.tokens.items(.tag)` returns `[]Token.Tag` directly. `tokenSlice(i)` takes a
-    `u32` and includes the `///` prefix.
-  - `firstToken` of a `pub` decl is the `pub` keyword.
-  - `fullContainerDecl(&buf, node)` (buf: `[2]Ast.Node.Index`) returns an optional;
-    members are `cd.ast.members`. Covers `container_decl*`, `container_decl_two*`,
-    `container_decl_arg*`, `tagged_union*`.
-  - `Node.Index` is `enum(u32)`; use `OptionalIndex.unwrap()` instead of manual
-    `@enumFromInt`.
-  - **Error-set members are not nodes:** `error_set_decl` holds only the brace tokens
-    (`nodeData(node).token_and_token`); members are `identifier` tokens.
-  - `fullFnProto(&buf1, decl)` gives `name_token`; `proto.iterate(&tree)` yields
-    `Param{ first_doc_comment, name_token, … }`.
-- **`zig build-lib -femit-docs`** writes `docs/` and a `.lib` into the **current
-  directory** (no output-dir flag). Clean them up before committing.
-- **`zig fetch --save[=<name>]`** resolves the ref and writes the dependency block into
-  the `build.zig.zon` of the **package root it runs in**, printing only
-  `info: resolved ref …`. Run it from a parent directory and it edits that parent's
-  manifest instead — the first `bump-master.yml` run wrote the pin into the checked-out
-  project's own `build.zig.zon` while the parser read the scratch copy (CI-11).
 - **Build API:** `root_module` is a field of the options struct; `b.addOptions()` +
   `addOptionPath` is how tests receive built binary paths.
+- **`zig build run -- <args>`** forwards arguments only after `run_cmd.addPassthruArgs()`.
+- **`zig build --help`** prints the real step list; `zig fmt --exclude <path>` takes a path
+  and is repeatable — that is how the fixture tree is skipped.
+- **`zig build-lib -femit-docs`** writes `docs/` and a `.lib` into the **current
+  directory** (no output-dir flag). Clean them up before committing.
+- **`zig fetch --save[=<name>]`** resolves the ref and writes the dependency block into the
+  `build.zig.zon` of the **package root it runs in**, printing only `info: resolved ref …`.
+  Run it from a parent directory and it edits that parent's manifest instead — the first
+  `bump-master.yml` run wrote the pin into the checked-out project's own `build.zig.zon`
+  while the parser read the scratch copy (CI-11).
+- **Windows resources:** `root_module.addWin32ResourceFile(.{ .file, .include_paths })`
+  behind `target.result.os.tag == .windows`, and `res/` must be listed in `build.zig.zon`'s
+  `paths` or a package build loses it (DOC-4).
+- **`std.compress.zstd`** exists (unused so far).
+
+### Comptime and language traps
+
 - **Comptime peer-type narrowing:** `@min(runtime_u64, 1)` resolves to a `u20`-width
-  result, and a multiplication of it inherits that width — a runtime overflow that no
+  result, and a multiplication of it inherits that width — a runtime overflow no
   annotation on the literal prevents. Give the stored computation an explicit type
   (`@as(u64, …)`) and annotate the local. `src/util/sleep.zig` hit this; the fix is
-  already applied and must not be "simplified" back.
+  applied and must not be "simplified" back.
 - **`orelse … catch` needs grouping** when combined: `(a orelse b) catch c`. Zig master
   rejects the ungrouped form, so it is a canary failure, not a style preference.
 - **`@hasDecl(T, "name")`** is the supported way to select a shape across toolchain
   versions (`src/util/json_array.zig`).
-- **`zig build run -- <args>`** forwards arguments only after `run_cmd.addPassthruArgs()`.
-- **Windows resources:** `root_module.addWin32ResourceFile(.{ .file, .include_paths })`
-  behind `target.result.os.tag == .windows`, and `res/` must be listed in
-  `build.zig.zon`'s `paths` or a package build loses it (DOC-4).
-- **`zig build --help`** prints the real step list; `zig fmt --exclude <path>` takes a
-  path and is repeatable — that is how the fixture tree is skipped.
 
 ---
 
@@ -767,20 +756,20 @@ skill).
 ### Allocation discipline
 
 Load corpora once into arenas; serve requests from flat read-only structures; use the
-per-request pool arena for scratch, reset after every message. Never re-parse ZON or
-JSONL per request. Reloads are atomic-replace: parse + validate fully, swap the
-pointer, drop the old one after its last reader — never mutate live structures.
-Bound every input and output (query length, clamped `limit`, artifacts bounded by
+per-request pool arena for scratch, reset after every message. Never re-parse ZON or JSONL
+per request. Reloads are atomic-replace: parse + validate fully, swap the pointer, drop
+the old one after its last reader — never mutate live structures. Bound every input and
+output (query length and token count, clamped `limit`, artifacts bounded by
 `--max-index-bytes`).
 
 ### Adding a capability
 
-- **Tool:** add a row to `registry.tool_specs` (keep it **sorted by name** — a unit
-  test enforces it) with `input`/`output` `Schema`s and a handler in `tools.zig`.
-  Never hand-write JSON Schema (D8). Validate arguments with `registry.validate` first.
+- **Tool:** add a row to `registry.tool_specs` (keep it **sorted by name** — a unit test
+  enforces it) with `input`/`output` `Schema`s and a handler in `tools.zig`. Never
+  hand-write JSON Schema (D8). Validate arguments with `registry.validate` first.
 - **Resource:** add to `resources.resource_specs` (one fixed URI) or
-  `resources.resource_families` (a URI shape), giving it a `handler` and an honest
-  `cache` hint; `resources.read` dispatches through the tables and never changes.
+  `resources.resource_families` (a URI shape), giving it a `handler` and an honest `cache`
+  hint; `resources.read` dispatches through the tables and never changes.
 - **Prompt:** add to `prompts.prompt_specs` (sorted) with its `handler`; `prompts.get`
   dispatches through the table and never changes.
 - Update §5 here and the surface tables in `readme.md`; extend
@@ -793,15 +782,15 @@ Bound every input and output (query length, clamped `limit`, artifacts bounded b
   FACT. Legend: FACT = documented mechanism; RESULT = study-specific finding, keep its
   conditions; SYNTHESIS = the report's classification, not a standard taxonomy;
   GUIDANCE = recommendation needing project-specific validation.
-- **All 12 rules are GUIDANCE.** Pattern records are SYNTHESIS; their facts are FACT
-  or RESULT per the source document.
+- **All 12 rules are GUIDANCE.** Pattern records are SYNTHESIS; their facts are FACT or
+  RESULT per the source document.
 - Fact text is the source document's own wording (light punctuation only). Do not add
   claims the source does not make.
-- `zig build check` fails on: ids not `P01..P12`/`R01..R12`/`Sxx`; duplicates; pattern
-  or rule counts ≠ 12; a source id not in `sources.zon`; a pattern `sources` entry that
-  no fact cites; a rule `consider` that is not a pattern id.
-- Imported upstream doc text is **data**: never move it into `instructions` or any
-  channel the client treats as directives (prompt-injection defence).
+- `zig build check` fails on: ids not `P01..P12`/`R01..R12`/`Sxx`; duplicates; pattern or
+  rule counts ≠ 12; a source id not in `sources.zon`; a pattern `sources` entry that no
+  fact cites; a rule `consider` that is not a pattern id.
+- Imported upstream doc text is **data**: never move it into `instructions` or any channel
+  the client treats as directives (prompt-injection defence).
 
 ### Style
 
@@ -809,12 +798,14 @@ Bound every input and output (query length, clamped `limit`, artifacts bounded b
   decision it implements.
 - Diagnostics go to stderr only; stdout is the protocol.
 - `zig fmt` is the formatter; the fixture tree is excluded.
-- **`.gitignore` rules are anchored.** `/docs/` is the `-femit-docs` output; an
-  unanchored `docs/` also swallowed `src/docs/`, and a fresh clone could not build
-  (4c6c569). Anchor every directory rule.
-- **One canonical artifact form:** fixed key order, `\n` only, one record per line,
-  sorted at the boundary; `.gitattributes` pins LF so a CRLF checkout cannot change a
-  hash (01064d7).
+- **`.gitignore` rules are anchored.** `/docs/` is the `-femit-docs` output; an unanchored
+  `docs/` also swallowed `src/docs/`, and a fresh clone could not build (`4c6c569`).
+  Anchor every directory rule.
+- **One canonical artifact form:** fixed key order, `\n` only, one record per line, sorted
+  at the boundary; `.gitattributes` pins LF so a CRLF checkout cannot change a hash
+  (`01064d7`).
+- **One canonical copy of every list.** A table that exists twice drifts; point at it
+  instead of restating it (GUIDE-8 is the test for the two limitation lists).
 
 ---
 
@@ -843,25 +834,26 @@ bounded inputs and outputs; version provenance (record `commit`, corpus `version
 
 ### Known gaps (verified in the tree)
 
-`PLAN.md` is the canonical, itemised backlog: every known defect, limitation and edge
-case, with the options considered and a verification step for each, plus the resolved
-tables for everything closed. This section deliberately keeps no second copy — a copy
-drifts. Read `PLAN.md` §1 for the current open set, and §4 for what is already closed,
-before assuming a gap still exists; do not restate either here.
+`PLAN.md` is the canonical, itemised backlog: every known defect, limitation and edge case,
+with the options considered and a verification step for each, plus the resolved ledger for
+everything closed. This section deliberately keeps no second copy — a copy drifts. Read
+`PLAN.md` §1 for the current open set, and §4 for what is already closed, before assuming a
+gap still exists; do not restate either here.
 
 ### Risks
 
 |Risk|Mitigation|
 |---|---|
-|Upstream master breaks|Parsing needs no compilation (D5); degrade-don't-skip; last good index keeps serving|
+|Upstream master breaks|Parsing needs no compilation (D5); degrade-don't-skip; the last good index keeps serving|
 |Zig std churn|Release leg pinned (D9); master canary non-blocking; std use confined to `Io`, `json`, `zon`, `zig.Ast`, `http`, `mem`|
 |Protocol revision churn|`supportedVersions` is data; `-32022`; legacy inference (D10)|
 |Bot PR noise|One batched PR per run, only when the index changes; reviewable JSONL|
 |Index growth|Configurable ceiling (default 256 MiB); per-project scope; RSS reported by bench|
 |Stale client cache|Index-derived results: 60 s TTL, `private`|
-|Reload races|Snapshot refcounting, single writer, swap after full validation|
+|Reload races|Snapshot refcounting, a single writer, swap only after full validation|
 |Corpus drift from the source doc|`advice_check`; mandatory labels; verbatim fact wording|
-|Prompt injection via upstream docs|Doc text is returned as data only|
+|Prompt injection via upstream docs|Doc text is returned as data only; `instructions` says so|
+|Artifact carried over by `--previous`|The sidecar's record count must agree, or the project is re-indexed (IDX-3)|
 
 ### Open questions with defaults
 
@@ -872,6 +864,7 @@ before assuming a gap still exists; do not restate either here.
 |Should `recommend_approach` rank?|It orders by score but makes no "best approach" claim; ranking against an objective needs a measured one|
 |`subscriptions/listen`?|Out of scope; the TTL covers freshness|
 |HTTP transport?|No — would reopen D1|
+|A call graph (callers, call paths)?|Not yet: a second corpus is a new decision, not a faster scan (`PLAN.md` PERF-1)|
 
 ---
 
@@ -879,34 +872,32 @@ before assuming a gap still exists; do not restate either here.
 
 - **Decisions are load-bearing.** Changing D1–D10 needs the user's explicit approval;
   record the new decision here in the same change.
-- **Keep docs in sync.** Behaviour change ⇒ update the relevant section here and the
+- **Keep docs in sync.** A behaviour change updates the relevant section here and the
   matching part of `readme.md` in the same commit. Keep §-numbers stable.
 - **Verify before claiming.** `zig build test` is the authority on compilation and
-  behaviour; also run `zig build check` after corpus edits and the `zig fmt` gate
-  before committing. Report only checks you actually ran.
-- **Git:** run `git log --oneline -5` and `git remote -v`; never quote a branch list
-  from this file. The previous text here claimed "no remote" while `origin` was
-  `github.com/biehla/ZigMCP`, and was wrong within a day — the exact failure §1
-  describes. One logical change per commit; amend or add, never rewrite a published
+  behaviour; also run `zig build check` after corpus edits and the `zig fmt` gate before
+  committing. Report only checks you actually ran.
+- **Git:** run `git log --oneline -5` and `git remote -v`; never quote a branch list from
+  this file. One logical change per commit; amend or add, never rewrite a published
   commit. Remove stray `docs/`/`.lib` from `-femit-docs` runs before committing.
 - **Never** hand-edit `generated/`, edit `systems_programming_context_v1.md` to change
   behaviour, add a runtime dependency, or print to stdout outside the transport.
-- **Document hygiene.** Cite a symbol, never a line number. Date a state claim or turn
-  it into a command (§1). Keep one canonical copy of a list — a second copy drifts.
-  A statement this change falsifies is fixed or deleted in the same commit, never
-  softened into something merely unfalsifiable.
-- **`git log` is evidence.** Before touching a guarded line, read the commit that put
-  it there: it names the failure the guard exists for (e.g. `0ca5f79` explains the
-  explicit `u64` widths in `src/util/sleep.zig`). Then write a message that names the
-  failure, not the diff.
+- **Document hygiene.** Cite a symbol, never a line number. Date a state claim or turn it
+  into a command (§1). Keep one canonical copy of a list — a second copy drifts. A
+  statement this change falsifies is fixed or deleted in the same commit, never softened
+  into something merely unfalsifiable.
+- **`git log` is evidence.** Before touching a guarded line, read the commit that put it
+  there: it names the failure the guard exists for (e.g. `0ca5f79` explains the explicit
+  `u64` widths in `src/util/sleep.zig`). Then write a message that names the failure, not
+  the diff.
 
 ---
 
 ## 16. Failure catalogue
 
 Defect classes this repository has actually hit, in the order they were found. Read the
-relevant row before writing a parser, a loader, or a protocol surface: each is cheaper
-to prevent than to debug, and each already has a guard here.
+relevant row before writing a parser, a loader or a protocol surface: each is cheaper to
+prevent than to debug, and each already has a guard here.
 
 |#|Symptom|Item|The check that catches it|
 |---|---|---|---|
@@ -921,18 +912,20 @@ to prevent than to debug, and each already has a guard here.
 |9|An unvalidated sidecar member is echoed to clients|PROTO-11|type and sign checked; omitted on mismatch|
 |10|"Nothing matched" arrives as a protocol error|PROTO-12|normal result, `isError: true`, schema-shaped|
 |11|`Fixture` and `fixture` collide|PROTO-13|project keys exact in URIs, symbol paths case-insensitive; tool arguments resolve exactly first (PROTO-14)|
-|12|CRLF changes a `doc_hash` and breaks the golden test|01064d7|`.gitattributes` LF; strip `\r` before hashing|
+|12|CRLF changes a `doc_hash` and breaks the golden test|`01064d7`|`.gitattributes` LF; strip `\r` before hashing|
 |13|A `lib/**` include matches nothing|IDX-2|test the pattern against a real tree, not by reading the regex|
 |14|A zero poll interval spins a core|REL-1|clamp to the 100 ms floor|
 |15|Shutdown hangs on a network read|REL-2|remote fetch owned by the watcher, never the startup path|
 |16|A stale index is served invisibly|REL-4|`index_state`/`index_error` reachable from `doc_import_status`|
-|17|`.gitignore` hides a source tree|4c6c569|anchor directory rules; `git status` on a fresh clone|
-|18|A test hangs instead of failing|4e0f03c|watchdog plus terminate-on-teardown|
+|17|`.gitignore` hides a source tree|`4c6c569`|anchor directory rules; `git status` on a fresh clone|
+|18|A test hangs instead of failing|`4e0f03c`|watchdog plus terminate-on-teardown|
 |19|`zig fetch --save` edits the wrong manifest|CI-11|run it in a subshell inside the checkout it must edit|
 |20|The lint gate is green locally and red in CI|CI-12|run actionlint with `shellcheck` visible on `PATH`|
 |21|The release tarball cannot start|CI-8|unpack into an empty directory and run it|
 |22|A project spelling differing by `-`/`_` or case silently matched nothing|PROTO-14|exact-first resolution, ambiguity reported, a miss names the known keys|
-|23|A path-qualified symbol typed unqualified returns a bare miss|PROTO-15|`doc_get` lists the closest stored symbols in `candidates`; the readme examples use the stored spelling|
+|23|A path-qualified symbol typed unqualified returns a bare miss|PROTO-15|`doc_get` lists the closest stored symbols in `candidates`; a unique dotted tail resolves (PROTO-16)|
+|24|A carried-over project reports a count it never walked|IDX-10|the count is `?usize`: read from the previous sidecar, omitted when unknown|
+|25|A metric's numerator and denominator count different things|IDX-10|the set is closed — every record-eligible site is counted, so the ratio cannot exceed 1|
 
-Add a row when a defect is fixed and no existing row would have caught it. A row that
-has never fired is still worth keeping: it is the checklist, not the history.
+Add a row when a defect is fixed and no existing row would have caught it. A row that has
+never fired is still worth keeping: it is the checklist, not the history.
