@@ -1,8 +1,8 @@
 # PLAN.md — defects, edge cases, limitations, and guideline deviations
 
-Status: open backlog. Twenty-two items were fixed on 2026-11-09, thirty-eight on
+Status: no open items. Twenty-two items were fixed on 2026-11-09, thirty-nine on
 2026-11-10, and five more were closed that day because they were already done — the
-option chosen for each, its commit and its verification are in §13–§31. Two sources: a read-through
+option chosen for each, its commit and its verification are in §13–§32. Two sources: a read-through
 of the tree on 2026-11-09, and a breakage campaign the same day that fuzzed the
 stdio surface and the indexer, profiled the hot paths, and inspected a `ReleaseSafe`
 PE with REA — method, measurements and negative results in §12.
@@ -84,11 +84,6 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri"
 
 ## 1. CI/CD
 
-- **CI-7 — no dependency caching.** Both jobs clone every upstream repo and re-fetch
-  toolchains each run. Options: (a) `actions/cache` keyed by project+commit; (b) reuse
-  the `zig fetch` package cache; (c) shallow clones (`--depth 1`) plus
-  `git fetch --depth 1 <sha>`. Verify: compare run times.
-
 ---
 
 ## 2. Protocol / MCP surface
@@ -143,25 +138,16 @@ recorded in §16. The symptom and its check stay in the readme troubleshooting t
 `src/regressions_test.zig` (run as `zig build test-regressions`, and as part of
 `zig build test`) holds the cross-cutting handler tests that need the real corpus
 and a loaded doc index. It is no longer a red-by-design suite: the items it covered
-are fixed (§13). The rows below are the items still open; each names the layer that
-must own its test, because no such layer exists yet.
+are fixed (§13). No item is open, so this map is empty — every id it ever named now
+has the test its layer owns, recorded with its commit in §13–§32.
 
-|Id|Regression test|If not: what must own it|
-|---|---|---|
-|CI-7|—|timing only|
-
-Every item above that names a handler can use the `Harness` in
-`src/regressions_test.zig` — it builds a real corpus and an empty index, so a new
-test is a few lines.
+New tests for a handler can use the `Harness` in `src/regressions_test.zig` — it
+builds a real corpus and an empty index, so a new test is a few lines.
 
 ## 11. Suggested order
 
-The first three steps of the original order — the pipeline, the cheap client-visible
-fixes and the data-plane trust items — are done (§13, §14, §15). What remains, in
-order:
-
-1. CI run time: CI-7 (dependency caching).
-2. Everything else in §1–§6 by demand.
+The queue is empty: every item this file listed is resolved in §13–§32. New work
+starts from a fresh read-through or a breakage campaign, not from this list.
 
 ---
 
@@ -489,6 +475,16 @@ in AGENTS.md §5.
 |Id|Option|Commit|Verification|
 |---|---|---|---|
 |REL-6|(c)|`8e047c1`|unit test `REL-6: a URL index has no local status sidecar`: `http(s)` paths are remote, a relative path and `file://` are not; `zig build test` passes|
+
+## 32. Resolved on 2026-11-10, eighteenth chunk
+
+One CI item, one commit (`93c6094`): both workflows fetch exactly the pinned commit
+instead of cloning the branch and checking the pin out, so a runner downloads no
+history it will not use.
+
+|Id|Option|Commit|Verification|
+|---|---|---|---|
+|CI-7|(c)|`93c6094`|the form `git init` + `remote add` + `fetch --depth 1 origin <sha>` + `checkout --detach FETCH_HEAD` was run against GitHub and resolved `FETCH_HEAD` to the pinned SHA; `zig build workflows` and the pinned actionlint pass. A before/after run-time comparison is a CI-only check|
 
 
 
