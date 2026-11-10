@@ -410,7 +410,8 @@ order (REL-10).
 
 ### Status sidecar (JSON, next to a local index)
 
-`<out minus .jsonl>.status.json`; the same path `deriveStatusPath` computes on both sides.
+`<out minus .jsonl>.status.json` (the `.status.json` suffix, derived by
+`deriveStatusPath` on both sides, so indexer and server agree on the name).
 
 ```json
 {"projects":{"<project>":{"commit":"…","records":33,"declarations":42,
@@ -422,9 +423,9 @@ order (REL-10).
 |---|---|
 |`commit`|The commit the records came from; a member that disagrees with the loaded index is another run's health|
 |`records`|Records this project contributed|
-|`declarations`|Every site the walk visited that can carry a record — a fn/var/field declaration, a named parameter, an error-set member, a file's `//!` run — documented or not, so `records / declarations ≤ 1` and the ratio is the documentation rule's yield (IDX-10). **Absent** when unknown: a project carried over from `--previous` reports the count its previous sidecar recorded, and omits the member if that sidecar has none — zero beside a full record count would be a fabricated yield|
+|`declarations`|Every site the walk visited that can carry a record — a fn/var/field declaration, a named parameter, an error-set member, a file's `//!` run — documented or not, so `records / declarations` can never exceed 1 and the ratio is the documentation rule's yield (IDX-10). **Absent** when unknown: a project carried over from `--previous` reports the count its previous sidecar recorded, and omits the member if that sidecar has none — zero beside a full record count would be a fabricated yield|
 |`files_total`, `files_degraded`|Files visited and files that did not parse cleanly|
-|`degraded[]`|One entry per degraded file: `path`, `reason` (unparsed: unreadable, oversized, too deeply nested) and `diagnostics[{tag, line}]`|
+|`degraded[]`|One entry per degraded file: `path`, `reason` (unparsed: unreadable, oversized, too deeply nested), and `diagnostics` — one `{tag, line}` per parser diagnostic|
 |`skipped`, `previous_records`|Present only on an incremental run (`--previous`): the project was carried over, and this many records were reused (IDX-3)|
 
 ### Upstream sources (`data/sources.zon`)
@@ -686,9 +687,9 @@ skill).
 - **`std.json`:** `ObjectMap` keeps `put(gpa, k, v)` on both toolchains. `std.json.Array`
   is **managed** on 0.17.1 (`.init(gpa)` + `append(v)`) and the **unmanaged**
   `std.ArrayList(Value)` on Zig master (`.empty` + `append(gpa, v)`), so JSON arrays are
-  constructed and appended only through `src/util/json_array.zig`, which selects the shape
-  at comptime via `@hasDecl(std.json.Array, "init")`. `std.ArrayList(T)` itself is
-  **unmanaged** (`append(gpa, v)`, `toOwnedSlice(gpa)`).
+  constructed and appended only through `src/util/json_array.zig` (`init`, `append`),
+  which selects the shape at comptime via `@hasDecl(std.json.Array, "init")`.
+  `std.ArrayList(T)` itself is **unmanaged** (`append(gpa, v)`, `toOwnedSlice(gpa)`).
 - **`std.json.Stringify.value(v, .{}, &writer)`** on a `std.json.Value` uses its
   `jsonStringify`; passing an anonymous struct serializes the struct instead — a silent
   wire bug.
@@ -696,7 +697,7 @@ skill).
   `source` must be `[:0]const u8`; `Diagnostics = { errors: []const Error }`.
   `fromSliceAlloc`/`free` are gone.
 
-### `std.zig.Ast`
+### `std.zig.Ast` (`lib/std/zig/Ast.zig`)
 
 - `Ast.parse(gpa, source, .{ .mode = .zig })` takes a sentinel-terminated source and
   **never fails on malformed input**: diagnostics land in `tree.errors`, mixing warnings
@@ -880,6 +881,10 @@ gap still exists; do not restate either here.
 - **Git:** run `git log --oneline -5` and `git remote -v`; never quote a branch list from
   this file. One logical change per commit; amend or add, never rewrite a published
   commit. Remove stray `docs/`/`.lib` from `-femit-docs` runs before committing.
+- **Commit subjects** carry the area and the id — `fix(indexer): IDX-10`,
+  `feat(tools): PROTO-16`, `docs(agents)` for this file, `docs(plan)` for the backlog,
+  `docs(readme)` for the user guide. The body names the failure the change fixes, not
+  the diff.
 - **Never** hand-edit `generated/`, edit `systems_programming_context_v1.md` to change
   behaviour, add a runtime dependency, or print to stdout outside the transport.
 - **Document hygiene.** Cite a symbol, never a line number. Date a state claim or turn it
