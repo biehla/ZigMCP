@@ -13,6 +13,8 @@ test {
     _ = @import("protocol/errors.zig");
     _ = @import("protocol/json_rpc.zig");
     _ = @import("protocol/meta.zig");
+    _ = @import("protocol/response.zig");
+    _ = @import("server/log.zig");
     _ = @import("server/prompts.zig");
     _ = @import("server/registry.zig");
     _ = @import("server/resources.zig");

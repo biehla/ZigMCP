@@ -160,7 +160,7 @@ server would put upstream-parse failure modes on the request path.
 |`src/advice/corpus.zig`|Loader for `data/advice/*.zon`; re-exports the schema types|
 |`src/advice/rules.zig`|Token-overlap matcher over the SELECT rules (P05)|
 |`src/advice/render.zig`|Record → structured JSON and text, labels attached|
-|`src/docs/index.zig`|JSONL loader (whole-or-nothing), 256 MiB ceiling|
+|`src/docs/index.zig`|JSONL loader (whole-or-nothing), configurable size ceiling|
 |`src/docs/columnar.zig`|P03 layout: one string table + parallel arrays|
 |`src/docs/reload.zig`|Index source (path/URL), snapshot store, watcher thread, atomic swap|
 |`src/docs/search.zig`|Scored symbol/path/doc search, limit clamp|
@@ -414,15 +414,18 @@ trusted as before.
 - Index location: `--index` or `ZIGMCP_INDEX` — a local path or an `http(s)://` URL.
   Default: `generated/index.jsonl` if it exists. None ⇒ an empty index (advice still
   served, doc tools report nothing matched).
+- Size ceiling: `--max-index-bytes <n>` or `ZIGMCP_MAX_INDEX_BYTES`, default 256 MiB
+  (`docs_index.max_index_bytes`). The same ceiling bounds the initial load, every
+  local reload and every HTTP download (REL-5).
 - A failed initial load logs to stderr and serves without an index; the watcher
   keeps trying. The log names the underlying cause — `FileNotFound`, `IsDir`,
-  `IndexTooLarge` (past the 256 MiB ceiling) or `MalformedRecord` (one bad line) —
+  `IndexTooLarge` (past the configured ceiling) or `MalformedRecord` (one bad line) —
   so an operator can tell a missing artifact from a corrupt one (REL-8). The same
   state reaches clients through `doc_import_status`'s `index_state`/`index_error`,
   so a stale index is visible without reading the server's stderr (REL-4).
 - **Local file:** polled every 1 s by mtime + size. **URL:** re-fetched every 60 s
   with `std.http.Client.fetch` (no conditional GET in the stdlib) and compared by
-  SHA-256; downloads are capped at 256 MiB.
+  SHA-256; downloads are capped at the configured ceiling.
 - New artifacts are parsed and validated **in full** into a fresh arena, then the
   active pointer is swapped. Readers hold reference-counted snapshots, so the old
   index is freed only after its last reader releases it. The watcher thread is the
@@ -476,8 +479,8 @@ behaviour.
 **Semantics the tests pin:** doc text verbatim except prefix stripping and line
 joining; the attachment rule; `tools/list` sorted by name and the index sorted by
 `(project, symbol)`; a degraded file still contributes records and never fails a
-start; a 256 MiB index ceiling (candidate, not yet measured on the full corpus); no
-wall-clock deadline claims — report p50/p95/p99 instead.
+start; a configurable index ceiling (default 256 MiB, candidate, not yet measured on
+the full corpus); no wall-clock deadline claims — report p50/p95/p99 instead.
 
 **Permanent-test rule:** tests must catch consumer-visible defects — behaviour,
 boundaries, invariants, transitions, precedence, errors. Not wiring, mock echoes,
@@ -527,6 +530,7 @@ zig fmt --check . --exclude tests/fixtures   # the fixture tree is deliberately 
   and running the same gates reproduces the canary locally.
 - **Server options:** `--index <path-or-url>` / `ZIGMCP_INDEX`; `--advice-dir <path>`
   / `ZIGMCP_ADVICE_DIR` (default `data/advice`, relative to the working directory);
+  `--max-index-bytes <n>` / `ZIGMCP_MAX_INDEX_BYTES` (default 268435456, i.e. 256 MiB);
   `--help`. Flags override the environment. An unknown argument or a missing option
   value prints one line and the usage block to stderr and exits 2 — never a bare Zig
   error name, a stack trace or exit 1 (SRV-8).
@@ -619,7 +623,8 @@ Load corpora once into arenas; serve requests from flat read-only structures; us
 per-request pool arena for scratch, reset after every message. Never re-parse ZON or
 JSONL per request. Reloads are atomic-replace: parse + validate fully, swap the
 pointer, drop the old one after its last reader — never mutate live structures.
-Bound every input and output (query length, clamped `limit`, 256 MiB artifacts).
+Bound every input and output (query length, clamped `limit`, artifacts bounded by
+`--max-index-bytes`).
 
 ### Adding a capability
 
@@ -704,7 +709,7 @@ summary below is the part that changes how you work in this tree.
 |Zig std churn|Release leg pinned (D9); master canary non-blocking; std use confined to `Io`, `json`, `zon`, `zig.Ast`, `http`, `mem`|
 |Protocol revision churn|`supportedVersions` is data; `-32022`; legacy inference (D10)|
 |Bot PR noise|One batched PR per run, only when the index changes; reviewable JSONL|
-|Index growth|256 MiB ceiling; per-project scope; RSS reported by bench|
+|Index growth|Configurable ceiling (default 256 MiB); per-project scope; RSS reported by bench|
 |Stale client cache|Index-derived results: 60 s TTL, `private`|
 |Reload races|Snapshot refcounting, single writer, swap after full validation|
 |Corpus drift from the source doc|`advice_check`; mandatory labels; verbatim fact wording|

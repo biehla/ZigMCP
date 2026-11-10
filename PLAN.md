@@ -237,10 +237,6 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri"
   classifies only `http(s)://`. Options: (a) strip `file://` into a path; (b) reject
   with a clear error; (c) document. Verify: `--index file:///tmp/i.jsonl`.
 
-- **REL-5 — the 256 MiB ceiling is hard-coded.** A larger corpus is rejected with only
-  a stderr message. Options: (a) a `--max-index-bytes` flag; (b) stream the load;
-  (c) keep and document. Verify: `--index` a sparse 257 MiB file.
-
 - **REL-6 — remote indexes have no status sidecar,** so degraded-file data is
   invisible. Options: (a) fetch `<url>.status.json`; (b) embed status as an index
   header record; (c) accept. Verify: `doc_import_status` on a URL index.

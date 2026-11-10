@@ -7,6 +7,7 @@
 
 const std = @import("std");
 const registry = @import("registry.zig");
+const columnar_module = @import("../docs/columnar.zig");
 const corpus_module = @import("../advice/corpus.zig");
 const render = @import("../advice/render.zig");
 const text_util = @import("../util/text.zig");
@@ -198,7 +199,45 @@ pub fn listTemplates(ctx: *registry.Context) !registry.Result {
     return .{ .value = .{ .object = list_object }, .cache = registry.index_cache };
 }
 
-fn projectNames(gpa: std.mem.Allocator, columnar: *const @import("../docs/columnar.zig").Columnar) ![][]const u8 {
+/// Records one `docs://{project}/index` listing renders before it truncates.
+///
+/// One read used to return every symbol of a project, unbounded in size
+/// (PROTO-10). The cap is a truncation with a marker, not a silent cut: a
+/// client can see that more records exist and reach them through
+/// `doc_search` / `doc_get`.
+pub const max_index_listing_records: usize = 5_000;
+
+/// Renders the project's `path:line symbol` lines, at most `max_records` of
+/// them, and returns the project's total record count.
+fn appendIndexListing(
+    gpa: std.mem.Allocator,
+    columnar: *const columnar_module.Columnar,
+    project: []const u8,
+    max_records: usize,
+    text: *std.ArrayList(u8),
+) !usize {
+    var written: usize = 0;
+    var total: usize = 0;
+    for (0..columnar.count()) |record| {
+        // Project keys are exact identifiers (PROTO-13): `Fixture` and
+        // `fixture` are different projects and different URIs.
+        if (!std.mem.eql(u8, columnar.projectAt(record), project)) continue;
+        total += 1;
+        if (written >= max_records) continue;
+        try text.print(gpa, "{s}:{d} {s}\n", .{
+            columnar.pathAt(record),
+            columnar.lines[record],
+            columnar.symbolAt(record),
+        });
+        written += 1;
+    }
+    if (total > written) {
+        try text.print(gpa, "\n… truncated: {d} more records; use doc_search or doc_get for the rest\n", .{total - written});
+    }
+    return total;
+}
+
+fn projectNames(gpa: std.mem.Allocator, columnar: *const columnar_module.Columnar) ![][]const u8 {
     var names: std.ArrayList([]const u8) = .empty;
     for (0..columnar.count()) |record| {
         const name = columnar.projectAt(record);
@@ -363,17 +402,8 @@ fn docsText(ctx: *registry.Context, uri: []const u8) ResourceError![]const u8 {
     if (std.mem.endsWith(u8, rest, "/index")) {
         const project = rest[0 .. rest.len - "/index".len];
         var text: std.ArrayList(u8) = .empty;
-        for (0..columnar.count()) |record| {
-            // Project keys are exact identifiers (PROTO-13): `Fixture` and
-            // `fixture` are different projects and different URIs.
-            if (!std.mem.eql(u8, columnar.projectAt(record), project)) continue;
-            try text.print(gpa, "{s}:{d} {s}\n", .{
-                columnar.pathAt(record),
-                columnar.lines[record],
-                columnar.symbolAt(record),
-            });
-        }
-        if (text.items.len == 0) return error.UnknownResource;
+        const total = try appendIndexListing(gpa, columnar, project, max_index_listing_records, &text);
+        if (total == 0) return error.UnknownResource;
         return text.toOwnedSlice(gpa);
     }
 
@@ -396,4 +426,39 @@ fn docsText(ctx: *registry.Context, uri: []const u8) ResourceError![]const u8 {
     }
 
     return error.UnknownResource;
+}
+
+test "PROTO-10: a project index listing is capped and says so" {
+    // One read used to return every symbol of a project, unbounded in size.
+    // The helper takes the cap as a parameter so the truncation contract is
+    // testable with three records; the policy constant is
+    // `max_index_listing_records`.
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    var builder = columnar_module.Builder.init(gpa);
+    for ([_][]const u8{ "a", "b", "c" }, 0..) |symbol, index| {
+        try builder.append(.{
+            .project = "p",
+            .commit = "c",
+            .path = "m.zig",
+            .line = @intCast(index + 1),
+            .kind = .function,
+            .symbol = symbol,
+            .container = "",
+            .doc = "docs",
+            .doc_hash = "h",
+        });
+    }
+    const index = try builder.finish();
+
+    var text: std.ArrayList(u8) = .empty;
+    const total = try appendIndexListing(gpa, &index, "p", 2, &text);
+
+    try std.testing.expectEqual(@as(usize, 3), total);
+    try std.testing.expect(std.mem.indexOf(u8, text.items, "m.zig:1 a") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text.items, "m.zig:2 b") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text.items, "m.zig:3 c") == null);
+    try std.testing.expect(std.mem.indexOf(u8, text.items, "truncated: 1 more records") != null);
 }

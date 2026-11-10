@@ -8,6 +8,7 @@
 const std = @import("std");
 const index_module = @import("index.zig");
 const sleep_module = @import("../util/sleep.zig");
+const log_module = @import("../server/log.zig");
 
 pub const Index = index_module.Index;
 
@@ -26,6 +27,15 @@ pub const Source = union(enum) {
     pub fn fromString(location: []const u8) Source {
         if (std.mem.startsWith(u8, location, "http://") or std.mem.startsWith(u8, location, "https://")) {
             return .{ .url = location };
+        }
+        // `file://` is a path with a scheme (REL-3). A Windows path is spelled
+        // `file:///C:/x`, so the slash before the drive letter is not part of
+        // the path; a POSIX one is `file:///tmp/i.jsonl`, where the leading
+        // slash is.
+        if (std.mem.startsWith(u8, location, "file://")) {
+            var path = location["file://".len..];
+            if (path.len >= 3 and path[0] == '/' and path[2] == ':') path = path[1..];
+            return .{ .file = path };
         }
         return .{ .file = location };
     }
@@ -52,13 +62,16 @@ pub const Loaded = struct {
 };
 
 /// Loads an index artifact from a local path or an HTTP(S) URL.
-pub fn loadSource(io: std.Io, gpa: std.mem.Allocator, source: Source) !Loaded {
+///
+/// `max_bytes` bounds the read or download; `--max-index-bytes` overrides the
+/// documented default (REL-5).
+pub fn loadSource(io: std.Io, gpa: std.mem.Allocator, source: Source, max_bytes: usize) !Loaded {
     switch (source) {
         .file => |path| {
-            return .{ .index = try index_module.loadFile(io, gpa, path), .digest = @splat(0) };
+            return .{ .index = try index_module.loadFile(io, gpa, path, max_bytes), .digest = @splat(0) };
         },
         .url => |url| {
-            const bytes = try fetchUrl(io, gpa, url);
+            const bytes = try fetchUrl(io, gpa, url, max_bytes);
             defer gpa.free(bytes);
             return .{ .index = try index_module.load(gpa, bytes), .digest = digestOf(bytes) };
         },
@@ -71,11 +84,11 @@ pub fn loadSource(io: std.Io, gpa: std.mem.Allocator, source: Source) !Loaded {
 /// remote index is refreshed by re-fetching and comparing content hashes
 /// (AGENTS.md §8). The download is bounded by the same ceiling the local loader
 /// enforces, so a hostile artifact cannot exhaust memory.
-fn fetchUrl(io: std.Io, gpa: std.mem.Allocator, url: []const u8) ![]u8 {
+fn fetchUrl(io: std.Io, gpa: std.mem.Allocator, url: []const u8, max_bytes: usize) ![]u8 {
     var client: std.http.Client = .{ .allocator = gpa, .io = io };
     defer client.deinit();
 
-    var bounded = try BoundedWriter.init(gpa, index_module.max_index_bytes);
+    var bounded = try BoundedWriter.init(gpa, max_bytes);
     defer bounded.deinit();
 
     const result = try client.fetch(.{
@@ -377,14 +390,22 @@ const Context = struct {
     io: std.Io,
     source: Source,
     poll_interval_ms: u64,
+    /// Client-directed log events (PROTO-4). The watcher thread only pushes
+    /// here; the request loop is the writer of stdout.
+    log: *log_module.Queue,
     stop: std.atomic.Value(bool) = .init(false),
     /// Set when the watch loop has returned.
     finished: std.atomic.Value(bool) = .init(false),
     last_size: u64 = 0,
     last_mtime: i128 = 0,
+    /// Metadata-change time: a rewrite that restores `mtime` still moves this
+    /// (REL-7), so the poll cannot miss an equal-size, equal-mtime edit.
+    last_ctime: i128 = 0,
     have_stat: bool = false,
     last_digest: Digest = @splat(0),
     have_digest: bool = false,
+    /// Ceiling for every reload this watcher performs (REL-5).
+    max_bytes: usize = index_module.max_index_bytes,
 };
 
 /// Starts the watcher thread for `source`.
@@ -397,7 +418,9 @@ pub fn startWatcher(
     store: *Store,
     source: Source,
     poll_interval_ms: u64,
+    log: *log_module.Queue,
     seed_digest: ?Digest,
+    max_bytes: usize,
 ) !Watcher {
     const context = try gpa.create(Context);
     context.* = .{
@@ -405,6 +428,8 @@ pub fn startWatcher(
         .io = io,
         .source = source,
         .poll_interval_ms = poll_interval_ms,
+        .log = log,
+        .max_bytes = max_bytes,
     };
     switch (source) {
         .file => |path| {
@@ -412,6 +437,7 @@ pub fn startWatcher(
             if (statFile(io, path)) |stat| {
                 context.last_size = stat.size;
                 context.last_mtime = stat.mtime.nanoseconds;
+                context.last_ctime = stat.ctime.nanoseconds;
                 context.have_stat = true;
             }
         },
@@ -455,26 +481,34 @@ fn sleepUntilStopped(context: *Context) void {
 fn watchFile(context: *Context, path: []const u8) void {
     const io = context.io;
     const stat = statFile(io, path) orelse return;
-    if (context.have_stat and stat.size == context.last_size and stat.mtime.nanoseconds == context.last_mtime) {
+    if (context.have_stat and
+        stat.size == context.last_size and
+        stat.mtime.nanoseconds == context.last_mtime and
+        stat.ctime.nanoseconds == context.last_ctime)
+    {
         return;
     }
 
     const replacement = context.store.gpa.create(Index) catch |err| {
         context.store.setStatus(.reload_failed, @errorName(err));
+        context.log.push(.warning, "index reload failed");
         logStderr(io, "zigmcp: index reload failed ({s}); keeping the previous index\n", .{@errorName(err)});
         context.last_size = stat.size;
         context.last_mtime = stat.mtime.nanoseconds;
+        context.last_ctime = stat.ctime.nanoseconds;
         context.have_stat = true;
         return;
     };
-    replacement.* = index_module.loadFile(io, context.store.gpa, path) catch |err| {
+    replacement.* = index_module.loadFile(io, context.store.gpa, path, context.max_bytes) catch |err| {
         context.store.gpa.destroy(replacement);
         context.store.setStatus(.reload_failed, @errorName(err));
+        context.log.push(.warning, "index reload failed");
         logStderr(io, "zigmcp: index reload failed ({s}); keeping the previous index\n", .{@errorName(err)});
         // Remember the failed artifact so a broken file is not retried in a
         // tight loop; the next change triggers another attempt.
         context.last_size = stat.size;
         context.last_mtime = stat.mtime.nanoseconds;
+        context.last_ctime = stat.ctime.nanoseconds;
         context.have_stat = true;
         return;
     };
@@ -482,6 +516,7 @@ fn watchFile(context: *Context, path: []const u8) void {
     context.store.swap(replacement);
     context.last_size = stat.size;
     context.last_mtime = stat.mtime.nanoseconds;
+    context.last_ctime = stat.ctime.nanoseconds;
     context.have_stat = true;
 }
 
@@ -491,7 +526,8 @@ fn watchUrl(context: *Context, url: []const u8) void {
     const io = context.io;
     const gpa = context.store.gpa;
 
-    const bytes = fetchUrl(io, gpa, url) catch |err| {
+    const bytes = fetchUrl(io, gpa, url, context.max_bytes) catch |err| {
+        context.log.push(.warning, "index refresh failed");
         logStderr(io, "zigmcp: index refresh failed ({s}); keeping the previous index\n", .{@errorName(err)});
         return;
     };
@@ -502,6 +538,7 @@ fn watchUrl(context: *Context, url: []const u8) void {
 
     const replacement = gpa.create(Index) catch |err| {
         context.store.setStatus(.reload_failed, @errorName(err));
+        context.log.push(.warning, "index reload failed");
         logStderr(io, "zigmcp: index reload failed ({s}); keeping the previous index\n", .{@errorName(err)});
         context.last_digest = digest;
         context.have_digest = true;
@@ -510,6 +547,7 @@ fn watchUrl(context: *Context, url: []const u8) void {
     replacement.* = index_module.load(gpa, bytes) catch |err| {
         gpa.destroy(replacement);
         context.store.setStatus(.reload_failed, @errorName(err));
+        context.log.push(.warning, "index reload failed");
         logStderr(io, "zigmcp: index reload failed ({s}); keeping the previous index\n", .{@errorName(err)});
         // Remember the failed artifact so a broken download is not retried in a
         // tight loop; the next publish triggers another attempt.
@@ -565,6 +603,18 @@ test "an index location is classified as a file or a URL" {
     try std.testing.expectEqual(Source{ .url = "http://example.test/index.jsonl" }, Source.fromString("http://example.test/index.jsonl"));
     try std.testing.expectEqual(Source{ .url = "https://example.test/index.jsonl" }, Source.fromString("https://example.test/index.jsonl"));
     try std.testing.expectEqualStrings("https://example.test/index.jsonl", Source.fromString("https://example.test/index.jsonl").text());
+
+    // REL-3: a `file://` URL is a path with a scheme, not a relative path
+    // named "file:/...". A POSIX path keeps its leading slash; a Windows path
+    // is `file:///C:/x` and the slash before the drive letter is not part of
+    // the path.
+    const posix = Source.fromString("file:///tmp/i.jsonl");
+    try std.testing.expect(!posix.isUrl());
+    try std.testing.expectEqualStrings("/tmp/i.jsonl", posix.text());
+
+    const windows = Source.fromString("file:///C:/Users/me/index.jsonl");
+    try std.testing.expect(!windows.isUrl());
+    try std.testing.expectEqualStrings("C:/Users/me/index.jsonl", windows.text());
 }
 
 test "a reload concurrent with in-flight reads never tears an index" {

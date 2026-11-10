@@ -110,6 +110,7 @@ absolute path.
 |---|---|---|---|
 |`--index <path-or-url>`|`ZIGMCP_INDEX`|`generated/index.jsonl`, if that file exists|Doc index to load and keep watching. A local path or an `http://` / `https://` URL|
 |`--advice-dir <path>`|`ZIGMCP_ADVICE_DIR`|`data/advice`|Directory holding the five advice files|
+|`--max-index-bytes <n>`|`ZIGMCP_MAX_INDEX_BYTES`|`268435456` (256 MiB)|Largest index artifact accepted, for both a local file and an HTTP download|
 |`--help`, `-h`|—|—|Print usage to stderr and exit|
 
 - A flag wins over the environment variable.
@@ -132,7 +133,8 @@ absolute path.
 A new index is loaded and checked completely before it replaces the old one. If the
 new file is broken, the server keeps serving the previous index. Requests in
 progress always see one complete index, never a mix. Index files larger than
-256 MiB are rejected.
+256 MiB by default — or larger than the configured `--max-index-bytes` — are
+rejected.
 
 The server only reads. It never writes files, never contacts anything except the
 configured index URL, and prints diagnostics to stderr only.

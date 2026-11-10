@@ -9,6 +9,7 @@ const registry = @import("server/registry.zig");
 const meta = @import("protocol/meta.zig");
 const errors = @import("protocol/errors.zig");
 const json_rpc = @import("protocol/json_rpc.zig");
+const response_module = @import("protocol/response.zig");
 const transport_module = @import("transport/stdio.zig");
 const corpus_module = @import("advice/corpus.zig");
 const rules_module = @import("advice/rules.zig");
@@ -16,6 +17,7 @@ const docs_index = @import("docs/index.zig");
 const docs_reload = @import("docs/reload.zig");
 const pool_module = @import("util/arena_pool.zig");
 const discover = @import("server/discover.zig");
+const log_module = @import("server/log.zig");
 const tools_module = @import("server/tools.zig");
 const resources_module = @import("server/resources.zig");
 const prompts_module = @import("server/prompts.zig");
@@ -29,6 +31,9 @@ const remote_poll_ms: u64 = 60_000;
 const Options = struct {
     advice_dir: []const u8 = default_advice_dir,
     index_path: ?[]const u8 = null,
+    /// Ceiling for the index artifact: `--max-index-bytes` or
+    /// `ZIGMCP_MAX_INDEX_BYTES`, defaulting to the documented 256 MiB (REL-5).
+    max_index_bytes: usize = docs_index.max_index_bytes,
     help: bool = false,
 };
 
@@ -42,6 +47,7 @@ pub fn main(init: std.process.Init) !void {
         logStderr(init.io, "zigmcp: {s}\n", .{switch (err) {
             error.UnknownArgument => "unknown argument",
             error.MissingArgument => "missing value for an option",
+            error.InvalidArgument => "invalid value for an option",
             else => @errorName(err),
         }});
         printUsage(init.io) catch {};
@@ -76,6 +82,10 @@ pub fn main(init: std.process.Init) !void {
     var store_alive = true;
     defer if (store_alive) store.deinit();
 
+    // Client-directed logs (PROTO-4): the watcher pushes from its thread and
+    // the request loop — the only writer of stdout — drains the queue.
+    var log_queue: log_module.Queue = .{};
+
     var index_path: ?[]const u8 = null;
     var index_source: ?docs_reload.Source = null;
     var index_digest: ?docs_reload.Digest = null;
@@ -84,7 +94,7 @@ pub fn main(init: std.process.Init) !void {
         const source = docs_reload.Source.fromString(path);
         index_source = source;
         const loaded = gpa.create(docs_index.Index) catch |err| return err;
-        if (docs_reload.loadSource(init.io, gpa, source)) |result| {
+        if (docs_reload.loadSource(init.io, gpa, source, options.max_index_bytes)) |result| {
             loaded.* = result.index;
             index_digest = result.digest;
             store.swap(loaded);
@@ -106,7 +116,7 @@ pub fn main(init: std.process.Init) !void {
         // ~60 s, so polling the origin every second would hammer it for no
         // benefit.
         const poll_ms = if (source.isUrl()) remote_poll_ms else watcher_poll_ms;
-        watcher = docs_reload.startWatcher(gpa, init.io, &store, source, poll_ms, index_digest) catch |err| blk: {
+        watcher = docs_reload.startWatcher(gpa, init.io, &store, source, poll_ms, &log_queue, index_digest, options.max_index_bytes) catch |err| blk: {
             logStderr(init.io, "zigmcp: cannot start the index watcher ({s})\n", .{@errorName(err)});
             break :blk null;
         };
@@ -134,6 +144,7 @@ pub fn main(init: std.process.Init) !void {
         .matcher = &matcher,
         .docs = &store,
         .index_path = index_path,
+        .log = &log_queue,
     };
 
     var reader_buffer: [64 * 1024]u8 = undefined;
@@ -167,9 +178,34 @@ pub fn main(init: std.process.Init) !void {
         const line = maybe_line orelse break :serve;
 
         pool.reset();
+        drainLog(&log_queue, pool.allocator(), &transport);
         handleLine(&ctx, &transport, line) catch |err| {
-            logStderr(init.io, "zigmcp: request handling failed ({s})\n", .{@errorName(err)});
+            if (err != error.OutOfMemory) {
+                logStderr(init.io, "zigmcp: request handling failed ({s})\n", .{@errorName(err)});
+                continue :serve;
+            }
+            // A dropped request leaves the client waiting for a response that
+            // never comes (SRV-3): answer -32603 from a fresh pool.
+            pool.reset();
+            sendError(&transport, pool.allocator(), null, errors.outOfMemory()) catch |send_err| {
+                logStderr(init.io, "zigmcp: cannot report the out-of-memory failure ({s})\n", .{@errorName(send_err)});
+                break :serve;
+            };
         };
+    }
+}
+
+/// Emits queued log events as `notifications/message` lines (PROTO-4).
+///
+/// The watcher thread never touches stdout: it pushes into the queue, and this
+/// loop is the single writer. A write failure is not fatal — a client that
+/// closed its end is already gone.
+fn drainLog(queue: *log_module.Queue, gpa: std.mem.Allocator, transport: *transport_module.Transport) void {
+    var events: [log_module.capacity]log_module.Event = undefined;
+    const count = queue.drain(&events);
+    for (events[0..count]) |event| {
+        const notification = log_module.toNotification(gpa, event) catch continue;
+        transport.writeValue(notification) catch continue;
     }
 }
 
@@ -211,6 +247,21 @@ fn handleLine(ctx: *registry.Context, transport: *transport_module.Transport, li
         },
     };
 
+    // `_meta` carries the log level per request: a client that omits it gets
+    // no notifications, and an unknown name is invalid params rather than a
+    // silently ignored opt-in (PROTO-4).
+    if (resolution.log_level) |level_text| {
+        const level = log_module.Level.parse(level_text) orelse {
+            return sendError(transport, gpa, request.id, .{
+                .code = .invalid_params,
+                .message = "Invalid params: _meta.logLevel must be one of debug, info, notice, warning, error, critical, alert, emergency.",
+            });
+        };
+        ctx.log.setMinimum(level);
+    } else {
+        ctx.log.setMinimum(null);
+    }
+
     const outcome = dispatch(ctx, request, resolution) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
     };
@@ -221,8 +272,16 @@ fn handleLine(ctx: *registry.Context, transport: *transport_module.Transport, li
     switch (outcome) {
         .failure => |failure| return sendError(transport, gpa, request.id, failure),
         .result => |result| {
-            const response = try buildResponse(ctx, request.id.?, result, resolution.version);
-            try transport.writeValue(response);
+            // A handler result must be an object: the envelope adds members to
+            // it, and an unchecked `.object` panicked the process (SRV-2).
+            const envelope = response_module.build(gpa, request.id.?, result, resolution.version) catch |err| switch (err) {
+                error.NonObjectResult => return sendError(transport, gpa, request.id, .{
+                    .code = .internal_error,
+                    .message = "Internal error: the handler returned a non-object result.",
+                }),
+                error.OutOfMemory => return error.OutOfMemory,
+            };
+            try transport.writeValue(envelope);
         },
     }
 }
@@ -242,7 +301,18 @@ fn dispatch(
         if (resolution.version == .legacy) {
             return .{ .result = try discover.initializeLegacy(ctx) };
         }
-        return .{ .failure = .{ .code = .method_not_found, .message = "Unknown method: initialize." } };
+        // `initialize` was removed in 2026-07-28, so answering it would be a
+        // second discovery path (D7). The error carries what a client needs to
+        // recover: the method to call and the revisions on offer (PROTO-3).
+        const gpa = ctx.pool.allocator();
+        var data: std.json.ObjectMap = .{};
+        try data.put(gpa, "use", .{ .string = "server/discover" });
+        try data.put(gpa, "supportedVersions", try meta.supportedVersionsValue(gpa));
+        return .{ .failure = .{
+            .code = .method_not_found,
+            .message = "Unknown method: initialize (call server/discover on 2026-07-28).",
+            .data = .{ .object = data },
+        } };
     }
 
     if (std.mem.eql(u8, method, "tools/list")) {
@@ -320,51 +390,6 @@ fn dispatch(
     return .{ .failure = .{ .code = .method_not_found, .message = "Unknown method." } };
 }
 
-fn buildResponse(
-    ctx: *registry.Context,
-    id: json_rpc.Id,
-    result: registry.Result,
-    version: meta.Version,
-) !std.json.Value {
-    const gpa = ctx.pool.allocator();
-
-    var payload = result.value.object;
-
-    if (version == .current) {
-        try payload.put(gpa, "resultType", .{ .string = "complete" });
-
-        var server_info: std.json.ObjectMap = .{};
-        try server_info.put(gpa, "name", .{ .string = registry.server_name });
-        try server_info.put(gpa, "version", .{ .string = registry.server_version });
-
-        var meta_object: std.json.ObjectMap = .{};
-        try meta_object.put(gpa, "io.modelcontextprotocol/serverInfo", .{ .object = server_info });
-        try payload.put(gpa, "_meta", .{ .object = meta_object });
-
-        if (result.cache) |cache| {
-            try payload.put(gpa, "ttlMs", .{ .integer = @intCast(cache.ttl_ms) });
-            try payload.put(gpa, "cacheScope", .{ .string = switch (cache.scope) {
-                .public => "public",
-                .private => "private",
-            } });
-        }
-    }
-
-    var object: std.json.ObjectMap = .{};
-    try object.put(gpa, "jsonrpc", .{ .string = "2.0" });
-    try object.put(gpa, "id", idValue(id));
-    try object.put(gpa, "result", .{ .object = payload });
-    return .{ .object = object };
-}
-
-fn idValue(id: json_rpc.Id) std.json.Value {
-    return switch (id) {
-        .number => |number| .{ .integer = number },
-        .string => |string| .{ .string = string },
-        .null => .{ .null = {} },
-    };
-}
-
 fn sendError(
     transport: *transport_module.Transport,
     gpa: std.mem.Allocator,
@@ -373,7 +398,7 @@ fn sendError(
 ) !void {
     var object: std.json.ObjectMap = .{};
     try object.put(gpa, "jsonrpc", .{ .string = "2.0" });
-    try object.put(gpa, "id", if (id) |value| idValue(value) else .{ .null = {} });
+    try object.put(gpa, "id", if (id) |value| response_module.idValue(value) else .{ .null = {} });
     try object.put(gpa, "error", try errors.toValue(gpa, failure));
     try transport.writeValue(.{ .object = object });
 }
@@ -387,6 +412,9 @@ fn parseOptions(init: std.process.Init) !Options {
     }
     if (init.environ_map.get("ZIGMCP_INDEX")) |path| {
         options.index_path = path;
+    }
+    if (init.environ_map.get("ZIGMCP_MAX_INDEX_BYTES")) |text| {
+        options.max_index_bytes = std.fmt.parseInt(usize, text, 10) catch return error.InvalidArgument;
     }
 
     // The arguments are copied into the process arena so they outlive this
@@ -406,6 +434,10 @@ fn parseOptions(init: std.process.Init) !Options {
             index += 1;
             if (index >= args.len) return error.MissingArgument;
             options.index_path = args[index];
+        } else if (std.mem.eql(u8, argument, "--max-index-bytes")) {
+            index += 1;
+            if (index >= args.len) return error.MissingArgument;
+            options.max_index_bytes = std.fmt.parseInt(usize, args[index], 10) catch return error.InvalidArgument;
         } else if (index == 0) {
             // argv[0] is the program name.
             continue;
@@ -436,12 +468,16 @@ fn printUsage(io: std.Io) !void {
         \\zigmcp — an MCP server for systems-programming advice and imported Zig docs
         \\
         \\Usage: zigmcp [--index <path-or-url>] [--advice-dir <path>]
+        \\              [--max-index-bytes <n>]
         \\
         \\  --index <path>      JSONL doc index to load and watch: a local path or an
         \\                      HTTP(S) URL (default: generated/index.jsonl when it
         \\                      exists; also settable through ZIGMCP_INDEX)
         \\  --advice-dir <path> Advice corpus directory (default: data/advice; also settable
         \\                      through ZIGMCP_ADVICE_DIR)
+        \\  --max-index-bytes <n>  Reject an index larger than <n> bytes, locally and over
+        \\                      HTTP (default: 268435456, i.e. 256 MiB; also settable
+        \\                      through ZIGMCP_MAX_INDEX_BYTES)
         \\  --help              Show this message
         \\
     );

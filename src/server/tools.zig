@@ -23,10 +23,19 @@ pub const advice_lookup_input = registry.Schema{ .fields = &.{
     .{ .name = "question", .kind = .string, .required = false, .description = "Free-text question matched against the advice records." },
 } };
 
-pub const advice_lookup_output = registry.Schema{ .fields = &.{
-    .{ .name = "query", .kind = .string },
-    .{ .name = "matches", .kind = .array },
-} };
+/// How many pattern records question mode returns before it truncates.
+pub const max_advice_matches: usize = 5;
+
+pub const advice_lookup_output = registry.Schema{
+    .fields = &.{
+        .{ .name = "query", .kind = .string },
+        .{ .name = "matches", .kind = .array },
+        // PROTO-7: the cap was silent, so a caller could not tell five matches
+        // from five-and-more. Both members are always present.
+        .{ .name = "match_count", .kind = .integer, .description = "Number of records in `matches`." },
+        .{ .name = "truncated", .kind = .boolean, .description = "True when more records matched than were returned." },
+    },
+};
 
 pub const recommend_approach_input = registry.Schema{ .fields = &.{
     .{ .name = "signals", .kind = .string_array, .description = "Observed signals from the system under discussion." },
@@ -92,6 +101,8 @@ fn emptyAdviceResult(gpa: std.mem.Allocator, query: []const u8) !std.json.Value 
     var object: std.json.ObjectMap = .{};
     try object.put(gpa, "query", .{ .string = query });
     try object.put(gpa, "matches", .{ .array = json_array.init(gpa) });
+    try object.put(gpa, "match_count", .{ .integer = 0 });
+    try object.put(gpa, "truncated", .{ .bool = false });
     return .{ .object = object };
 }
 
@@ -109,6 +120,7 @@ pub fn adviceLookup(ctx: *Context, args: std.json.Value) ToolError!ToolOutcome {
 
     var matches: std.json.Array = json_array.init(gpa);
     var text: std.ArrayList(u8) = .empty;
+    var truncated = false;
 
     if (concept) |id| {
         const pattern = ctx.corpus.findPattern(id) orelse {
@@ -122,7 +134,9 @@ pub fn adviceLookup(ctx: *Context, args: std.json.Value) ToolError!ToolOutcome {
         try text.appendSlice(gpa, try render.patternText(gpa, pattern));
     } else {
         const query = question.?;
-        const scored = try scorePatterns(ctx, gpa, query);
+        const query_tokens = try text_util.tokenize(gpa, query);
+        if (query_tokens.len > registry.max_query_tokens) return error.InvalidParams;
+        const scored = try scorePatterns(ctx, gpa, query_tokens);
         if (scored.len == 0) {
             return toolFailure(
                 gpa,
@@ -130,15 +144,24 @@ pub fn adviceLookup(ctx: *Context, args: std.json.Value) ToolError!ToolOutcome {
                 try emptyAdviceResult(gpa, query),
             );
         }
-        for (scored) |entry| {
+        // The cap is reported, never silent (PROTO-7): `match_count` is what
+        // was returned and `truncated` says more matched.
+        const shown = @min(scored.len, max_advice_matches);
+        truncated = scored.len > shown;
+        for (scored[0..shown]) |entry| {
             try json_array.append(&matches, gpa, try render.patternValue(gpa, entry.pattern));
             try text.appendSlice(gpa, try render.patternText(gpa, entry.pattern));
+        }
+        if (truncated) {
+            try text.print(gpa, "\n({d} more records matched; narrow the question to see them.)\n", .{scored.len - shown});
         }
     }
 
     var structured: std.json.ObjectMap = .{};
     try structured.put(gpa, "query", .{ .string = concept orelse question.? });
     try structured.put(gpa, "matches", .{ .array = matches });
+    try structured.put(gpa, "match_count", .{ .integer = @intCast(matches.items.len) });
+    try structured.put(gpa, "truncated", .{ .bool = truncated });
 
     return .{
         .text = try text.toOwnedSlice(gpa),
@@ -153,12 +176,18 @@ pub const ScoredPattern = struct {
 
 /// The advice records that match a free-text question, best match first.
 pub fn matchingPatterns(ctx: *Context, gpa: std.mem.Allocator, question: []const u8) ![]ScoredPattern {
-    return scorePatterns(ctx, gpa, question);
+    const scored = try scorePatterns(ctx, gpa, try text_util.tokenize(gpa, question));
+    // A prompt renders its matches inline, so it keeps the compact cap that
+    // `advice_lookup` used to apply on its way out.
+    if (scored.len > max_advice_matches) return scored[0..max_advice_matches];
+    return scored;
 }
 
-fn scorePatterns(ctx: *Context, gpa: std.mem.Allocator, question: []const u8) ![]ScoredPattern {
-    const query_tokens = try text_util.tokenize(gpa, question);
-
+fn scorePatterns(
+    ctx: *Context,
+    gpa: std.mem.Allocator,
+    query_tokens: []const []const u8,
+) ![]ScoredPattern {
     var scored: std.ArrayList(ScoredPattern) = .empty;
     for (ctx.corpus.patterns) |*pattern| {
         var haystack: std.ArrayList(u8) = .empty;
@@ -195,8 +224,28 @@ fn scorePatterns(ctx: *Context, gpa: std.mem.Allocator, question: []const u8) ![
         }
     }.lessThan);
 
-    if (scored.items.len > 5) scored.shrinkRetainingCapacity(5);
+    // Every match is returned: the handler decides how many to show and says
+    // whether it truncated (PROTO-7).
     return scored.toOwnedSlice(gpa);
+}
+
+/// Collects the string leaves of an opaque `constraints` object so they can
+/// take part in matching (PROTO-5). `validate` has already bounded the shape:
+/// at most 64 members per container, four levels deep, 4 KiB per string.
+fn collectConstraintStrings(
+    gpa: std.mem.Allocator,
+    value: std.json.Value,
+    out: *std.ArrayList([]const u8),
+) !void {
+    switch (value) {
+        .string => |text| try out.append(gpa, text),
+        .array => |items| for (items.items) |item| try collectConstraintStrings(gpa, item, out),
+        .object => |object| {
+            var it = object.iterator();
+            while (it.next()) |entry| try collectConstraintStrings(gpa, entry.value_ptr.*, out);
+        },
+        else => {},
+    }
 }
 
 /// `recommend_approach`: applies the SELECT rules as data.
@@ -208,7 +257,22 @@ pub fn recommendApproach(ctx: *Context, args: std.json.Value) ToolError!ToolOutc
         return error.InvalidParams;
     if (signals.len == 0) return error.InvalidParams;
 
-    const matches = try ctx.matcher.matchSignals(gpa, signals);
+    // PROTO-5: `constraints` used to be accepted and ignored, so a caller
+    // believed it filtered. Its string leaves join the signal set the matcher
+    // sees; the echo still shows only what the caller sent as signals.
+    var matcher_signals: std.ArrayList([]const u8) = .empty;
+    try matcher_signals.appendSlice(gpa, signals);
+    if (args.object.get("constraints")) |constraints| {
+        try collectConstraintStrings(gpa, constraints, &matcher_signals);
+    }
+
+    // The matcher compares rule tokens against signal tokens: the same
+    // client-chosen cost as a query, so the same bound applies (SRV-7).
+    var signal_tokens: usize = 0;
+    for (matcher_signals.items) |signal| signal_tokens += (try text_util.tokenize(gpa, signal)).len;
+    if (signal_tokens > registry.max_query_tokens) return error.InvalidParams;
+
+    const matches = try ctx.matcher.matchSignals(gpa, matcher_signals.items);
     if (matches.len == 0) {
         // Same defect class as PROTO-12: the tool declares an output schema, so
         // "no rule matched" still has to be shaped like one.
@@ -261,6 +325,11 @@ pub fn docSearch(ctx: *Context, args: std.json.Value) ToolError!ToolOutcome {
 
     const query = registry.getString(args, "query") orelse return error.InvalidParams;
     if (query.len == 0) return error.InvalidParams;
+    // Search compares every query token against every record, so a query with
+    // thousands of tokens held the server for tens of seconds (SRV-7). The
+    // token count is a documented input bound, not a silent truncation.
+    const query_tokens = try text_util.tokenize(gpa, query);
+    if (query_tokens.len > registry.max_query_tokens) return error.InvalidParams;
     const project = registry.getString(args, "project");
     const limit = registry.getInteger(args, "limit");
 
@@ -272,7 +341,14 @@ pub fn docSearch(ctx: *Context, args: std.json.Value) ToolError!ToolOutcome {
     else
         docs_search.default_limit;
 
-    const matches = try docs_search.search(gpa, &snapshot.index.columnar, query, project, effective_limit);
+    const matches = try docs_search.searchWithTokens(
+        gpa,
+        &snapshot.index.columnar,
+        query,
+        query_tokens,
+        project,
+        effective_limit,
+    );
     if (matches.len == 0) {
         var structured: std.json.ObjectMap = .{};
         try structured.put(gpa, "query", .{ .string = query });

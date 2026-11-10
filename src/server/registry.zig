@@ -14,6 +14,7 @@ const rules_module = @import("../advice/rules.zig");
 const docs_reload = @import("../docs/reload.zig");
 const pool_module = @import("../util/arena_pool.zig");
 const json_array = @import("../util/json_array.zig");
+const log_module = @import("log.zig");
 const tools_module = @import("tools.zig");
 
 pub const server_name = "zigmcp";
@@ -56,6 +57,10 @@ pub const Context = struct {
     docs: *docs_reload.Store,
     /// Path of the index artifact, when one is configured.
     index_path: ?[]const u8,
+    /// Client-directed log events. The request loop drains this queue and
+    /// emits `notifications/message`; the reload watcher pushes into it
+    /// (PROTO-4).
+    log: *log_module.Queue,
 };
 
 pub const ToolError = error{
@@ -81,6 +86,51 @@ pub const Kind = enum {
     object,
     any,
 };
+
+/// Maximum byte length of any string argument, keys included (GUIDE-4).
+///
+/// AGENTS.md §12 requires every input to be bounded. The 64 KiB line cap is
+/// the hard transport limit, but a 60 KiB `query` costs a search over every
+/// token of it (SRV-7), so the documented bound is far tighter.
+pub const max_string_bytes: usize = 4096;
+/// Maximum number of elements in any array argument.
+pub const max_array_items: usize = 64;
+/// Maximum nesting depth of an object argument (`constraints` is opaque).
+pub const max_object_depth: u8 = 4;
+/// Maximum number of tokens a free-text query or a signal set may contribute.
+///
+/// Search compares every query token against every record, so an unbounded
+/// token count is a client-chosen stall (SRV-7): 15 000 tokens on a
+/// 50 000-record index costs ~20 s.
+pub const max_query_tokens: usize = 64;
+
+/// True when a value fits the input bounds: bounded strings, bounded arrays,
+/// bounded nesting. A wrong *type* is not a bounds problem and is reported by
+/// `valueMatchesKind` instead.
+fn withinBounds(value: std.json.Value, depth: u8) bool {
+    switch (value) {
+        .string => |s| return s.len <= max_string_bytes,
+        .array => |list| {
+            if (list.items.len > max_array_items) return false;
+            if (depth == 0) return false;
+            for (list.items) |item| {
+                if (!withinBounds(item, depth - 1)) return false;
+            }
+            return true;
+        },
+        .object => |object| {
+            if (object.count() > max_array_items) return false;
+            if (depth == 0) return false;
+            var it = object.iterator();
+            while (it.next()) |entry| {
+                if (entry.key_ptr.*.len > max_string_bytes) return false;
+                if (!withinBounds(entry.value_ptr.*, depth - 1)) return false;
+            }
+            return true;
+        },
+        else => return true,
+    }
+}
 
 pub const Field = struct {
     name: []const u8,
@@ -180,6 +230,7 @@ pub fn validate(schema: Schema, args: ?std.json.Value) !void {
             continue;
         }
         if (!valueMatchesKind(field.kind, member.?)) return error.InvalidParams;
+        if (!withinBounds(member.?, max_object_depth)) return error.InvalidParams;
     }
 
     var it = object.iterator();
@@ -352,6 +403,79 @@ test "a non-object arguments value is rejected" {
     const schema = Schema{ .fields = &.{} };
     try std.testing.expectError(error.InvalidParams, validate(schema, .{ .string = "x" }));
     try std.testing.expectError(error.InvalidParams, validate(schema, .{ .integer = 1 }));
+}
+
+test "string, array and nesting bounds are enforced" {
+    // GUIDE-4: AGENTS.md §12 says bound every input, but the 64 KiB line cap
+    // was the only bound — a 60 KiB query reached the matcher (SRV-7's 20 s
+    // stall). Exactly at a bound is accepted; one over is invalid params.
+    const schema = Schema{ .fields = &.{
+        .{ .name = "query", .kind = .string },
+        .{ .name = "signals", .kind = .string_array, .required = false },
+        .{ .name = "constraints", .kind = .object, .required = false },
+    } };
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    for ([_]usize{ max_string_bytes, max_string_bytes + 1 }) |length| {
+        const text = try gpa.alloc(u8, length);
+        @memset(text, 'x');
+        var args: std.json.ObjectMap = .{};
+        try args.put(gpa, "query", .{ .string = text });
+        if (length <= max_string_bytes) {
+            try validate(schema, .{ .object = args });
+        } else {
+            try std.testing.expectError(error.InvalidParams, validate(schema, .{ .object = args }));
+        }
+    }
+
+    // An array is bounded by element count ...
+    for ([_]usize{ max_array_items, max_array_items + 1 }) |count| {
+        var items: std.json.Array = json_array.init(gpa);
+        var index: usize = 0;
+        while (index < count) : (index += 1) try json_array.append(&items, gpa, .{ .string = "s" });
+        var args: std.json.ObjectMap = .{};
+        try args.put(gpa, "query", .{ .string = "x" });
+        try args.put(gpa, "signals", .{ .array = items });
+        if (count <= max_array_items) {
+            try validate(schema, .{ .object = args });
+        } else {
+            try std.testing.expectError(error.InvalidParams, validate(schema, .{ .object = args }));
+        }
+    }
+
+    // ... and by element length.
+    {
+        const long = try gpa.alloc(u8, max_string_bytes + 1);
+        @memset(long, 'x');
+        var items: std.json.Array = json_array.init(gpa);
+        try json_array.append(&items, gpa, .{ .string = long });
+        var args: std.json.ObjectMap = .{};
+        try args.put(gpa, "query", .{ .string = "x" });
+        try args.put(gpa, "signals", .{ .array = items });
+        try std.testing.expectError(error.InvalidParams, validate(schema, .{ .object = args }));
+    }
+
+    // `constraints` is opaque, so its nesting is bounded but not understood.
+    for ([_]usize{ max_object_depth, max_object_depth + 1 }) |levels| {
+        var value: std.json.Value = .{ .string = "leaf" };
+        var level: usize = 0;
+        while (level < levels) : (level += 1) {
+            var object: std.json.ObjectMap = .{};
+            try object.put(gpa, "k", value);
+            value = .{ .object = object };
+        }
+        var args: std.json.ObjectMap = .{};
+        try args.put(gpa, "query", .{ .string = "x" });
+        try args.put(gpa, "constraints", value);
+        if (levels <= max_object_depth) {
+            try validate(schema, .{ .object = args });
+        } else {
+            try std.testing.expectError(error.InvalidParams, validate(schema, .{ .object = args }));
+        }
+    }
 }
 
 test "an integral float satisfies an integer field" {

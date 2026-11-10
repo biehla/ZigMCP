@@ -85,7 +85,10 @@ pub fn load(parent_gpa: std.mem.Allocator, bytes: []const u8) !Index {
 }
 
 /// Reads and loads an index artifact from disk.
-pub fn loadFile(io: std.Io, gpa: std.mem.Allocator, path: []const u8) !Index {
+///
+/// `max_bytes` is the ceiling for this load; `--max-index-bytes` overrides the
+/// documented 256 MiB default (REL-5).
+pub fn loadFile(io: std.Io, gpa: std.mem.Allocator, path: []const u8, max_bytes: usize) !Index {
     // Every I/O failure keeps its own name: an operator must be able to tell a
     // missing file from a corrupt one, and a size rejection from a syntax
     // error (REL-8). Only the ceiling is renamed, because `StreamTooLong` does
@@ -94,7 +97,7 @@ pub fn loadFile(io: std.Io, gpa: std.mem.Allocator, path: []const u8) !Index {
         io,
         path,
         gpa,
-        .limited(max_index_bytes),
+        .limited(max_bytes),
         .of(u8),
         null,
     ) catch |err| return if (err == error.StreamTooLong) error.IndexTooLarge else err;
@@ -310,12 +313,21 @@ test "a missing index keeps its own error" {
     // operator could not tell a missing file from a corrupt one.
     try std.testing.expectError(
         error.FileNotFound,
-        loadFile(std.testing.io, std.testing.allocator, "tests/no-such-index.jsonl"),
+        loadFile(std.testing.io, std.testing.allocator, "tests/no-such-index.jsonl", max_index_bytes),
+    );
+}
+
+test "an artifact larger than the ceiling is rejected" {
+    // REL-5: the ceiling is now a parameter, so a tiny one is testable — the
+    // golden artifact is ~7 KiB, far past a 10-byte limit.
+    try std.testing.expectError(
+        error.IndexTooLarge,
+        loadFile(std.testing.io, std.testing.allocator, "tests/golden/index.jsonl", 10),
     );
 }
 
 test "a directory is not reported as a malformed index" {
-    if (loadFile(std.testing.io, std.testing.allocator, "tests")) |index| {
+    if (loadFile(std.testing.io, std.testing.allocator, "tests", max_index_bytes)) |index| {
         var loaded = index;
         loaded.deinit();
         return error.TestUnexpectedResult;

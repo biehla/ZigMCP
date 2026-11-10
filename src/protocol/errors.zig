@@ -27,6 +27,18 @@ pub const Error = struct {
     data: ?std.json.Value = null,
 };
 
+/// The error object for a request the server could not serve for lack of
+/// memory.
+///
+/// A dropped request left the client waiting for a response that never came
+/// (SRV-3); the request is answered with `-32603` instead.
+pub fn outOfMemory() Error {
+    return .{
+        .code = .internal_error,
+        .message = "Internal error: out of memory while handling the request.",
+    };
+}
+
 /// Builds the `error` member of a JSON-RPC error response.
 pub fn toValue(gpa: std.mem.Allocator, err: Error) !std.json.Value {
     var obj: std.json.ObjectMap = .{};
@@ -51,6 +63,13 @@ test "error object carries code, message and optional data" {
     try std.testing.expectEqual(@as(i64, -32602), obj.get("code").?.integer);
     try std.testing.expectEqualStrings("missing required field", obj.get("message").?.string);
     try std.testing.expectEqualStrings("concept", obj.get("data").?.string);
+}
+
+test "an out-of-memory failure is an internal error, not a dropped request" {
+    const failure = outOfMemory();
+    try std.testing.expectEqual(Code.internal_error, failure.code);
+    try std.testing.expectEqual(@as(i32, -32603), failure.code.toInt());
+    try std.testing.expect(failure.message.len > 0);
 }
 
 test "error object omits data when absent" {

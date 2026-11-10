@@ -199,6 +199,29 @@ test "a legacy request without _meta gets legacy semantics" {
     try std.testing.expect(result.get("_meta") == null);
 }
 
+test "initialize on the current revision names the supported versions" {
+    // PROTO-3: a client that sends `initialize` with `_meta` got a bare
+    // -32601 with nothing to act on. `initialize` is still not answered (D7),
+    // but the error now carries the method to call and the revisions on offer.
+    const harness = try Harness.start();
+    defer {
+        harness.release();
+        std.testing.allocator.destroy(harness);
+    }
+
+    try harness.send("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"initialize\",\"params\":" ++ comptime metaParams("2026-07-28") ++ "}");
+    const response = try harness.receive();
+    defer response.deinit();
+
+    const error_object = response.value.object.get("error").?.object;
+    try std.testing.expectEqual(@as(i64, -32601), error_object.get("code").?.integer);
+    const data = error_object.get("data").?.object;
+    try std.testing.expectEqualStrings("server/discover", data.get("use").?.string);
+    try std.testing.expectEqual(@as(usize, 2), data.get("supportedVersions").?.array.items.len);
+
+    try harness.stop();
+}
+
 test "an incomplete _meta is invalid params" {
     const harness = try Harness.start();
     defer {
@@ -277,6 +300,166 @@ test "an oversized line is a parse error and the server keeps serving" {
     const response = try harness.receive();
     defer response.deinit();
     try std.testing.expect(response.value.object.get("result") != null);
+
+    try harness.stop();
+}
+
+test "a query beyond the input bounds is invalid params, not a stall" {
+    // SRV-7 + GUIDE-4: a 60 KB query used to be scored token by token against
+    // every record. The server is single-threaded, so one request could hold
+    // it for ~20 s on a 50 000-record index.
+    const harness = try Harness.start();
+    defer {
+        harness.release();
+        std.testing.allocator.destroy(harness);
+    }
+
+    const query = try std.testing.allocator.alloc(u8, 60 * 1024);
+    defer std.testing.allocator.free(query);
+    @memset(query, 'x');
+
+    const request = try std.fmt.allocPrint(
+        std.testing.allocator,
+        "{{\"jsonrpc\":\"2.0\",\"id\":40,\"method\":\"tools/call\",\"params\":{{\"name\":\"doc_search\",\"arguments\":{{\"query\":\"{s}\"}}}}}}",
+        .{query},
+    );
+    defer std.testing.allocator.free(request);
+    try harness.send(request);
+
+    const response = try harness.receive();
+    defer response.deinit();
+    const error_object = response.value.object.get("error").?.object;
+    try std.testing.expectEqual(@as(i64, -32602), error_object.get("code").?.integer);
+
+    // The server is still serving.
+    try harness.send("{\"jsonrpc\":\"2.0\",\"id\":41,\"method\":\"tools/list\"}");
+    const next = try harness.receive();
+    defer next.deinit();
+    try std.testing.expect(next.value.object.get("result") != null);
+
+    try harness.stop();
+}
+
+test "an unknown logLevel is invalid params" {
+    // PROTO-4: `logLevel` used to be parsed and dropped. An unknown name is
+    // now rejected rather than silently ignored.
+    const harness = try Harness.start();
+    defer {
+        harness.release();
+        std.testing.allocator.destroy(harness);
+    }
+
+    try harness.send(
+        "{\"jsonrpc\":\"2.0\",\"id\":60,\"method\":\"tools/list\",\"params\":{\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{},\"io.modelcontextprotocol/logLevel\":\"verbose\"}}}",
+    );
+    const response = try harness.receive();
+    defer response.deinit();
+
+    const error_object = response.value.object.get("error").?.object;
+    try std.testing.expectEqual(@as(i64, -32602), error_object.get("code").?.integer);
+
+    try harness.stop();
+}
+
+test "a reload failure reaches a client that asked for logs" {
+    // PROTO-4: the watcher pushes an event into the queue, and the request
+    // loop — the only writer of stdout — turns it into `notifications/message`
+    // before the next response.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const index_path = try std.fmt.allocPrint(
+        std.testing.allocator,
+        ".zig-cache/tmp/{s}/index.jsonl",
+        .{&tmp.sub_path},
+    );
+    defer std.testing.allocator.free(index_path);
+
+    {
+        const file = try tmp.dir.createFile(io, "index.jsonl", .{});
+        defer file.close(io);
+        var buffer: [256]u8 = undefined;
+        var writer = file.writer(io, &buffer);
+        try writer.interface.writeAll(
+            \\{"project":"p","commit":"c","path":"a.zig","line":1,"kind":"fn","symbol":"s","container":"","doc":"d","doc_hash":"18ac3e7343f016890c510e93f935261169d9e3f565436429830faf0934f4f8e4"}
+        );
+        try writer.interface.writeByte('\n');
+        try writer.interface.flush();
+    }
+
+    const harness = try Harness.startWithIndex(index_path);
+    defer {
+        harness.release();
+        std.testing.allocator.destroy(harness);
+    }
+
+    const request =
+        "{\"jsonrpc\":\"2.0\",\"id\":70,\"method\":\"tools/call\",\"params\":{\"name\":\"doc_import_status\",\"arguments\":{},\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{},\"io.modelcontextprotocol/logLevel\":\"warning\"}}}";
+
+    // The first request opts into logging and tells us the index is healthy.
+    try harness.send(request);
+    {
+        const response = try harness.receive();
+        defer response.deinit();
+        const state = response.value.object.get("result").?.object.get("structuredContent").?.object.get("index_state").?.string;
+        try std.testing.expectEqualStrings("ok", state);
+    }
+
+    // Break the artifact: the watcher sees the change and fails the reload.
+    {
+        const file = try tmp.dir.createFile(io, "index.jsonl", .{});
+        defer file.close(io);
+        var buffer: [256]u8 = undefined;
+        var writer = file.writer(io, &buffer);
+        try writer.interface.writeAll("{not a record}\n");
+        try writer.interface.flush();
+    }
+
+    // Poll until the failure is recorded. Each poll asks for logs, so the
+    // queue keeps its minimum; notifications are read as they arrive.
+    var saw_notification = false;
+    var poll: usize = 0;
+    while (poll < 60 and !saw_notification) : (poll += 1) {
+        sleep_util.sleepMilliseconds(io, 100);
+        try harness.send(request);
+        while (true) {
+            const line = try harness.receive();
+            defer line.deinit();
+            if (line.value.object.get("id") == null) {
+                // A notification: the event the watcher queued.
+                try std.testing.expectEqualStrings(
+                    "notifications/message",
+                    line.value.object.get("method").?.string,
+                );
+                const params = line.value.object.get("params").?.object;
+                try std.testing.expectEqualStrings("warning", params.get("level").?.string);
+                saw_notification = true;
+                continue;
+            }
+            break;
+        }
+    }
+
+    try std.testing.expect(saw_notification);
+
+    try harness.stop();
+}
+
+test "a JSON-RPC batch is an invalid request, not a crash" {
+    // PROTO-8: MCP has no batching, so an array envelope is answered with
+    // -32600 and a null id — the shape a client needs to fall back on.
+    const harness = try Harness.start();
+    defer {
+        harness.release();
+        std.testing.allocator.destroy(harness);
+    }
+
+    try harness.send("[{\"jsonrpc\":\"2.0\",\"id\":50,\"method\":\"tools/list\"}]");
+    const response = try harness.receive();
+    defer response.deinit();
+    const error_object = response.value.object.get("error").?.object;
+    try std.testing.expectEqual(@as(i64, -32600), error_object.get("code").?.integer);
+    try std.testing.expect(response.value.object.get("id").? == .null);
 
     try harness.stop();
 }

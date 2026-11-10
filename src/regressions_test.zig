@@ -14,12 +14,14 @@ const registry = @import("server/registry.zig");
 const tools = @import("server/tools.zig");
 const resources = @import("server/resources.zig");
 const prompts = @import("server/prompts.zig");
+const log_module = @import("server/log.zig");
 const corpus_module = @import("advice/corpus.zig");
 const rules_module = @import("advice/rules.zig");
 const docs_index = @import("docs/index.zig");
 const docs_reload = @import("docs/reload.zig");
 const pool_module = @import("util/arena_pool.zig");
 const text_util = @import("util/text.zig");
+const json_array = @import("util/json_array.zig");
 
 /// A server context with the real corpus and an empty doc index.
 ///
@@ -31,6 +33,7 @@ const Harness = struct {
     matcher: rules_module.Matcher,
     store: docs_reload.Store,
     pool: pool_module.ArenaPool,
+    log: log_module.Queue,
     ctx: registry.Context,
 };
 
@@ -49,6 +52,7 @@ fn startHarnessWithIndex(gpa: std.mem.Allocator, jsonl: []const u8) !*Harness {
     index.* = try docs_index.load(gpa, jsonl);
     harness.store = docs_reload.Store.init(gpa, index);
     harness.pool = try pool_module.ArenaPool.init(gpa);
+    harness.log = .{};
 
     harness.ctx = .{
         .gpa = gpa,
@@ -58,6 +62,7 @@ fn startHarnessWithIndex(gpa: std.mem.Allocator, jsonl: []const u8) !*Harness {
         .matcher = &harness.matcher,
         .docs = &harness.store,
         .index_path = null,
+        .log = &harness.log,
     };
     return harness;
 }
@@ -187,6 +192,92 @@ test "GUIDE-2: prompts dispatch through the table" {
         // Both builders emit this word; a wrong or missing handler cannot.
         try std.testing.expect(std.mem.indexOf(u8, text, "GUIDANCE") != null);
     }
+}
+
+test "GUIDE-4/SRV-7: a query beyond the input bounds is invalid params" {
+    // The §0 amplification recipe: a 60 KB query used to be scored token by
+    // token against every record (19.7 s on a 50 000-record index), and
+    // nothing bounded the string at all before the search.
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    const harness = try startHarness(gpa);
+
+    const huge = try gpa.alloc(u8, 60 * 1024);
+    @memset(huge, 'x');
+    var args: std.json.ObjectMap = .{};
+    try args.put(gpa, "query", .{ .string = huge });
+    try std.testing.expectError(
+        error.InvalidParams,
+        tools.docSearch(&harness.ctx, .{ .object = args }),
+    );
+
+    // Within the byte bound but over the token bound: still invalid params,
+    // not a silent truncation.
+    var many: std.ArrayList(u8) = .empty;
+    var index: usize = 0;
+    while (index < registry.max_query_tokens + 1) : (index += 1) try many.appendSlice(gpa, "memo ");
+    var token_args: std.json.ObjectMap = .{};
+    try token_args.put(gpa, "query", .{ .string = many.items });
+    try std.testing.expectError(
+        error.InvalidParams,
+        tools.docSearch(&harness.ctx, .{ .object = token_args }),
+    );
+
+    // A bounded query reaches the index: an empty one answers "nothing
+    // matched", which is a result, not an error.
+    var small: std.ArrayList(u8) = .empty;
+    index = 0;
+    while (index < 8) : (index += 1) try small.appendSlice(gpa, "memo ");
+    var ok_args: std.json.ObjectMap = .{};
+    try ok_args.put(gpa, "query", .{ .string = small.items });
+    const outcome = try tools.docSearch(&harness.ctx, .{ .object = ok_args });
+    try std.testing.expect(outcome.is_error);
+
+    // The advice question mode and the signal set share the bound.
+    const question = try gpa.alloc(u8, registry.max_string_bytes + 1);
+    @memset(question, 'q');
+    var question_args: std.json.ObjectMap = .{};
+    try question_args.put(gpa, "question", .{ .string = question });
+    try std.testing.expectError(
+        error.InvalidParams,
+        tools.adviceLookup(&harness.ctx, .{ .object = question_args }),
+    );
+}
+
+test "PROTO-5: constraints take part in rule matching" {
+    // PROTO-5: `constraints` was accepted and ignored, so a caller believed it
+    // filtered. Its string leaves now join the matcher's signal tokens while
+    // the echoed `signals` stay exactly what the caller sent.
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    const harness = try startHarness(gpa);
+
+    var bare: std.json.ObjectMap = .{};
+    var bare_signals: std.json.Array = json_array.init(gpa);
+    try json_array.append(&bare_signals, gpa, .{ .string = "unrelated observation" });
+    try bare.put(gpa, "signals", .{ .array = bare_signals });
+    const unmatched = try tools.recommendApproach(&harness.ctx, .{ .object = bare });
+    try std.testing.expect(unmatched.is_error);
+
+    var constraint: std.json.ObjectMap = .{};
+    try constraint.put(gpa, "note", .{ .string = "measured memory bottleneck" });
+    var with_constraints: std.json.ObjectMap = .{};
+    var signals: std.json.Array = json_array.init(gpa);
+    try json_array.append(&signals, gpa, .{ .string = "unrelated observation" });
+    try with_constraints.put(gpa, "signals", .{ .array = signals });
+    try with_constraints.put(gpa, "constraints", .{ .object = constraint });
+
+    const matched = try tools.recommendApproach(&harness.ctx, .{ .object = with_constraints });
+    try std.testing.expect(!matched.is_error);
+    const structured = matched.structured.?.object;
+    const matches = structured.get("matches").?.array.items;
+    try std.testing.expect(matches.len > 0);
+    try std.testing.expectEqualStrings("R03", matches[0].object.get("rule_id").?.string);
+    // The echo is the caller's signals only: the constraint text is input to
+    // the matcher, not output.
+    try std.testing.expectEqual(@as(usize, 1), structured.get("signals").?.array.items.len);
 }
 
 test "IDX-4: doc_get returns every record sharing a symbol" {

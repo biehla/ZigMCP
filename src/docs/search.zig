@@ -70,10 +70,28 @@ pub fn search(
     project: ?[]const u8,
     limit: usize,
 ) ![]Match {
+    if (query.len == 0) {
+        var matches: std.ArrayList(Match) = .empty;
+        return matches.toOwnedSlice(gpa);
+    }
+    return searchWithTokens(gpa, index, query, try text_util.tokenize(gpa, query), project, limit);
+}
+
+/// The same search with the query's tokens supplied by the caller.
+///
+/// The tool handler bounds the token count before calling (SRV-7), so the
+/// tokenizer runs once per request instead of twice.
+pub fn searchWithTokens(
+    gpa: std.mem.Allocator,
+    index: *const Columnar,
+    query: []const u8,
+    tokens: []const []const u8,
+    project: ?[]const u8,
+    limit: usize,
+) ![]Match {
     var matches: std.ArrayList(Match) = .empty;
     if (query.len == 0) return matches.toOwnedSlice(gpa);
 
-    const tokens = try text_util.tokenize(gpa, query);
     const effective_limit = clampLimit(limit);
 
     for (0..index.count()) |record| {
