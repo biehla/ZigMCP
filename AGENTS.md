@@ -395,7 +395,9 @@ records there is skipped and those records are carried over verbatim.
   Default: `generated/index.jsonl` if it exists. None ⇒ an empty index (advice still
   served, doc tools report nothing matched).
 - A failed initial load logs to stderr and serves without an index; the watcher
-  keeps trying.
+  keeps trying. The log names the underlying cause — `FileNotFound`, `IsDir`,
+  `IndexTooLarge` (past the 256 MiB ceiling) or `MalformedRecord` (one bad line) —
+  so an operator can tell a missing artifact from a corrupt one (REL-8).
 - **Local file:** polled every 1 s by mtime + size. **URL:** re-fetched every 60 s
   with `std.http.Client.fetch` (no conditional GET in the stdlib) and compared by
   SHA-256; downloads are capped at 256 MiB.

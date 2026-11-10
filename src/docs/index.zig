@@ -35,6 +35,8 @@ pub const Index = struct {
 pub const LoadError = error{
     OutOfMemory,
     MalformedRecord,
+    /// The artifact is larger than `max_index_bytes`.
+    IndexTooLarge,
 };
 
 /// Parses a JSONL artifact into a columnar index.
@@ -72,6 +74,10 @@ pub fn load(parent_gpa: std.mem.Allocator, bytes: []const u8) !Index {
 
 /// Reads and loads an index artifact from disk.
 pub fn loadFile(io: std.Io, gpa: std.mem.Allocator, path: []const u8) !Index {
+    // Every I/O failure keeps its own name: an operator must be able to tell a
+    // missing file from a corrupt one, and a size rejection from a syntax
+    // error (REL-8). Only the ceiling is renamed, because `StreamTooLong` does
+    // not say which limit was hit.
     const bytes = std.Io.Dir.cwd().readFileAllocOptions(
         io,
         path,
@@ -79,10 +85,7 @@ pub fn loadFile(io: std.Io, gpa: std.mem.Allocator, path: []const u8) !Index {
         .limited(max_index_bytes),
         .of(u8),
         null,
-    ) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => return error.MalformedRecord,
-    };
+    ) catch |err| return if (err == error.StreamTooLong) error.IndexTooLarge else err;
     defer gpa.free(bytes);
     return load(gpa, bytes);
 }
@@ -215,6 +218,25 @@ test "a malformed line aborts the load" {
     ;
 
     try std.testing.expectError(error.MalformedRecord, load(gpa, bytes));
+}
+
+test "a missing index keeps its own error" {
+    // REL-8: every I/O failure used to collapse onto `MalformedRecord`, so an
+    // operator could not tell a missing file from a corrupt one.
+    try std.testing.expectError(
+        error.FileNotFound,
+        loadFile(std.testing.io, std.testing.allocator, "tests/no-such-index.jsonl"),
+    );
+}
+
+test "a directory is not reported as a malformed index" {
+    if (loadFile(std.testing.io, std.testing.allocator, "tests")) |index| {
+        var loaded = index;
+        loaded.deinit();
+        return error.TestUnexpectedResult;
+    } else |err| {
+        try std.testing.expect(err != error.MalformedRecord);
+    }
 }
 
 test "a record with an unknown kind is rejected" {
