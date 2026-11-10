@@ -3,7 +3,8 @@
 Status: one open item (§1, CI-13). Twenty-two items were fixed on 2026-11-09 and
 forty-two on 2026-11-10, and five more were closed that day because they were already
 done — the option chosen for each, its commit and its verification are in §13–§33.
-Two more were closed on 2026-11-10 as PROTO-14 and DOC-5; see §34.
+Two more were closed on 2026-11-10 as PROTO-14 and DOC-5; see §34. PROTO-15, DOC-7
+and DOC-8 followed the same day from evaluation feedback; see §35.
 Two sources: a read-through of the tree on 2026-11-09, and a breakage campaign the
 same day that fuzzed the stdio surface and the indexer, profiled the hot paths, and
 inspected a `ReleaseSafe` PE with REA — method, measurements and negative results in
@@ -538,6 +539,21 @@ tool descriptions.
 |PROTO-14|(a) resolve the argument exactly first, then ignoring case and `_` vs `-`, and only when that names one project|`f2e3844`|handler tests: `project: "zig-std"` reaches the `zig_std` records and `doc_get` echoes `ZIG_STD` back; `FIXTURE` over `Fixture`+`fixture` is `isError` with both keys named and no merging; `nope` lists `Known projects: mcp_zig, zig_std`; the PROTO-13 test still passes|
 |DOC-5|(a) state "documentation comments only" in the tool descriptions and the readme|`f2e3844`|`tools/list` description text from a live server; readme "The doc index" paragraph|
 |DOC-6|add `LICENSE` (MIT), `build.zig.zon` `paths`, and the release tarball copy|`f2e3844`|`head -1 LICENSE`; `grep '"LICENSE"' build.zig.zon`; the packaging step copies it into `dist/pkg`|
+
+## 35. Resolved on 2026-11-10, evaluation feedback
+
+`TODO.md` recorded an evaluation that asked `doc_get` for `mem.copyForwards` — the
+readme's own example — and got `found:false`, because the index stores
+`lib.std.mem.copyForwards`. The tool now answers a miss with the closest stored
+symbols, and every example and description uses the spelling the indexer produces. The
+URL-index cost (a full re-download per poll) is documented; the transport is unchanged.
+Two commits: the behaviour change (`8a33da8`) and the docs that follow it (`85d4871`).
+
+|Id|Option|Commit|Verification|
+|---|---|---|---|
+|PROTO-15|the miss reports the closest stored symbols in the message and a `candidates` array|`8a33da8`|regression test `doc_get: a miss names the stored path-qualified symbols`: `mem.copyForwards` → `candidates[0] == "lib.std.mem.copyForwards"`, and `ArrayList.append` → `lib.std.std.ArrayList`; protocol test: `fixture`/`comments.plain` → `candidates[0] == "lib.std.comments.plain"`|
+|DOC-7|examples and descriptions use the stored spelling|`85d4871`|readme `doc_get` example and record example carry `lib.std.mem.copyForwards`; `tools/list` descriptions name `///`, `//!` and plain `//`; `server/discover` instructions state the rule|
+|DOC-8|document the per-poll re-download|`85d4871`|readme "How updates land" names the full re-download and the local-file alternative|
 
 
 
