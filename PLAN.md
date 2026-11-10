@@ -1,8 +1,8 @@
 # PLAN.md — defects, edge cases, limitations, and guideline deviations
 
-Status: open backlog. Twenty-two items were fixed on 2026-11-09, thirty-seven on
+Status: open backlog. Twenty-two items were fixed on 2026-11-09, thirty-eight on
 2026-11-10, and five more were closed that day because they were already done — the
-option chosen for each, its commit and its verification are in §13–§30. Two sources: a read-through
+option chosen for each, its commit and its verification are in §13–§31. Two sources: a read-through
 of the tree on 2026-11-09, and a breakage campaign the same day that fuzzed the
 stdio surface and the indexer, profiled the hot paths, and inspected a `ReleaseSafe`
 PE with REA — method, measurements and negative results in §12.
@@ -107,10 +107,6 @@ No open items.
 
 ## 5. Index loading and hot reload
 
-- **REL-6 — remote indexes have no status sidecar,** so degraded-file data is
-  invisible. Options: (a) fetch `<url>.status.json`; (b) embed status as an index
-  header record; (c) accept. Verify: `doc_import_status` on a URL index.
-
 ---
 
 ## 6. Guideline deviations
@@ -153,7 +149,6 @@ must own its test, because no such layer exists yet.
 |Id|Regression test|If not: what must own it|
 |---|---|---|
 |CI-7|—|timing only|
-|REL-6|—|integration: URL index with no sidecar|
 
 Every item above that names a handler can use the `Harness` in
 `src/regressions_test.zig` — it builds a real corpus and an empty index, so a new
@@ -165,9 +160,8 @@ The first three steps of the original order — the pipeline, the cheap client-v
 fixes and the data-plane trust items — are done (§13, §14, §15). What remains, in
 order:
 
-1. Remaining limitation: REL-6 (remote status sidecar).
-2. CI run time: CI-7 (dependency caching).
-3. Everything else in §1–§6 by demand.
+1. CI run time: CI-7 (dependency caching).
+2. Everything else in §1–§6 by demand.
 
 ---
 
@@ -484,6 +478,17 @@ version and Windows applies no compatibility heuristics.
 |Id|Option|Commit|Verification|
 |---|---|---|---|
 |DOC-4|(b)|`e9c8057`|pefile on the Debug and ReleaseSafe images: resource types `RT_MANIFEST` + `RT_VERSION`, with `CompanyName`/`FileDescription`/`FileVersion`/`ProductName`/`ProductVersion` = ZigMCP / ZigMCP MCP server / 0.1.0 / ZigMCP / 0.1.0; `zig build test` passes|
+
+## 31. Resolved on 2026-11-10, seventeenth chunk
+
+One limitation, one commit (`8e047c1`), resolved with option (c): a remote index has
+no status sidecar, so `doc_import_status` omits its degraded counts. Fetching a remote
+sidecar would also require the publisher to ship one; the local-only rule stays stated
+in AGENTS.md §5.
+
+|Id|Option|Commit|Verification|
+|---|---|---|---|
+|REL-6|(c)|`8e047c1`|unit test `REL-6: a URL index has no local status sidecar`: `http(s)` paths are remote, a relative path and `file://` are not; `zig build test` passes|
 
 
 
