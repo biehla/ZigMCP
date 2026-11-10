@@ -334,10 +334,11 @@ counting.
 |`symbol`|Syntactic container path; module path is the file path with `/` → `.` and `.zig` stripped|
 |`container`|Enclosing symbol (`""` for a module's `//!` record)|
 |`doc`|`///` or `//!` stripped (the space after it is kept), lines joined with `\n`|
-|`doc_hash`|Lowercase hex SHA-256 of `doc`|
+|`doc_hash`|Lowercase hex SHA-256 of `doc`; recomputed and compared at load, so a mismatch rejects the artifact (REL-9)|
 
 Key order is fixed. Records are sorted by `(project, symbol)`, ties by `(path, line)`.
-The loader rejects the **whole** artifact if any non-blank line is malformed.
+The loader rejects the **whole** artifact if any non-blank line is malformed, or if a
+record's `doc_hash` is not the SHA-256 of its `doc`.
 
 ### Upstream sources (`data/sources.zon`)
 

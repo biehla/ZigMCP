@@ -493,11 +493,11 @@ test "a snapshot keeps the old index alive across a swap" {
 
     const first = try gpa.create(Index);
     first.* = try index_module.load(gpa,
-        \\{"project":"p","commit":"a","path":"x.zig","line":1,"kind":"fn","symbol":"old","doc":"d","doc_hash":"h"}
+        \\{"project":"p","commit":"a","path":"x.zig","line":1,"kind":"fn","symbol":"old","doc":"d","doc_hash":"18ac3e7343f016890c510e93f935261169d9e3f565436429830faf0934f4f8e4"}
     );
     const second = try gpa.create(Index);
     second.* = try index_module.load(gpa,
-        \\{"project":"p","commit":"b","path":"x.zig","line":1,"kind":"fn","symbol":"new","doc":"d","doc_hash":"h"}
+        \\{"project":"p","commit":"b","path":"x.zig","line":1,"kind":"fn","symbol":"new","doc":"d","doc_hash":"18ac3e7343f016890c510e93f935261169d9e3f565436429830faf0934f4f8e4"}
     );
 
     var store = Store.init(gpa, first);
@@ -527,7 +527,7 @@ test "a reload concurrent with in-flight reads never tears an index" {
 
     const first = try gpa.create(Index);
     first.* = try index_module.load(gpa,
-        \\{"project":"p","commit":"a","path":"x.zig","line":1,"kind":"fn","symbol":"old","doc":"d","doc_hash":"h"}
+        \\{"project":"p","commit":"a","path":"x.zig","line":1,"kind":"fn","symbol":"old","doc":"d","doc_hash":"18ac3e7343f016890c510e93f935261169d9e3f565436429830faf0934f4f8e4"}
     );
 
     var store = Store.init(gpa, first);
@@ -565,8 +565,8 @@ test "a reload concurrent with in-flight reads never tears an index" {
             while (i < 200) : (i += 1) {
                 const replacement = self.gpa.create(Index) catch return;
                 replacement.* = index_module.load(self.gpa,
-                    \\{"project":"p","commit":"b","path":"x.zig","line":1,"kind":"fn","symbol":"new","doc":"d","doc_hash":"h"}
-                    \\{"project":"p","commit":"b","path":"x.zig","line":2,"kind":"fn","symbol":"newer","doc":"d","doc_hash":"h"}
+                    \\{"project":"p","commit":"b","path":"x.zig","line":1,"kind":"fn","symbol":"new","doc":"d","doc_hash":"18ac3e7343f016890c510e93f935261169d9e3f565436429830faf0934f4f8e4"}
+                    \\{"project":"p","commit":"b","path":"x.zig","line":2,"kind":"fn","symbol":"newer","doc":"d","doc_hash":"18ac3e7343f016890c510e93f935261169d9e3f565436429830faf0934f4f8e4"}
                 ) catch {
                     self.gpa.destroy(replacement);
                     return;
@@ -596,11 +596,11 @@ test "swapping without readers reclaims the old index immediately" {
 
     const first = try gpa.create(Index);
     first.* = try index_module.load(gpa,
-        \\{"project":"p","commit":"a","path":"x.zig","line":1,"kind":"fn","symbol":"old","doc":"d","doc_hash":"h"}
+        \\{"project":"p","commit":"a","path":"x.zig","line":1,"kind":"fn","symbol":"old","doc":"d","doc_hash":"18ac3e7343f016890c510e93f935261169d9e3f565436429830faf0934f4f8e4"}
     );
     const second = try gpa.create(Index);
     second.* = try index_module.load(gpa,
-        \\{"project":"p","commit":"b","path":"x.zig","line":1,"kind":"fn","symbol":"new","doc":"d","doc_hash":"h"}
+        \\{"project":"p","commit":"b","path":"x.zig","line":1,"kind":"fn","symbol":"new","doc":"d","doc_hash":"18ac3e7343f016890c510e93f935261169d9e3f565436429830faf0934f4f8e4"}
     );
 
     var store = Store.init(gpa, first);

@@ -126,8 +126,8 @@ test "PROTO-13: projects differing only in case stay distinct" {
     const gpa = arena.allocator();
 
     const harness = try startHarnessWithIndex(gpa,
-        \\{"project":"Fixture","commit":"c1","path":"A.zig","line":1,"kind":"fn","symbol":"a","container":"","doc":"alpha docs","doc_hash":"h1"}
-        \\{"project":"fixture","commit":"c2","path":"b.zig","line":2,"kind":"fn","symbol":"b","container":"","doc":"alpha docs","doc_hash":"h2"}
+        \\{"project":"Fixture","commit":"c1","path":"A.zig","line":1,"kind":"fn","symbol":"a","container":"","doc":"alpha docs","doc_hash":"36a69add5014cf58a2cee74b1c30ef5fe3b80cd48ab14cd5e5efa3b22dc8dc2d"}
+        \\{"project":"fixture","commit":"c2","path":"b.zig","line":2,"kind":"fn","symbol":"b","container":"","doc":"alpha docs","doc_hash":"36a69add5014cf58a2cee74b1c30ef5fe3b80cd48ab14cd5e5efa3b22dc8dc2d"}
     );
 
     // A project-scoped URI lists only that project's records: the two keys are

@@ -65,6 +65,7 @@ pub fn load(parent_gpa: std.mem.Allocator, bytes: []const u8) !Index {
             else => return error.MalformedRecord,
         };
         const record = extractRecord(parsed.value) catch return error.MalformedRecord;
+        try verifyDocHash(record);
         try builder.append(record);
     }
 
@@ -98,7 +99,7 @@ test "property: a mutated JSONL record loads whole or is rejected" {
     const random = prng.random();
 
     const valid =
-        \\{"project":"p","commit":"c","path":"a.zig","line":1,"kind":"fn","symbol":"s","doc":"d","doc_hash":"h"}
+        \\{"project":"p","commit":"c","path":"a.zig","line":1,"kind":"fn","symbol":"s","doc":"d","doc_hash":"18ac3e7343f016890c510e93f935261169d9e3f565436429830faf0934f4f8e4"}
     ;
     // The last byte of the two-byte "ó" is missing.
     const truncated_utf8 =
@@ -160,6 +161,21 @@ fn optionalString(object: std.json.ObjectMap, key: []const u8) ![]const u8 {
     return value.string;
 }
 
+/// Recomputes the record's `doc_hash`, which must be the lowercase-hex SHA-256
+/// of `doc`.
+///
+/// The field exists for provenance. Accepting any string meant a hand-edited or
+/// partially corrupted artifact served changed documentation under a
+/// plausible-looking hash — the one thing the field is there to prevent
+/// (REL-9).
+fn verifyDocHash(record: Record) !void {
+    if (record.doc_hash.len != 64) return error.MalformedRecord;
+    var digest: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(record.doc, &digest, .{});
+    const expected = std.fmt.bytesToHex(digest, .lower);
+    if (!std.mem.eql(u8, record.doc_hash, &expected)) return error.MalformedRecord;
+}
+
 fn extractRecord(value: std.json.Value) !Record {
     const object = switch (value) {
         .object => |o| o,
@@ -194,8 +210,8 @@ test "a JSONL artifact loads into a columnar index" {
     const gpa = arena.allocator();
 
     const bytes =
-        \\{"project":"zig-std","commit":"abc","path":"lib/std/mem.zig","line":812,"kind":"fn","symbol":"mem.copyForwards","container":"mem","doc":"Copies source into dest.","doc_hash":"h1"}
-        \\{"project":"zig-std","commit":"abc","path":"lib/std/mem.zig","line":900,"kind":"param","symbol":"mem.copyForwards.dest","container":"mem","doc":"The destination.","doc_hash":"h2"}
+        \\{"project":"zig-std","commit":"abc","path":"lib/std/mem.zig","line":812,"kind":"fn","symbol":"mem.copyForwards","container":"mem","doc":"Copies source into dest.","doc_hash":"5b9b51d9a8c4c3a5174688eb4c984931a3874fe30db40b99c862e57c26ef97fa"}
+        \\{"project":"zig-std","commit":"abc","path":"lib/std/mem.zig","line":900,"kind":"param","symbol":"mem.copyForwards.dest","container":"mem","doc":"The destination.","doc_hash":"07d1be738c49af36bb07dc76657ec5cedec4cd91cc2cfc58db2a5e9b1a3217a4"}
     ;
 
     var index = try load(gpa, bytes);
@@ -213,11 +229,28 @@ test "a malformed line aborts the load" {
     const gpa = arena.allocator();
 
     const bytes =
-        \\{"project":"zig-std","commit":"abc","path":"a.zig","line":1,"kind":"fn","symbol":"a","doc":"d","doc_hash":"h"}
+        \\{"project":"zig-std","commit":"abc","path":"a.zig","line":1,"kind":"fn","symbol":"a","doc":"d","doc_hash":"18ac3e7343f016890c510e93f935261169d9e3f565436429830faf0934f4f8e4"}
         \\not json
     ;
 
     try std.testing.expectError(error.MalformedRecord, load(gpa, bytes));
+}
+
+test "a record whose hash does not match its doc is rejected" {
+    // REL-9: `doc_hash` is the provenance of `doc`; it used to be accepted as
+    // any string, so a hand-edited artifact served changed documentation under
+    // a plausible-looking hash.
+    const tampered =
+        \\{"project":"p","commit":"c","path":"a.zig","line":1,"kind":"fn","symbol":"s","doc":"changed","doc_hash":"18ac3e7343f016890c510e93f935261169d9e3f565436429830faf0934f4f8e4"}
+    ;
+    try std.testing.expectError(error.MalformedRecord, load(std.testing.allocator, tampered));
+
+    // A hash that is not 64 lowercase hex characters is rejected before it is
+    // compared.
+    const short =
+        \\{"project":"p","commit":"c","path":"a.zig","line":1,"kind":"fn","symbol":"s","doc":"d","doc_hash":"h"}
+    ;
+    try std.testing.expectError(error.MalformedRecord, load(std.testing.allocator, short));
 }
 
 test "a missing index keeps its own error" {
@@ -245,7 +278,7 @@ test "a record with an unknown kind is rejected" {
     const gpa = arena.allocator();
 
     const bytes =
-        \\{"project":"zig-std","commit":"abc","path":"a.zig","line":1,"kind":"weird","symbol":"a","doc":"d","doc_hash":"h"}
+        \\{"project":"zig-std","commit":"abc","path":"a.zig","line":1,"kind":"weird","symbol":"a","doc":"d","doc_hash":"18ac3e7343f016890c510e93f935261169d9e3f565436429830faf0934f4f8e4"}
     ;
 
     try std.testing.expectError(error.MalformedRecord, load(gpa, bytes));
