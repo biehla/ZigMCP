@@ -3,9 +3,9 @@
 Status: open backlog. Twenty-two items were fixed on 2026-11-09 and three on
 2026-11-10 — the option chosen for each, its commit and its verification are in §13
 and §14. Two sources: a read-through of the tree on 2026-11-09, and a breakage
-campaign the same day that fuzzed the stdio
-surface and the indexer, profiled the hot paths, and inspected a `ReleaseSafe` PE
-with REA — method, measurements and negative results in §12.
+campaign the same day that fuzzed the stdio surface and the indexer, profiled the
+hot paths, and inspected a `ReleaseSafe` PE with REA — method, measurements and
+negative results in §12.
 `AGENTS.md` remains the spec of record for behaviour; the accepted gaps are summarised
 in its §14, which this file expands.
 
