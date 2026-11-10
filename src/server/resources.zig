@@ -116,13 +116,24 @@ pub fn findFamily(uri: []const u8) ?*const ResourceFamily {
 
 pub const symbol_template = "docs://{project}/symbols/{symbol}";
 
-fn resourceValue(gpa: std.mem.Allocator, spec: ResourceSpec) !std.json.Value {
+/// The display half of a resource entry: what `resources/list` reports. A
+/// listing never has to name a handler, so the synthesized `docs://` and
+/// per-pattern entries carry display data only.
+const ResourceDisplay = struct {
+    uri: []const u8,
+    name: []const u8,
+    title: []const u8,
+    description: []const u8,
+    mime_type: []const u8 = "text/plain",
+};
+
+fn resourceValue(gpa: std.mem.Allocator, display: ResourceDisplay) !std.json.Value {
     var object: std.json.ObjectMap = .{};
-    try object.put(gpa, "uri", .{ .string = spec.uri });
-    try object.put(gpa, "name", .{ .string = spec.name });
-    try object.put(gpa, "title", .{ .string = spec.title });
-    try object.put(gpa, "description", .{ .string = spec.description });
-    try object.put(gpa, "mimeType", .{ .string = spec.mime_type });
+    try object.put(gpa, "uri", .{ .string = display.uri });
+    try object.put(gpa, "name", .{ .string = display.name });
+    try object.put(gpa, "title", .{ .string = display.title });
+    try object.put(gpa, "description", .{ .string = display.description });
+    try object.put(gpa, "mimeType", .{ .string = display.mime_type });
     return .{ .object = object };
 }
 
@@ -133,7 +144,13 @@ pub fn list(ctx: *registry.Context) !registry.Result {
 
     var resources: std.json.Array = json_array.init(gpa);
     for (resource_specs) |spec| {
-        try json_array.append(&resources, gpa, try resourceValue(gpa, spec));
+        try json_array.append(&resources, gpa, try resourceValue(gpa, .{
+            .uri = spec.uri,
+            .name = spec.name,
+            .title = spec.title,
+            .description = spec.description,
+            .mime_type = spec.mime_type,
+        }));
     }
     for (ctx.corpus.patterns) |pattern| {
         const uri = try std.fmt.allocPrint(gpa, "advice://patterns/{s}", .{pattern.id});
@@ -142,8 +159,6 @@ pub fn list(ctx: *registry.Context) !registry.Result {
             .name = try std.fmt.allocPrint(gpa, "advice-pattern-{s}", .{pattern.id}),
             .title = try std.fmt.allocPrint(gpa, "Advice pattern {s}", .{pattern.id}),
             .description = pattern.name,
-            .handler = patternText,
-            .cache = registry.advice_cache,
         }));
     }
 
@@ -156,8 +171,6 @@ pub fn list(ctx: *registry.Context) !registry.Result {
             .name = try std.fmt.allocPrint(gpa, "{s}-index", .{project}),
             .title = try std.fmt.allocPrint(gpa, "{s} symbol index", .{project}),
             .description = "Symbols imported for this project.",
-            .handler = docsText,
-            .cache = registry.index_cache,
         }));
     }
 
