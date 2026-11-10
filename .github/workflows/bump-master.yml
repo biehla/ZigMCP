@@ -214,7 +214,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          branch="bump/upstream-$(date -u +%Y-%m-%d)"
+          # A second run in the same day must not collide with the first run's
+          # branch (CI-6); the diff gate above still suppresses a no-op PR, so a
+          # unique branch only appears when the index actually changed.
+          branch="bump/upstream-$(date -u +%Y-%m-%d)-${GITHUB_RUN_ID}"
           git config user.name "zigmcp-bot"
           git config user.email "zigmcp-bot@users.noreply.github.com"
           git checkout -b "$branch"
