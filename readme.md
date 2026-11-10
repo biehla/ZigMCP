@@ -153,7 +153,7 @@ explanation; that is an answer, not a failure.
 |`advice_lookup`|`concept` (e.g. `"P03"`) **or** `question` (free text)|The full advice record(s): what the paradigm controls, facts with their labels and sources, candidate uses, boundaries, checks. A question returns up to 5 best matches|
 |`recommend_approach`|`signals`: list of observations about your system (required, non-empty); `constraints`: any object (optional, currently unused)|The decision rules your signals match, best first, each with the paradigms to consider, the "only if" constraint, its `GUIDANCE` label and a match score|
 |`doc_search`|`query` (required); `project` (optional); `limit` (optional, default 20, max 100)|Matching doc records with `path:line`, symbol, kind and doc text. Exact symbol matches rank first, then partial symbol matches, then path matches, then matches in the doc text|
-|`doc_get`|`project`, `symbol` (both required; the project key is exact, the symbol is case-insensitive)|The full documentation of one symbol, with its source location and upstream commit. `found` is always present, so a miss is still shaped like the tool's output schema|
+|`doc_get`|`project`, `symbol` (both required; the project key is exact, the symbol is case-insensitive)|The full documentation of **every** record with this symbol (usually one), each with its source location and upstream commit. `found` is always present, so a miss is still shaped like the tool's output schema|
 |`doc_import_status`|none|What the index holds: `index_state` (`ok`, `unloaded` or `reload_failed`, with `index_error` when a load failed), and per project the upstream commit, record count and, for a local index with a status file, how many source files were only partly parseable|
 
 Examples of arguments:

@@ -365,6 +365,10 @@ fn normalizeSlashes(gpa: std.mem.Allocator, s: []const u8) ![]const u8 {
 
 fn matchesInclude(rel: []const u8, include: []const u8) bool {
     var inc = include;
+    // `lib/std/**` is how `data/sources.zon` spells "everything under this
+    // directory"; the walker compares prefixes, so the glob suffix is dropped
+    // rather than matched (IDX-2).
+    if (std.mem.endsWith(u8, inc, "/**")) inc = inc[0 .. inc.len - "/**".len];
     while (inc.len > 0 and (inc[inc.len - 1] == '/' or inc[inc.len - 1] == '\\')) inc = inc[0 .. inc.len - 1];
     if (inc.len == 0) return true;
     // Compare slash-normalized.

@@ -58,18 +58,11 @@ pub const doc_get_input = registry.Schema{ .fields = &.{
 pub const doc_get_output = registry.Schema{
     .fields = &.{
         // `found` is the only always-present member: a "no such symbol" result is
-        // still shaped like this schema (PROTO-12), so the record fields are
-        // optional and `found` carries the answer.
+        // still shaped like this schema (PROTO-12).
         .{ .name = "found", .kind = .boolean, .description = "True when the symbol is present in the index." },
         .{ .name = "project", .kind = .string, .required = false },
-        .{ .name = "commit", .kind = .string, .required = false },
-        .{ .name = "path", .kind = .string, .required = false },
-        .{ .name = "line", .kind = .integer, .required = false },
-        .{ .name = "kind", .kind = .string, .required = false },
         .{ .name = "symbol", .kind = .string, .required = false },
-        .{ .name = "container", .kind = .string, .required = false },
-        .{ .name = "doc", .kind = .string, .required = false },
-        .{ .name = "doc_hash", .kind = .string, .required = false },
+        .{ .name = "matches", .kind = .array, .required = false, .description = "Every record sharing the symbol path, ordered by path then line." },
     },
 };
 
@@ -326,7 +319,10 @@ pub fn docSearch(ctx: *Context, args: std.json.Value) ToolError!ToolOutcome {
     };
 }
 
-/// `doc_get`: the full documentation of one symbol.
+/// `doc_get`: the full documentation of a symbol. Several records can share a
+/// symbol path — a `//!` container record and a declaration from the sibling
+/// `<dir>.zig` can both produce `std.os` — so every match is returned (IDX-4);
+/// stopping at the first one made the rest unreachable.
 pub fn docGet(ctx: *Context, args: std.json.Value) ToolError!ToolOutcome {
     registry.validate(doc_get_input, args) catch return error.InvalidParams;
     const gpa = ctx.pool.allocator();
@@ -338,17 +334,16 @@ pub fn docGet(ctx: *Context, args: std.json.Value) ToolError!ToolOutcome {
     defer snapshot.deinit();
     const columnar = &snapshot.index.columnar;
 
-    var found: ?usize = null;
+    var records: std.ArrayList(usize) = .empty;
     for (0..columnar.count()) |record| {
         // Project keys are exact identifiers; only symbols are matched
         // case-insensitively (PROTO-13).
         if (!std.mem.eql(u8, columnar.projectAt(record), project)) continue;
         if (!text_util.eqlIgnoreCase(columnar.symbolAt(record), symbol)) continue;
-        found = record;
-        break;
+        try records.append(gpa, record);
     }
 
-    const record = found orelse {
+    if (records.items.len == 0) {
         var structured: std.json.ObjectMap = .{};
         try structured.put(gpa, "found", .{ .bool = false });
         try structured.put(gpa, "project", .{ .string = project });
@@ -358,28 +353,38 @@ pub fn docGet(ctx: *Context, args: std.json.Value) ToolError!ToolOutcome {
             try std.fmt.allocPrint(gpa, "No indexed symbol '{s}' in project '{s}'.", .{ symbol, project }),
             .{ .object = structured },
         );
-    };
+    }
+
+    var matches: std.json.Array = json_array.init(gpa);
+    var text: std.ArrayList(u8) = .empty;
+    for (records.items, 0..) |record, index| {
+        var item: std.json.ObjectMap = .{};
+        try item.put(gpa, "commit", .{ .string = columnar.commitAt(record) });
+        try item.put(gpa, "path", .{ .string = columnar.pathAt(record) });
+        try item.put(gpa, "line", .{ .integer = columnar.lines[record] });
+        try item.put(gpa, "kind", .{ .string = columnar.kinds[record].label() });
+        try item.put(gpa, "symbol", .{ .string = columnar.symbolAt(record) });
+        try item.put(gpa, "container", .{ .string = columnar.containerAt(record) });
+        try item.put(gpa, "doc", .{ .string = columnar.docAt(record) });
+        try item.put(gpa, "doc_hash", .{ .string = columnar.docHashAt(record) });
+        try json_array.append(&matches, gpa, .{ .object = item });
+
+        if (index > 0) try text.append(gpa, '\n');
+        try text.print(gpa, "{s}:{d} {s}\n\n{s}\n", .{
+            columnar.pathAt(record),
+            columnar.lines[record],
+            columnar.symbolAt(record),
+            columnar.docAt(record),
+        });
+    }
 
     var structured: std.json.ObjectMap = .{};
     try structured.put(gpa, "found", .{ .bool = true });
-    try structured.put(gpa, "project", .{ .string = columnar.projectAt(record) });
-    try structured.put(gpa, "commit", .{ .string = columnar.commitAt(record) });
-    try structured.put(gpa, "path", .{ .string = columnar.pathAt(record) });
-    try structured.put(gpa, "line", .{ .integer = columnar.lines[record] });
-    try structured.put(gpa, "kind", .{ .string = columnar.kinds[record].label() });
-    try structured.put(gpa, "symbol", .{ .string = columnar.symbolAt(record) });
-    try structured.put(gpa, "container", .{ .string = columnar.containerAt(record) });
-    try structured.put(gpa, "doc", .{ .string = columnar.docAt(record) });
-    try structured.put(gpa, "doc_hash", .{ .string = columnar.docHashAt(record) });
+    try structured.put(gpa, "project", .{ .string = project });
+    try structured.put(gpa, "symbol", .{ .string = symbol });
+    try structured.put(gpa, "matches", .{ .array = matches });
 
-    const text = try std.fmt.allocPrint(gpa, "{s}:{d} {s}\n\n{s}\n", .{
-        columnar.pathAt(record),
-        columnar.lines[record],
-        columnar.symbolAt(record),
-        columnar.docAt(record),
-    });
-
-    return .{ .text = text, .structured = .{ .object = structured } };
+    return .{ .text = try text.toOwnedSlice(gpa), .structured = .{ .object = structured } };
 }
 
 /// `tools/list`: the advertised capability table.

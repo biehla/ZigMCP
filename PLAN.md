@@ -1,8 +1,8 @@
 # PLAN.md — defects, edge cases, limitations, and guideline deviations
 
-Status: open backlog. Twenty-two items were fixed on 2026-11-09 and three on
-2026-11-10 — the option chosen for each, its commit and its verification are in §13
-and §14. Two sources: a read-through of the tree on 2026-11-09, and a breakage
+Status: open backlog. Twenty-two items were fixed on 2026-11-09 and seven on
+2026-11-10 — the option chosen for each, its commit and its verification are in
+§13, §14 and §15. Two sources: a read-through of the tree on 2026-11-09, and a breakage
 campaign the same day that fuzzed the stdio surface and the indexer, profiled the
 hot paths, and inspected a `ReleaseSafe` PE with REA — method, measurements and
 negative results in §12.
@@ -198,16 +198,6 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri"
 
 ## 4. Indexer
 
-- **IDX-2 — `--include` is a path prefix, not a glob.** `lib/std/**` matches nothing;
-  only `lib/std` works. Options: (a) strip a trailing `/**` in the indexer; (b)
-  implement glob matching; (c) document prefix semantics only. Verify: run with
-  `--include 'lib/std/**'`.
-
-- **IDX-4 — duplicate symbols collide.** Overloads or a `fn` and a `var` with the same
-  name produce several records; `doc_get` returns the first. Options: (a) return all
-  matches; (b) add `kind` to the lookup; (c) append a disambiguator to `symbol`.
-  Verify: `doc_get` on a duplicated name.
-
 - **IDX-5 — invalid UTF-8 in a doc comment is emitted raw.** The JSON writer assumes
   valid UTF-8, so invalid bytes can yield an index the loader rejects. Options:
   (a) validate and replace with U+FFFD; (b) drop the file, report degraded; (c)
@@ -294,19 +284,9 @@ Rules being broken are in `AGENTS.md` §5, §11, §12 (code/corpus conventions) 
 
 ## 7. Test coverage gaps
 
-- **TEST-1 — no test for an oversized input line (SRV-1).** Options: (a) protocol
-  test with a 70 KiB line expecting `-32700`; (b) a unit test on the transport; (c)
-  accept.
-- **TEST-2 — no test for duplicate symbols in `doc_get` (IDX-4).**
 - **TEST-3 — no test for `doc_import_status` argument rejection (PROTO-2).**
 - **TEST-4 — no test that every listed resource is readable (PROTO-1).** A loop over
   `resources/list` → `resources/read` would have caught it.
-- **TEST-5 — workflows are not linted.** No `actionlint`/`yamllint`, which is why
-  CI-1 shipped. Options: (a) add `actionlint` to CI; (b) a shell test asserting the
-  `if:` shape; (c) accept.
-- **TEST-6 — CLI edge cases are untested.** `--include` globs, `--previous` partial
-  reuse, `--status` derivation. Options: (a) extend the indexer test layer; (b) a
-  small `tests/indexer_cli_test.zig`; (c) accept.
 
 ---
 
@@ -376,8 +356,6 @@ must own its test, because no such layer exists yet.
 |SRV-3|—|transport-level harness with an injected failing allocator|
 |SRV-4|—|`json_rpc` unit test with deep nesting; expectation depends on the option|
 |SRV-5|—|benchmark only, not deterministic|
-|IDX-2|—|indexer CLI harness: `--include 'lib/std/**'`|
-|IDX-4|—|indexer CLI + `doc_get` handler test on a duplicate symbol|
 |IDX-5|—|indexer CLI harness: fixture with a 0xFF byte in a comment|
 |IDX-6|—|`modulePath` is private; export it for a unit test|
 |IDX-7|—|fixture with a nested declaration inside an error set|
@@ -390,10 +368,6 @@ must own its test, because no such layer exists yet.
 |GUIDE-4|—|handler test: 60 KiB query expects `-32602`|
 |GUIDE-7|—|same as CI-3|
 |GUIDE-8|—|doc lint: each gap id appears once across the tree|
-|TEST-1|—|is the test SRV-1 needs|
-|TEST-2|—|is the test IDX-4 needs|
-|TEST-5|—|adds `actionlint`, which is what CI-1 needs|
-|TEST-6|—|is the test IDX-2/IDX-3 need|
 |DOC-1|—|packaging assertion on `build.zig.zon` `.paths`|
 |DOC-2|—|doc lint comparing the two snippets|
 |DOC-3|—|same as GUIDE-8|
@@ -410,14 +384,13 @@ test is a few lines.
 ## 11. Suggested order
 
 The first three steps of the original order — the pipeline, the cheap client-visible
-fixes and the data-plane trust items — are done (§13), as is the structural debt
-(§14). What remains, in order:
+fixes and the data-plane trust items — are done (§13, §14, §15). What remains, in
+order:
 
-1. TEST-1, TEST-2, TEST-5, TEST-6 — pin the remaining items so they cannot regress.
-2. Remaining limitations by demand: PROTO-10, REL-1, REL-5.
-3. Measured hot spots: IDX-9 (quadratic indexer) and SRV-7 (client-chosen stall).
-4. Contract and packaging gaps: DOC-4, CI-9.
-5. Everything else in §1–§6 by demand.
+1. Remaining limitations by demand: PROTO-10, REL-1, REL-5.
+2. Measured hot spots: IDX-9 (quadratic indexer) and SRV-7 (client-chosen stall).
+3. Contract and packaging gaps: DOC-4, CI-9.
+4. Everything else in §1–§6 by demand.
 
 ---
 
@@ -546,4 +519,20 @@ would have meant staging halves of one file.
 |GUIDE-3|(a) one shared `src/advice/schema.zig` imported as the `advice_schema` module|`20784b3`|`zig build check` + `zig build bench` compile both tools against it; `grep -n "const Pattern = struct" src tools` prints one line; `corpus.zig` pins type identity at comptime|
 |GUIDE-2|(a) a `handler` in `PromptSpec`/`ResourceSpec` (and `cache` in resources)|`20784b3`|regression tests: every prompt spec dispatches through its handler, both resource families read through the table|
 |GUIDE-1|(a) add the `//!` headers|`20784b3`|`src/root.zig` lint test names every headerless `src/**`/`tools/**` file (both tools before the fix) and passes after|
+
+## 15. Resolved on 2026-11-10, second chunk
+
+Four items plus two stale entries, one commit (`<sha>`): the `--include` glob and
+`doc_get`'s duplicate handling are two independent defects, but their tests, their
+doc rows and their `PLAN.md` deletions overlap, so they landed together.
+
+|Id|Option|Commit|Verification|
+|---|---|---|---|
+|IDX-2|(a) strip a trailing `/**` in `matchesInclude`|`<sha>`|indexer test: `--include 'lib/std/**'` and `--include lib/std` produce identical, non-empty output|
+|IDX-4|(a) `doc_get` returns every match|`<sha>`|regression test: two records sharing `mod.dup` → `matches.len == 2` in `(path, line)` order|
+|TEST-2|— closed by IDX-4|`<sha>`|`IDX-4: doc_get returns every record sharing a symbol`|
+|TEST-6|`--include` half; `--previous`/`--status` were already covered|`<sha>`|`an --include glob selects the same files as its directory prefix`; `a truncated --previous index is not reused` already asserts `skipped` and the derived `.status.json`|
+|TEST-1|already covered; removed as stale|—|`tests/protocol_test.zig`: `an oversized line is a parse error and the server keeps serving`|
+|TEST-5|already covered; removed as stale|—|`ci.yml` runs `zig build workflows` and `go run …/actionlint@v1.7.7` in both jobs|
+
 

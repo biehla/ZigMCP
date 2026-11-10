@@ -73,7 +73,7 @@ pub fn load(parent_gpa: std.mem.Allocator, bytes: []const u8) !Index {
         try verifyDocHash(record);
         // Canonical order is part of the artifact contract (AGENTS.md §7): an
         // out-of-order artifact changes `docs://{project}/index`, the tie order
-        // in search and which duplicate `doc_get` returns (REL-10).
+        // in search and the order of `doc_get`'s matches (REL-10).
         if (builder.last()) |previous| {
             if (keyOrder(previous, record) == .gt) return error.MalformedRecord;
         }
@@ -287,8 +287,8 @@ test "a record whose hash does not match its doc is rejected" {
 
 test "an artifact out of canonical order is rejected" {
     // REL-10: the loader accepted any order, so a reordered artifact silently
-    // changed `docs://{project}/index`, the tie order in search and which
-    // duplicate `doc_get` returned.
+    // changed `docs://{project}/index`, the tie order in search and the order
+    // `doc_get` returns its matches in.
     const reversed =
         \\{"project":"p","commit":"c","path":"a.zig","line":2,"kind":"fn","symbol":"b","doc":"d","doc_hash":"18ac3e7343f016890c510e93f935261169d9e3f565436429830faf0934f4f8e4"}
         \\{"project":"p","commit":"c","path":"a.zig","line":1,"kind":"fn","symbol":"a","doc":"d","doc_hash":"18ac3e7343f016890c510e93f935261169d9e3f565436429830faf0934f4f8e4"}

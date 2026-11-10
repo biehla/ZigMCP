@@ -188,3 +188,36 @@ test "GUIDE-2: prompts dispatch through the table" {
         try std.testing.expect(std.mem.indexOf(u8, text, "GUIDANCE") != null);
     }
 }
+
+test "IDX-4: doc_get returns every record sharing a symbol" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    // Two records with the same symbol path: the container record styles of a
+    // `//!` module and of a declaration in the sibling `<dir>.zig` collide.
+    const harness = try startHarnessWithIndex(gpa,
+        \\{"project":"p","commit":"c1","path":"a.zig","line":1,"kind":"fn","symbol":"mod.dup","container":"mod","doc":"alpha docs","doc_hash":"36a69add5014cf58a2cee74b1c30ef5fe3b80cd48ab14cd5e5efa3b22dc8dc2d"}
+        \\{"project":"p","commit":"c2","path":"b.zig","line":2,"kind":"container","symbol":"mod.dup","container":"","doc":"beta docs","doc_hash":"b507a2bbaa3c9ea48eb66a2b270e02fe438ccf1138feb6714b7d03897e7aa8e9"}
+    );
+
+    var args: std.json.ObjectMap = .{};
+    try args.put(gpa, "project", .{ .string = "p" });
+    try args.put(gpa, "symbol", .{ .string = "MOD.DUP" });
+
+    const outcome = try tools.docGet(&harness.ctx, .{ .object = args });
+    try std.testing.expect(!outcome.is_error);
+
+    const structured = outcome.structured.?.object;
+    try std.testing.expect(structured.get("found").?.bool);
+    // The caller's spelling is echoed, not the stored one.
+    try std.testing.expectEqualStrings("MOD.DUP", structured.get("symbol").?.string);
+
+    const matches = structured.get("matches").?.array.items;
+    try std.testing.expectEqual(@as(usize, 2), matches.len);
+    try std.testing.expectEqualStrings("a.zig", matches[0].object.get("path").?.string);
+    try std.testing.expectEqualStrings("alpha docs", matches[0].object.get("doc").?.string);
+    try std.testing.expectEqualStrings("b.zig", matches[1].object.get("path").?.string);
+    try std.testing.expectEqualStrings("container", matches[1].object.get("kind").?.string);
+    try std.testing.expectEqualStrings("", matches[1].object.get("container").?.string);
+}

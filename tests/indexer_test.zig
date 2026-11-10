@@ -327,3 +327,64 @@ test "a pathologically nested file is degraded instead of overflowing the stack"
     defer std.testing.allocator.free(produced);
     try std.testing.expect(std.mem.indexOf(u8, produced, "\"symbol\":\"small.ok\"") != null);
 }
+
+test "an --include glob selects the same files as its directory prefix" {
+    // IDX-2: `--include 'lib/std/**'` — the form `data/sources.zon` uses — was
+    // compared as a literal prefix, so it selected nothing and the project was
+    // published as an empty index.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const gpa = std.testing.allocator;
+    const plain_out = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/plain.jsonl", .{&tmp.sub_path});
+    defer gpa.free(plain_out);
+    const glob_out = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/glob.jsonl", .{&tmp.sub_path});
+    defer gpa.free(glob_out);
+
+    for ([_][2][]const u8{
+        .{ "lib/std", plain_out },
+        .{ "lib/std/**", glob_out },
+    }) |run| {
+        var child = try std.process.spawn(io, .{
+            .argv = &.{
+                options.indexer_exe,
+                "--out",
+                run[1],
+                "--source",
+                "fixture=0000000=tests/fixtures/indexer_src",
+                "--include",
+                run[0],
+            },
+            .stdin = .ignore,
+            .stdout = .ignore,
+            .stderr = .ignore,
+        });
+        switch (try child.wait(io)) {
+            .exited => |code| try std.testing.expectEqual(@as(u8, 0), code),
+            else => return error.UnexpectedExit,
+        }
+    }
+
+    const plain = try std.Io.Dir.cwd().readFileAllocOptions(
+        io,
+        plain_out,
+        gpa,
+        .limited(16 * 1024 * 1024),
+        .of(u8),
+        null,
+    );
+    defer gpa.free(plain);
+    const glob = try std.Io.Dir.cwd().readFileAllocOptions(
+        io,
+        glob_out,
+        gpa,
+        .limited(16 * 1024 * 1024),
+        .of(u8),
+        null,
+    );
+    defer gpa.free(glob);
+
+    // A non-empty result first: two empty files would also be byte-equal.
+    try std.testing.expect(std.mem.indexOf(u8, plain, "\"lib.std.sample") != null);
+    try std.testing.expectEqualStrings(plain, glob);
+}
