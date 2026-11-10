@@ -76,6 +76,8 @@ pub const doc_import_status_input = registry.Schema{ .fields = &.{} };
 
 pub const doc_import_status_output = registry.Schema{ .fields = &.{
     .{ .name = "index_path", .kind = .string, .required = false },
+    .{ .name = "index_state", .kind = .string, .description = "unloaded, ok, or reload_failed." },
+    .{ .name = "index_error", .kind = .string, .required = false, .description = "Why the last load failed." },
     .{ .name = "index_records", .kind = .integer },
     .{ .name = "projects", .kind = .array },
 } };
@@ -568,6 +570,18 @@ pub fn docImportStatus(ctx: *Context, args: std.json.Value) ToolError!ToolOutcom
     var structured: std.json.ObjectMap = .{};
     if (ctx.index_path) |path| {
         try structured.put(gpa, "index_path", .{ .string = path });
+    }
+    // The active index may be stale: the artifact on disk failed to load and a
+    // previous index kept serving. Only stderr knew that before (REL-4).
+    const index_status = ctx.docs.statusSnapshot();
+    try structured.put(gpa, "index_state", .{ .string = index_status.state.label() });
+    if (index_status.error_name) |name| {
+        try structured.put(gpa, "index_error", .{ .string = name });
+    }
+    if (index_status.state != .ok) {
+        try text.print(gpa, "index: {s}", .{index_status.state.label()});
+        if (index_status.error_name) |name| try text.print(gpa, " ({s})", .{name});
+        try text.appendSlice(gpa, "\n");
     }
     try structured.put(gpa, "index_records", .{ .integer = @intCast(columnar.count()) });
     try structured.put(gpa, "projects", .{ .array = project_values });

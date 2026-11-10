@@ -82,6 +82,10 @@ pub fn main(init: std.process.Init) !void {
             store.swap(loaded);
         } else |err| {
             gpa.destroy(loaded);
+            // The failure is reported by `doc_import_status`, not only on
+            // stderr, so a client can see that the index in use is not the
+            // artifact on disk (REL-4).
+            store.setStatus(.reload_failed, @errorName(err));
             // The server still serves the advice corpus; the watcher picks the
             // artifact up as soon as it appears.
             logStderr(init.io, "zigmcp: cannot load the doc index '{s}' ({s}); serving without an index\n", .{ path, @errorName(err) });

@@ -187,6 +187,34 @@ fn digestOf(bytes: []const u8) Digest {
     return digest;
 }
 
+/// What the server last knew about the configured index artifact.
+///
+/// `doc_import_status` reports it, so a client can tell that the index being
+/// served is not the artifact on disk — the previous index keeps serving
+/// (REL-4). The failure only ever produced a stderr line before.
+pub const IndexState = enum {
+    /// No index is configured; the server serves an empty one.
+    unloaded,
+    /// The active index is the artifact's current content.
+    ok,
+    /// The artifact could not be loaded; a previous index keeps serving.
+    reload_failed,
+
+    pub fn label(self: IndexState) []const u8 {
+        return switch (self) {
+            .unloaded => "unloaded",
+            .ok => "ok",
+            .reload_failed => "reload_failed",
+        };
+    }
+};
+
+pub const Status = struct {
+    state: IndexState = .unloaded,
+    /// `@errorName` of the last failure. Static text, so it needs no owner.
+    error_name: ?[]const u8 = null,
+};
+
 /// A tiny spin lock.
 ///
 /// The critical sections here are a pointer swap and a counter update, so a
@@ -214,9 +242,24 @@ pub const Store = struct {
     /// Fallback slot used when the retired list cannot grow (out of memory).
     overflow: ?*Index = null,
     readers: usize = 0,
+    status: Status = .{},
 
     pub fn init(gpa: std.mem.Allocator, current: *Index) Store {
         return .{ .gpa = gpa, .current = current };
+    }
+
+    /// Records the outcome of a load for `doc_import_status` (REL-4).
+    pub fn setStatus(self: *Store, state: IndexState, error_name: ?[]const u8) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        self.status = .{ .state = state, .error_name = error_name };
+    }
+
+    /// The last known index status.
+    pub fn statusSnapshot(self: *Store) Status {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return self.status;
     }
 
     pub fn deinit(self: *Store) void {
@@ -274,6 +317,7 @@ pub const Store = struct {
 
         const old = self.current;
         self.current = replacement;
+        self.status = .{ .state = .ok, .error_name = null };
         self.retired.append(self.gpa, old) catch {
             // The old index cannot be freed while a reader may still hold it,
             // so it waits in the overflow slot instead.
@@ -416,6 +460,7 @@ fn watchFile(context: *Context, path: []const u8) void {
     }
 
     const replacement = context.store.gpa.create(Index) catch |err| {
+        context.store.setStatus(.reload_failed, @errorName(err));
         logStderr(io, "zigmcp: index reload failed ({s}); keeping the previous index\n", .{@errorName(err)});
         context.last_size = stat.size;
         context.last_mtime = stat.mtime.nanoseconds;
@@ -424,6 +469,7 @@ fn watchFile(context: *Context, path: []const u8) void {
     };
     replacement.* = index_module.loadFile(io, context.store.gpa, path) catch |err| {
         context.store.gpa.destroy(replacement);
+        context.store.setStatus(.reload_failed, @errorName(err));
         logStderr(io, "zigmcp: index reload failed ({s}); keeping the previous index\n", .{@errorName(err)});
         // Remember the failed artifact so a broken file is not retried in a
         // tight loop; the next change triggers another attempt.
@@ -455,6 +501,7 @@ fn watchUrl(context: *Context, url: []const u8) void {
     if (context.have_digest and std.mem.eql(u8, &context.last_digest, &digest)) return;
 
     const replacement = gpa.create(Index) catch |err| {
+        context.store.setStatus(.reload_failed, @errorName(err));
         logStderr(io, "zigmcp: index reload failed ({s}); keeping the previous index\n", .{@errorName(err)});
         context.last_digest = digest;
         context.have_digest = true;
@@ -462,6 +509,7 @@ fn watchUrl(context: *Context, url: []const u8) void {
     };
     replacement.* = index_module.load(gpa, bytes) catch |err| {
         gpa.destroy(replacement);
+        context.store.setStatus(.reload_failed, @errorName(err));
         logStderr(io, "zigmcp: index reload failed ({s}); keeping the previous index\n", .{@errorName(err)});
         // Remember the failed artifact so a broken download is not retried in a
         // tight loop; the next publish triggers another attempt.
@@ -609,4 +657,35 @@ test "swapping without readers reclaims the old index immediately" {
     store.swap(second);
     try std.testing.expectEqual(@as(usize, 0), store.retired.items.len);
     try std.testing.expectEqualStrings("new", store.current.columnar.symbolAt(0));
+}
+
+test "the store reports the last load outcome" {
+    // REL-4: a failed load was visible on stderr only.
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const record =
+        \\{"project":"p","commit":"a","path":"x.zig","line":1,"kind":"fn","symbol":"old","doc":"d","doc_hash":"18ac3e7343f016890c510e93f935261169d9e3f565436429830faf0934f4f8e4"}
+    ;
+
+    const first = try gpa.create(Index);
+    first.* = try index_module.load(gpa, record);
+    var store = Store.init(gpa, first);
+    defer store.deinit();
+
+    try std.testing.expectEqual(IndexState.unloaded, store.statusSnapshot().state);
+
+    store.setStatus(.reload_failed, @errorName(error.FileNotFound));
+    const failed = store.statusSnapshot();
+    try std.testing.expectEqual(IndexState.reload_failed, failed.state);
+    try std.testing.expectEqualStrings("FileNotFound", failed.error_name.?);
+
+    // A successful swap clears the failure.
+    const replacement = try gpa.create(Index);
+    replacement.* = try index_module.load(gpa, record);
+    store.swap(replacement);
+    const ok = store.statusSnapshot();
+    try std.testing.expectEqual(IndexState.ok, ok.state);
+    try std.testing.expect(ok.error_name == null);
 }

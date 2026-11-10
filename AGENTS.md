@@ -201,7 +201,7 @@ item), `structuredContent` matching the output schema, and `isError`.
 |`recommend_approach`|`signals: string[]` (non-empty), optional `constraints: object` (opaque)|`{signals, matches[{rule_id, condition, consider[], and_only_if?, evidence, score}]}`|A rule matches on ≥2 shared tokens, or 1 token covering ≥50% of its condition|
 |`doc_search`|`query`, optional `project`, optional `limit` (default 20, max 100; ≤0 → 20)|`{query, count, results[{project, commit, path, line, kind, symbol, container, doc}]}`|Score: exact symbol 100 / symbol substring 60 / token-in-symbol 40, +25 path, +10 doc substring or +5 token-in-doc; ties by symbol, path, line|
 |`doc_get`|`project`, `symbol` (case-insensitive)|`{found, project?, commit?, path?, line?, kind?, symbol?, container?, doc?, doc_hash?}`|Exact match only; `found` is always present so a miss is still schema-shaped|
-|`doc_import_status`|`{}`|`{index_path?, index_records, projects[{project, commit, records, files_total?, files_degraded?, degraded?}]}`|Degraded counts come from the `.status.json` sidecar next to a **local** index; a sidecar member whose type or sign contradicts this schema is omitted rather than echoed|
+|`doc_import_status`|`{}`|`{index_path?, index_state, index_error?, index_records, projects[{project, commit, records, files_total?, files_degraded?, degraded?}]}`|`index_state` is `ok`/`unloaded`/`reload_failed`, so a client can see that the index being served is not the artifact on disk (REL-4); degraded counts come from the `.status.json` sidecar next to a **local** index, and a sidecar member whose type or sign contradicts this schema is omitted rather than echoed|
 
 "Nothing matched" is a **normal result with `isError: true`**, an explanation, and
 `structuredContent` shaped like the tool's `outputSchema` (empty `matches`/`results`,
@@ -399,7 +399,9 @@ records there is skipped and those records are carried over verbatim.
 - A failed initial load logs to stderr and serves without an index; the watcher
   keeps trying. The log names the underlying cause — `FileNotFound`, `IsDir`,
   `IndexTooLarge` (past the 256 MiB ceiling) or `MalformedRecord` (one bad line) —
-  so an operator can tell a missing artifact from a corrupt one (REL-8).
+  so an operator can tell a missing artifact from a corrupt one (REL-8). The same
+  state reaches clients through `doc_import_status`'s `index_state`/`index_error`,
+  so a stale index is visible without reading the server's stderr (REL-4).
 - **Local file:** polled every 1 s by mtime + size. **URL:** re-fetched every 60 s
   with `std.http.Client.fetch` (no conditional GET in the stdlib) and compared by
   SHA-256; downloads are capped at 256 MiB.

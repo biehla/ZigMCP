@@ -28,6 +28,11 @@ const Harness = struct {
     const exit_deadline_ms = 10_000;
 
     fn start() !*Harness {
+        return startWithIndex("tests/golden/index.jsonl");
+    }
+
+    /// Starts the server against an arbitrary `--index` argument.
+    fn startWithIndex(index_path: []const u8) !*Harness {
         const harness = try std.testing.allocator.create(Harness);
         errdefer std.testing.allocator.destroy(harness);
 
@@ -43,7 +48,7 @@ const Harness = struct {
             // The golden index is checked in, so the doc tools are exercised
             // against real records on every machine (the generated index is
             // gitignored and may not exist).
-            .argv = &.{ options.server_exe, "--advice-dir", "data/advice", "--index", "tests/golden/index.jsonl" },
+            .argv = &.{ options.server_exe, "--advice-dir", "data/advice", "--index", index_path },
             .stdin = .pipe,
             .stdout = .pipe,
             // The server's diagnostics stay visible: a failing protocol test
@@ -393,6 +398,28 @@ test "a tool with no match still answers with structuredContent" {
     defer advice.deinit();
     const advice_structured = advice.value.object.get("result").?.object.get("structuredContent").?.object;
     try std.testing.expectEqual(@as(usize, 0), advice_structured.get("matches").?.array.items.len);
+}
+
+test "doc_import_status reports a failed index load" {
+    // REL-4: a rejected artifact only produced a stderr line, so a client could
+    // not see that the served index was not the one on disk.
+    const harness = try Harness.startWithIndex("tests/no-such-index.jsonl");
+    defer {
+        harness.kill();
+        harness.release();
+        std.testing.allocator.destroy(harness);
+    }
+
+    try harness.send(
+        "{\"jsonrpc\":\"2.0\",\"id\":15,\"method\":\"tools/call\",\"params\":{\"name\":\"doc_import_status\",\"arguments\":{}}}",
+    );
+    const response = try harness.receive();
+    defer response.deinit();
+
+    const structured = response.value.object.get("result").?.object.get("structuredContent").?.object;
+    try std.testing.expectEqualStrings("reload_failed", structured.get("index_state").?.string);
+    try std.testing.expectEqualStrings("FileNotFound", structured.get("index_error").?.string);
+    try std.testing.expectEqual(@as(i64, 0), structured.get("index_records").?.integer);
 }
 
 test "a missing resource is invalid params with the uri" {
