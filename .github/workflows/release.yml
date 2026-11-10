@@ -32,7 +32,9 @@ jobs:
           bin="zig-out/bin/zigmcp"
           [ -f "$bin" ] || bin="zig-out/bin/zigmcp.exe"
           cp "$bin" "dist/zigmcp-${{ matrix.os }}${bin##*.}"
-          # Attach the current index if present (generated/index.jsonl).
+          # The canonical index asset is the rolling `index` release published by
+          # index.yml (CI-2); attaching it here as well is only a convenience
+          # for someone holding a version tag, so it stays conditional.
           if [ -f generated/index.jsonl ]; then cp generated/index.jsonl dist/; fi
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2

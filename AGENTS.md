@@ -431,13 +431,15 @@ trusted as before.
 |Workflow|Trigger|Does|
 |---|---|---|
 |`ci.yml`|push, PR|`zig build test` + `zig fmt --check . --exclude tests/fixtures` on Zig 0.17.1 × {ubuntu, macos, windows} (blocking); same on Zig master (canary, `continue-on-error`)|
-|`bump-master.yml`|daily 03:17 UTC, manual|Builds a baseline index (latest release's `index.jsonl` asset, else rebuilt from current pins); re-resolves each branch with `zig fetch --save` in a scratch `zig init`; indexes the new pins; opens **one** PR updating `data/sources.zon` **only if the index differs**, with per-project old→new commits and changed-record counts; uploads the JSONL diff as an artifact. A dead branch fails only its project and keeps the old pin|
-|`index.yml`|push to `main` touching `data/sources.zon` (but the job's `if:` skips pushes — §14), manual|Indexes the pinned trees (incremental against the latest release asset), merges and sorts, merges status sidecars, uploads `generated/` as the `index` artifact|
+|`bump-master.yml`|daily 03:17 UTC, manual|Builds a baseline index (the rolling `index` release's `index.jsonl` asset, else rebuilt from current pins); re-resolves each branch with `zig fetch --save` in a scratch `zig init`; indexes the new pins; opens **one** PR updating `data/sources.zon` **only if the index differs**, with per-project old→new commits and changed-record counts; uploads the JSONL diff as an artifact. A dead branch fails only its project and keeps the old pin|
+|`index.yml`|push to `main` touching `data/sources.zon`, manual|Indexes the pinned trees (incremental against the rolling `index` release, rebuilt from scratch when it does not exist yet), merges and sorts, merges status sidecars, uploads `generated/` as the `index` artifact, and publishes `index.jsonl` to the rolling `index` release with `gh release upload --clobber`|
 |`release.yml`|tag `v*`|`zig build -Doptimize=ReleaseSafe` × 3 OS on 0.17.1; attaches binaries (+ `generated/index.jsonl` if present) and a client-config snippet|
 
-Baseline rule: the bump diff baseline is the latest **release asset**, never a prior
-workflow artifact (those expire and need run-id/token plumbing). Rollback = publish
-the previous index; no rebuild.
+Baseline rule: the bump diff baseline is the `index.jsonl` asset of the rolling
+**`index` release**, published by `index.yml` (`gh release upload … --clobber`), and
+never a prior workflow artifact (those expire and need run-id/token plumbing). One
+documented tag serves both baselines; `release.yml` does not produce it. Rollback =
+publish the previous index; no rebuild.
 
 ---
 
@@ -665,10 +667,6 @@ bounded inputs and outputs; version provenance (record `commit`, corpus `version
 The full list, with per-item options and verification steps, is `PLAN.md`. The
 summary below is the part that changes how you work in this tree.
 
-- `index.yml` uploads the index as a workflow artifact, and `release.yml` attaches
-  `generated/index.jsonl` only if it exists in the tagged checkout (it is gitignored,
-  so it never does). Nothing publishes the release asset that the bump/index
-  baselines expect.
 - `data/sources.zon` scope: only the first `include` is used by CI; `exclude` is
   ignored.
 - `doc_import_status` has no "freshness vs upstream master" field; degraded counts are

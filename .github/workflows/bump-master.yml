@@ -81,10 +81,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # AGENTS.md §8: the baseline is the index.jsonl asset of the most recent
-          # published release. Without a release (first run) the baseline stays
-          # the index rebuilt from the current pins above.
-          if gh release download --pattern index.jsonl --dir published 2>/dev/null; then
+          # AGENTS.md §8: the baseline is the index.jsonl asset of the rolling
+          # `index` release published by index.yml (one documented tag, CI-2).
+          # Before the first publish that release does not exist and the
+          # baseline stays the index rebuilt from the current pins above.
+          if gh release download index --pattern index.jsonl --dir published 2>/dev/null; then
             echo "baseline_source=release-asset" >> "$GITHUB_OUTPUT"
             cp published/index.jsonl baseline.jsonl
           else

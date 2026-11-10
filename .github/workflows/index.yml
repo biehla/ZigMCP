@@ -16,7 +16,9 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  # Writing is required to publish the rolling `index` release asset that the
+  # bump and rebuild baselines download (CI-2).
+  contents: write
   actions: read
 
 jobs:
@@ -72,9 +74,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           # AGENTS.md §8: a project whose commit is unchanged is skipped entirely
-          # and its records are carried over from the published index. Without
-          # a published release the index is rebuilt from scratch.
-          gh release download --pattern index.jsonl --dir published 2>/dev/null || true
+          # and its records are carried over from the published index. The
+          # baseline is the `index` release tag; on the very first run that
+          # release does not exist yet, the download fails, and the index is
+          # rebuilt from scratch — which is what publishes it.
+          gh release download index --pattern index.jsonl --dir published 2>/dev/null || true
           if [ -f published/index.jsonl ]; then
             cp published/index.jsonl previous.jsonl
             echo "previous index available"
@@ -146,3 +150,17 @@ jobs:
           name: index
           path: generated/
           if-no-files-found: error
+
+      - name: Publish the rolling index release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # One documented tag, `index`, is the artifact every baseline reads
+          # (AGENTS.md §8). It is a prerelease so it never becomes "latest" and
+          # never competes with a version tag from release.yml.
+          gh release view index >/dev/null 2>&1 || \
+            gh release create index \
+              --title "Doc index (rolling)" \
+              --notes "Rolling doc index published by index.yml; read by the bump and rebuild baselines." \
+              --prerelease
+          gh release upload index generated/index.jsonl --clobber
