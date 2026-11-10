@@ -68,6 +68,27 @@ pub fn build(b: *std.Build) void {
     // `zig build run -- <args>` forwards the arguments to the server.
     run_cmd.addPassthruArgs();
 
+    // Workflow trigger/expression consistency (CI-1): actionlint accepts a
+    // `github.event.X` its triggers cannot produce, this does not.
+    const workflow_module = b.createModule(.{
+        .root_source_file = b.path("src/util/workflow.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const workflow_check = b.addExecutable(.{
+        .name = "workflow_check",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/workflow_check.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "workflow", .module = workflow_module }},
+        }),
+    });
+    const run_workflow_check = b.addRunArtifact(workflow_check);
+    run_workflow_check.addArg(".github/workflows");
+    const workflow_step = b.step("workflows", "Check workflow trigger/expression consistency");
+    workflow_step.dependOn(&run_workflow_check.step);
+
     const run_advice_check = b.addRunArtifact(advice_check);
     run_advice_check.addArgs(&.{"data/advice"});
     const check_step = b.step("check", "Validate the advice corpus");

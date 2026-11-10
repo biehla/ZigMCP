@@ -495,12 +495,17 @@ zig build test               # unit + protocol + golden
 zig build test-protocol      # protocol layer only
 zig build test-regressions   # PLAN.md open-bug tests (red until fixed)
 zig build check              # advice corpus validation
+zig build workflows          # workflow trigger/expression consistency (CI-1)
 zig build bench              # verification report
 zig build run -- --index tests/golden/index.jsonl
 zig build -Doptimize=ReleaseSafe
 zig fmt --check . --exclude tests/fixtures   # the fixture tree is deliberately unformattable
 ```
 
+- **Workflow gates:** `zig build workflows` (trigger/expression consistency, CI-1)
+  and `actionlint -ignore 'runtime "node20" is deprecated' .github/workflows/*.yml`.
+  The ignore suppresses a runner-runtime deprecation that every `uses:` in the tree
+  shares; bumping those action majors is tracked separately as `CI-9`.
 - **Toolchain:** Zig 0.17.1 at `C:\Users\Sethticles\scoop\apps\zig\0.17.1`;
   `.minimum_zig_version = "0.17.1"`; global cache `C:\Users\Sethticles\AppData\Local\zig`.
 - **Server options:** `--index <path-or-url>` / `ZIGMCP_INDEX`; `--advice-dir <path>`
@@ -660,9 +665,6 @@ bounded inputs and outputs; version provenance (record `commit`, corpus `version
 The full list, with per-item options and verification steps, is `PLAN.md`. The
 summary below is the part that changes how you work in this tree.
 
-- `index.yml`'s job has `if: … github.event.workflow_run.conclusion == 'success'`
-  while its trigger is `push`; on push that expression is false, so the job only runs
-  on manual dispatch.
 - `index.yml` uploads the index as a workflow artifact, and `release.yml` attaches
   `generated/index.jsonl` only if it exists in the tagged checkout (it is gitignored,
   so it never does). Nothing publishes the release asset that the bump/index

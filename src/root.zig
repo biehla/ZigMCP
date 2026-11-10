@@ -19,4 +19,7 @@ test {
     _ = @import("util/arena_pool.zig");
     _ = @import("util/sleep.zig");
     _ = @import("util/text.zig");
+    // The workflow trigger/expression check (CI-1); its CLI is
+    // `tools/workflow_check.zig`.
+    _ = @import("util/workflow.zig");
 }
