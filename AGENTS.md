@@ -185,6 +185,7 @@ server would put upstream-parse failure modes on the request path.
 |`.github/workflows/`|`ci.yml`, `bump-master.yml`, `index.yml`, `release.yml` (§8)|
 |`systems_programming_context_v1.md`|Upstream source of the advice corpus. Reference only — never edit it to change behaviour|
 |`readme.md`|User guide|
+|`res/zigmcp.rc`, `res/zigmcp.manifest`|Windows manifest (asInvoker, supported OS) and version resource (DOC-4)|
 |`lsp.json`|ZLS wiring (§10)|
 
 Gitignored: `zig-out/`, `.zig-cache/`, `.probe/` (API probes), `.superpowers/`

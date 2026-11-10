@@ -22,6 +22,14 @@ pub fn build(b: *std.Build) void {
             .imports = &.{.{ .name = "advice_schema", .module = advice_schema }},
         }),
     });
+    // DOC-4: a Windows release binary with a manifest (asInvoker, supported OS)
+    // and a version resource; other targets need no resource section.
+    if (target.result.os.tag == .windows) {
+        exe.root_module.addWin32ResourceFile(.{
+            .file = b.path("res/zigmcp.rc"),
+            .include_paths = &.{b.path("res")},
+        });
+    }
     b.installArtifact(exe);
 
     // The doc indexer: upstream tree -> generated/index.jsonl (AGENTS.md §8).
