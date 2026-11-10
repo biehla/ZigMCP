@@ -114,22 +114,6 @@ test "PROTO-6: advice_lookup rejects concept and question together" {
     );
 }
 
-test "PROTO-9: an integral float is accepted where an integer is required" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const gpa = arena.allocator();
-
-    const schema = registry.Schema{ .fields = &.{
-        .{ .name = "limit", .kind = .integer, .required = false },
-    } };
-
-    var args: std.json.ObjectMap = .{};
-    try args.put(gpa, "limit", .{ .float = 20.0 });
-
-    // Clients that serialise numbers as floats should not get -32602.
-    try registry.validate(schema, .{ .object = args });
-}
-
 test "GUIDE-6: a long token is not silently truncated" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

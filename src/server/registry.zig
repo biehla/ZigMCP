@@ -128,10 +128,28 @@ pub fn schemaFrom(gpa: std.mem.Allocator, schema: Schema) !std.json.Value {
     return .{ .object = object };
 }
 
+/// The IEEE-754 exact-integer range (2^53): above it a float cannot represent
+/// every integer, so a coerced value would be a guess rather than a reading.
+const max_exact_float_integer: f64 = 9_007_199_254_740_992;
+
+/// The integer a JSON number holds when it is spelled as a float but is exact
+/// (`20.0`), or `null` when it is fractional, infinite or too large.
+///
+/// Clients that serialise every number as a float are common, so rejecting
+/// `20.0` where `20` is meant is a wire-compatibility bug (PROTO-9).
+fn integralInteger(value: std.json.Value) ?i64 {
+    if (value != .float) return null;
+    const raw = value.float;
+    if (!std.math.isFinite(raw)) return null;
+    if (raw < -max_exact_float_integer or raw > max_exact_float_integer) return null;
+    if (@trunc(raw) != raw) return null;
+    return @intFromFloat(raw);
+}
+
 fn valueMatchesKind(kind: Kind, value: std.json.Value) bool {
     return switch (kind) {
         .string => value == .string,
-        .integer => value == .integer,
+        .integer => value == .integer or integralInteger(value) != null,
         .boolean => value == .bool,
         .string_array, .array => value == .array,
         .object => value == .object,
@@ -188,8 +206,8 @@ pub fn getInteger(args: ?std.json.Value, name: []const u8) ?i64 {
     const value = args orelse return null;
     if (value != .object) return null;
     const member = value.object.get(name) orelse return null;
-    if (member != .integer) return null;
-    return member.integer;
+    if (member == .integer) return member.integer;
+    return integralInteger(member);
 }
 
 pub fn getStringArray(gpa: std.mem.Allocator, args: ?std.json.Value, name: []const u8) !?[]const []const u8 {
@@ -333,4 +351,25 @@ test "a non-object arguments value is rejected" {
     const schema = Schema{ .fields = &.{} };
     try std.testing.expectError(error.InvalidParams, validate(schema, .{ .string = "x" }));
     try std.testing.expectError(error.InvalidParams, validate(schema, .{ .integer = 1 }));
+}
+
+test "an integral float satisfies an integer field" {
+    // PROTO-9: a client may serialise every number as a float. `20.0` is the
+    // integer 20; `20.5` and an out-of-range float are not.
+    const schema = Schema{ .fields = &.{.{ .name = "limit", .kind = .integer, .required = false }} };
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const integral = try std.json.parseFromSlice(std.json.Value, gpa, "{\"limit\":20.0}", .{});
+    try validate(schema, integral.value);
+    try std.testing.expectEqual(@as(?i64, 20), getInteger(integral.value, "limit"));
+
+    const fractional = try std.json.parseFromSlice(std.json.Value, gpa, "{\"limit\":20.5}", .{});
+    try std.testing.expectError(error.InvalidParams, validate(schema, fractional.value));
+    try std.testing.expectEqual(@as(?i64, null), getInteger(fractional.value, "limit"));
+
+    const huge = try std.json.parseFromSlice(std.json.Value, gpa, "{\"limit\":1e300}", .{});
+    try std.testing.expectError(error.InvalidParams, validate(schema, huge.value));
 }
