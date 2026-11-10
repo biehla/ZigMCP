@@ -130,16 +130,6 @@ test "PROTO-9: an integral float is accepted where an integer is required" {
     try registry.validate(schema, .{ .object = args });
 }
 
-test "GUIDE-5: a missing arguments object still enforces required fields" {
-    const schema = registry.Schema{ .fields = &.{
-        .{ .name = "query", .kind = .string },
-    } };
-
-    // `tools/call` passes .null when `arguments` is absent; a required field
-    // must still be rejected, otherwise every handler has to re-check.
-    try std.testing.expectError(error.InvalidParams, registry.validate(schema, .null));
-}
-
 test "GUIDE-6: a long token is not silently truncated" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

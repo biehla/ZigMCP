@@ -142,14 +142,17 @@ fn valueMatchesKind(kind: Kind, value: std.json.Value) bool {
 /// Validates request arguments against the schema.
 ///
 /// Unknown members, missing required members and wrongly typed members are all
-/// invalid params (`-32602`).
+/// invalid params (`-32602`). An absent `arguments` member (`null` or a missing
+/// `?Value`) means "no arguments": it is validated as an empty object, so a
+/// schema that requires any field still rejects it (GUIDE-5). Handlers
+/// therefore never have to re-check required fields.
 pub fn validate(schema: Schema, args: ?std.json.Value) !void {
-    const value = args orelse return;
-    if (value == .null) return;
-    const object = switch (value) {
+    const empty: std.json.ObjectMap = .{};
+    const object: std.json.ObjectMap = if (args) |value| switch (value) {
         .object => |o| o,
+        .null => empty,
         else => return error.InvalidParams,
-    };
+    } else empty;
 
     for (schema.fields) |field| {
         const member = object.get(field.name);
@@ -311,4 +314,23 @@ test "validation rejects missing, unknown and mistyped members" {
 
     const mistyped = try std.json.parseFromSlice(std.json.Value, gpa, "{\"concept\":3}", .{});
     try std.testing.expectError(error.InvalidParams, validate(schema, mistyped.value));
+}
+
+test "absent arguments still enforce required fields" {
+    // GUIDE-5: `tools/call` passes .null when `arguments` is missing, so a
+    // required field must still be rejected here — handlers never re-check.
+    const required = Schema{ .fields = &.{.{ .name = "query", .kind = .string }} };
+    try std.testing.expectError(error.InvalidParams, validate(required, null));
+    try std.testing.expectError(error.InvalidParams, validate(required, .{ .null = {} }));
+
+    // The same absent arguments are accepted when nothing is required.
+    const optional = Schema{ .fields = &.{.{ .name = "query", .kind = .string, .required = false }} };
+    try validate(optional, null);
+    try validate(optional, .{ .null = {} });
+}
+
+test "a non-object arguments value is rejected" {
+    const schema = Schema{ .fields = &.{} };
+    try std.testing.expectError(error.InvalidParams, validate(schema, .{ .string = "x" }));
+    try std.testing.expectError(error.InvalidParams, validate(schema, .{ .integer = 1 }));
 }
