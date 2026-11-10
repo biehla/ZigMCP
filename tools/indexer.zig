@@ -74,6 +74,10 @@ const ProjectStatus = struct {
     project: []const u8,
     commit: []const u8,
     records: usize,
+    /// Every declaration the walk visited, documented or not (IDX-10). The
+    /// difference from `records` is the yield of the documentation rule, and
+    /// reporting it is what makes that yield a measurement rather than a claim.
+    declarations: usize = 0,
     files_total: usize,
     degraded: std.ArrayList(DegradedFile),
     skipped: bool = false,
@@ -300,7 +304,7 @@ fn buildStatus(gpa: std.mem.Allocator, statuses: []ProjectStatus, report_skip: b
         try writeJsonString(gpa, w, st.project);
         try w.writeAll(":{\"commit\":");
         try writeJsonString(gpa, w, st.commit);
-        try w.print(",\"records\":{},\"files_total\":{},\"files_degraded\":{}", .{ st.records, st.files_total, st.degraded.items.len });
+        try w.print(",\"records\":{},\"declarations\":{},\"files_total\":{},\"files_degraded\":{}", .{ st.records, st.declarations, st.files_total, st.degraded.items.len });
         if (report_skip) {
             try w.print(",\"skipped\":{s}", .{if (st.skipped) "true" else "false"});
             if (st.skipped) try w.print(",\"previous_records\":{}", .{st.previous_records});
@@ -563,7 +567,9 @@ fn indexFile(gpa: std.mem.Allocator, project: []const u8, commit: []const u8, re
     }
 
     const mod_path = try modulePath(gpa, rel);
-    try walkDecls(gpa, &tree, &line_table, tree.rootDecls(), mod_path, project, commit, rel, records, unattached);
+    var declarations: usize = 0;
+    try walkDecls(gpa, &tree, &line_table, tree.rootDecls(), mod_path, project, commit, rel, records, &declarations, unattached);
+    st.declarations += declarations;
 }
 
 fn stripPrefix3(gpa: std.mem.Allocator, slice: []const u8, prefix: []const u8) ![]const u8 {
@@ -738,18 +744,23 @@ fn trimSuffixDot(s: []const u8) []const u8 {
     return s;
 }
 
-fn walkDecls(gpa: std.mem.Allocator, tree: *Ast, line_table: *const LineTable, decls: []const Node.Index, prefix: []const u8, project: []const u8, commit: []const u8, rel: []const u8, records: *std.ArrayList(Record), unattached: std.AutoHashMap(TokenIndex, void)) anyerror!void {
+fn walkDecls(gpa: std.mem.Allocator, tree: *Ast, line_table: *const LineTable, decls: []const Node.Index, prefix: []const u8, project: []const u8, commit: []const u8, rel: []const u8, records: *std.ArrayList(Record), declarations: *usize, unattached: std.AutoHashMap(TokenIndex, void)) anyerror!void {
     for (decls) |decl| {
         const tag = tree.nodeTag(decl);
         switch (tag) {
             .fn_decl, .fn_proto, .fn_proto_one, .fn_proto_multi, .fn_proto_simple => {
-                try handleFn(gpa, tree, line_table, decl, prefix, project, commit, rel, records, unattached);
+                // Counted before the doc decide: an undocumented declaration is
+                // a declaration the rule dropped (IDX-10).
+                declarations.* += 1;
+                try handleFn(gpa, tree, line_table, decl, prefix, project, commit, rel, records, declarations, unattached);
             },
             .global_var_decl, .local_var_decl, .simple_var_decl, .aligned_var_decl => {
-                try handleVar(gpa, tree, line_table, decl, prefix, project, commit, rel, records, unattached);
+                declarations.* += 1;
+                try handleVar(gpa, tree, line_table, decl, prefix, project, commit, rel, records, declarations, unattached);
             },
             .container_field_init, .container_field, .container_field_align => {
-                try handleField(gpa, tree, line_table, decl, prefix, project, commit, rel, records, unattached);
+                declarations.* += 1;
+                try handleField(gpa, tree, line_table, decl, prefix, project, commit, rel, records, declarations, unattached);
             },
             else => {
                 // Unknown / non-declaration node: skip silently (degrade, never fail the file).
@@ -773,7 +784,7 @@ fn paramDocRun(gpa: std.mem.Allocator, tree: *Ast, p: Ast.full.FnProto.Param, un
     return joined;
 }
 
-fn handleFn(gpa: std.mem.Allocator, tree: *Ast, line_table: *const LineTable, decl: Node.Index, prefix: []const u8, project: []const u8, commit: []const u8, rel: []const u8, records: *std.ArrayList(Record), unattached: std.AutoHashMap(TokenIndex, void)) anyerror!void {
+fn handleFn(gpa: std.mem.Allocator, tree: *Ast, line_table: *const LineTable, decl: Node.Index, prefix: []const u8, project: []const u8, commit: []const u8, rel: []const u8, records: *std.ArrayList(Record), declarations: *usize, unattached: std.AutoHashMap(TokenIndex, void)) anyerror!void {
     var buf1: [1]Node.Index = undefined;
     const proto = tree.fullFnProto(&buf1, decl) orelse return;
     const first = tree.firstToken(decl);
@@ -802,6 +813,9 @@ fn handleFn(gpa: std.mem.Allocator, tree: *Ast, line_table: *const LineTable, de
         var it = proto.iterate(tree);
         while (it.next()) |p| {
             const nt = p.name_token orelse continue;
+            // A named parameter can carry a record too, so it is a site the
+            // documentation rule either fills or drops (IDX-10).
+            declarations.* += 1;
             // A parameter's first token is `comptime`/`noalias` when present,
             // so `noalias x: T` is scanned from `noalias`.
             const doc: []const u8 = (try paramDocRun(gpa, tree, p, &unattached)) orelse
@@ -823,7 +837,7 @@ fn handleFn(gpa: std.mem.Allocator, tree: *Ast, line_table: *const LineTable, de
     }
 }
 
-fn handleVar(gpa: std.mem.Allocator, tree: *Ast, line_table: *const LineTable, decl: Node.Index, prefix: []const u8, project: []const u8, commit: []const u8, rel: []const u8, records: *std.ArrayList(Record), unattached: std.AutoHashMap(TokenIndex, void)) anyerror!void {
+fn handleVar(gpa: std.mem.Allocator, tree: *Ast, line_table: *const LineTable, decl: Node.Index, prefix: []const u8, project: []const u8, commit: []const u8, rel: []const u8, records: *std.ArrayList(Record), declarations: *usize, unattached: std.AutoHashMap(TokenIndex, void)) anyerror!void {
     const vd = tree.fullVarDecl(decl) orelse return;
     const name_tok = vd.ast.mut_token + 1;
     if (name_tok >= tree.tokens.items(.tag).len) return;
@@ -849,7 +863,7 @@ fn handleVar(gpa: std.mem.Allocator, tree: *Ast, line_table: *const LineTable, d
     const init = vd.ast.init_node.unwrap() orelse return;
     const init_tag = tree.nodeTag(init);
     if (init_tag == .error_set_decl) {
-        try handleErrorSet(gpa, tree, line_table, init, prefix, sym, project, commit, rel, records, unattached);
+        try handleErrorSet(gpa, tree, line_table, init, prefix, sym, project, commit, rel, records, declarations, unattached);
         return;
     }
     // Container initializer -> recurse.
@@ -859,17 +873,18 @@ fn handleVar(gpa: std.mem.Allocator, tree: *Ast, line_table: *const LineTable, d
         var np = try gpa.alloc(u8, new_prefix.len + 1);
         @memcpy(np[0..new_prefix.len], new_prefix);
         np[new_prefix.len] = '.';
-        try walkDecls(gpa, tree, line_table, cd.ast.members, np, project, commit, rel, records, unattached);
+        try walkDecls(gpa, tree, line_table, cd.ast.members, np, project, commit, rel, records, declarations, unattached);
     }
 }
 
-fn handleErrorSet(gpa: std.mem.Allocator, tree: *Ast, line_table: *const LineTable, node: Node.Index, prefix: []const u8, outer_sym: []const u8, project: []const u8, commit: []const u8, rel: []const u8, records: *std.ArrayList(Record), unattached: std.AutoHashMap(TokenIndex, void)) anyerror!void {
+fn handleErrorSet(gpa: std.mem.Allocator, tree: *Ast, line_table: *const LineTable, node: Node.Index, prefix: []const u8, outer_sym: []const u8, project: []const u8, commit: []const u8, rel: []const u8, records: *std.ArrayList(Record), declarations: *usize, unattached: std.AutoHashMap(TokenIndex, void)) anyerror!void {
     _ = prefix;
     const lbrace, const rbrace = tree.nodeData(node).token_and_token;
     const toks = tree.tokens.items(.tag);
     var i: TokenIndex = lbrace + 1;
     while (i < rbrace) : (i += 1) {
         if (toks[i] != .identifier) continue;
+        declarations.* += 1;
         const doc: []const u8 = (try collectDocRun(gpa, tree, i, &unattached)) orelse
             (try collectLineComments(gpa, tree.source, tree.tokenStart(i))) orelse
             continue;
@@ -889,7 +904,7 @@ fn handleErrorSet(gpa: std.mem.Allocator, tree: *Ast, line_table: *const LineTab
     }
 }
 
-fn handleField(gpa: std.mem.Allocator, tree: *Ast, line_table: *const LineTable, decl: Node.Index, prefix: []const u8, project: []const u8, commit: []const u8, rel: []const u8, records: *std.ArrayList(Record), unattached: std.AutoHashMap(TokenIndex, void)) anyerror!void {
+fn handleField(gpa: std.mem.Allocator, tree: *Ast, line_table: *const LineTable, decl: Node.Index, prefix: []const u8, project: []const u8, commit: []const u8, rel: []const u8, records: *std.ArrayList(Record), declarations: *usize, unattached: std.AutoHashMap(TokenIndex, void)) anyerror!void {
     const cf = tree.fullContainerField(decl) orelse return;
     const name_tok = cf.ast.main_token;
     if (tree.tokenTag(name_tok) != .identifier) return;
@@ -916,7 +931,7 @@ fn handleField(gpa: std.mem.Allocator, tree: *Ast, line_table: *const LineTable,
         var np = try gpa.alloc(u8, sym.len + 1);
         @memcpy(np[0..sym.len], sym);
         np[sym.len] = '.';
-        try walkDecls(gpa, tree, line_table, cd.ast.members, np, project, commit, rel, records, unattached);
+        try walkDecls(gpa, tree, line_table, cd.ast.members, np, project, commit, rel, records, declarations, unattached);
     }
 }
 

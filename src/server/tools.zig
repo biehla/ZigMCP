@@ -89,13 +89,17 @@ pub const doc_get_output = registry.Schema{
 
 pub const doc_import_status_input = registry.Schema{ .fields = &.{} };
 
-pub const doc_import_status_output = registry.Schema{ .fields = &.{
-    .{ .name = "index_path", .kind = .string, .required = false },
-    .{ .name = "index_state", .kind = .string, .description = "unloaded, ok, or reload_failed." },
-    .{ .name = "index_error", .kind = .string, .required = false, .description = "Why the last load failed." },
-    .{ .name = "index_records", .kind = .integer },
-    .{ .name = "projects", .kind = .array },
-} };
+pub const doc_import_status_output = registry.Schema{
+    .fields = &.{
+        .{ .name = "index_path", .kind = .string, .required = false },
+        .{ .name = "index_state", .kind = .string, .description = "unloaded, ok, or reload_failed." },
+        .{ .name = "index_error", .kind = .string, .required = false, .description = "Why the last load failed." },
+        .{ .name = "index_records", .kind = .integer },
+        // The members are not machine-checkable here (the schema has no nested
+        // object kind), so the description carries what a client will find.
+        .{ .name = "projects", .kind = .array, .description = "Per project: project, commit, records, and — when a local sidecar exists — declarations, files_total, files_degraded and degraded." },
+    },
+};
 
 /// A tool-level "no result": the call succeeded, the answer is "nothing
 /// matched".
@@ -882,6 +886,9 @@ pub fn docImportStatus(ctx: *Context, args: std.json.Value) ToolError!ToolOutcom
         var degraded_files: ?usize = null;
         if (sidecar) |value| {
             if (sidecarProject(value, stat.name)) |entry| {
+                // IDX-10: `declarations` is what the walk visited, so
+                // `records / declarations` is the yield of the doc rule.
+                _ = try putSidecarCount(&item, gpa, entry, "declarations");
                 _ = try putSidecarCount(&item, gpa, entry, "files_total");
                 degraded_files = try putSidecarCount(&item, gpa, entry, "files_degraded");
                 try putSidecarArray(&item, gpa, entry, "degraded");

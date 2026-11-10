@@ -711,6 +711,34 @@ test "doc_import_status reports a failed index load" {
     try std.testing.expectEqual(@as(i64, 0), structured.get("index_records").?.integer);
 }
 
+test "doc_import_status reports the declaration yield from the sidecar" {
+    // IDX-10: the documentation rule's yield used to be a claim in prose. The
+    // indexer now counts the sites it visited, and the count reaches a client
+    // through the status sidecar beside the local index.
+    const harness = try Harness.start();
+    defer {
+        harness.kill();
+        harness.release();
+        std.testing.allocator.destroy(harness);
+    }
+
+    try harness.send(
+        "{\"jsonrpc\":\"2.0\",\"id\":18,\"method\":\"tools/call\",\"params\":{\"name\":\"doc_import_status\",\"arguments\":{}}}",
+    );
+    const response = try harness.receive();
+    defer response.deinit();
+
+    const structured = response.value.object.get("result").?.object.get("structuredContent").?.object;
+    const projects = structured.get("projects").?.array.items;
+    try std.testing.expectEqual(@as(usize, 1), projects.len);
+    const fixture = projects[0].object;
+    try std.testing.expectEqualStrings("fixture", fixture.get("project").?.string);
+    try std.testing.expectEqual(@as(i64, 33), fixture.get("records").?.integer);
+    // More sites than records: a documented declaration is one record, but a
+    // parameter or error member is a site that may carry none.
+    try std.testing.expectEqual(@as(i64, 38), fixture.get("declarations").?.integer);
+}
+
 test "a missing resource is invalid params with the uri" {
     const harness = try Harness.start();
     defer {

@@ -106,7 +106,7 @@ anything was compiled or checked.
 | `recommend_approach` | `signals` (non-empty list of observations), optional `constraints` | The decision rules your signals match, best first: paradigms to consider, the "only if" constraint, its `GUIDANCE` label and a score |
 | `doc_search` | `query`, optional `project`, optional `limit` (default 20, max 100) | Matching records with `path:line`, symbol, kind and text: exact symbol first, then partial symbol, then path, then prose |
 | `doc_get` | `project`, `symbol` | Every record with that symbol — usually one — with its location and commit. `symbol` is the spelling the index stores (`lib.std.mem.copyForwards`); a shorter dotted tail (`mem.copyForwards`) resolves when exactly one stored symbol ends with it and the result then carries `resolved_from`. Otherwise a miss lists the closest stored symbols in `candidates`. `found` is always present, so a miss is still schema-shaped |
-| `doc_import_status` | none | `index_state` (`ok` / `unloaded` / `reload_failed`), `index_error` when a load failed, and per project the commit, record count and degraded-file counts for a local index |
+| `doc_import_status` | none | `index_state` (`ok` / `unloaded` / `reload_failed`), `index_error` when a load failed, and per project the commit, record count and — for a local index with a status sidecar — the declaration count and degraded-file counts |
 
 `project` is matched exactly first, so `Fixture` and `fixture` stay distinct. Failing
 that, it is compared again ignoring case and `_` vs `-`, and used only when that names
@@ -241,8 +241,11 @@ zig-out/bin/indexer \
 | `--previous <index.jsonl>` | Reuse records for projects whose commit has not changed, and only when the old status file agrees on the count |
 
 Keep the status file next to the index: `doc_import_status` reads the degraded-file
-counts from it. `generated/index.jsonl` is the server's default location, so
-`zig build run` picks it up without flags.
+counts from it, plus `declarations` — every fn, var, field, named parameter and
+error-set member the walk visited, documented or not — so `records / declarations` is
+the measured yield of the documentation rule rather than a claim about it.
+`generated/index.jsonl` is the server's default location, so `zig build run` picks it up
+without flags.
 
 The upstream projects, their pins and their include/exclude scope live in
 [`data/sources.zon`](data/sources.zon); `zig build plan-sources` prints the plan both CI

@@ -254,7 +254,7 @@ item), `structuredContent` matching the output schema, and `isError`.
 |`recommend_approach`|`signals: string[]` (non-empty), optional `constraints: object` (opaque)|`{signals, matches[{rule_id, condition, consider[], and_only_if?, evidence, score}]}`|A rule matches on ≥2 shared tokens, or 1 token covering ≥50% of its condition|
 |`doc_search`|`query`, optional `project`, optional `limit` (default 20, max 100; ≤0 → 20)|`{query, count, results[{project, commit, path, line, kind, symbol, container, doc}]}`|Score: exact symbol 100 / symbol substring 60 / token-in-symbol 40, +25 path, +10 doc substring or +5 token-in-doc; ties by symbol, path, line. `project` resolves exactly first, then ignoring case and `_` vs `-` when the spelling names exactly one project (PROTO-14). The index holds comment text only — no signature or body is stored|
 |`doc_get`|`project`, `symbol` (case-insensitive)|`{found, project?, symbol?, matches[{commit, path, line, kind, symbol, container, doc, doc_hash}], candidates?, resolved_from?}`|`symbol` is the path-qualified spelling the index stores (`lib.std.mem.copyForwards`); a shorter **dotted tail** resolves when exactly one stored symbol ends with it, and `resolved_from` then carries the argument as sent (PROTO-16) — two symbols sharing the tail stay a miss. Otherwise a miss lists the closest stored symbols in `candidates` (PROTO-15). Every record sharing the symbol path — a `//!` container record and a declaration from the sibling `<dir>.zig` can collide — comes back in `(path, line)` order; `found` is always present so a miss is still schema-shaped. `project` resolves as in `doc_search` (PROTO-14); a record holds comment text only, never a signature or body|
-|`doc_import_status`|`{}`|`{index_path?, index_state, index_error?, index_records, projects[{project, commit, records, files_total?, files_degraded?, degraded?}]}`|`index_state` is `ok`/`unloaded`/`reload_failed`, so a client can see that the index being served is not the artifact on disk (REL-4); degraded counts come from the `.status.json` sidecar next to a **local** index, and a sidecar member whose type or sign contradicts this schema is omitted rather than echoed|
+|`doc_import_status`|`{}`|`{index_path?, index_state, index_error?, index_records, projects[{project, commit, records, declarations?, files_total?, files_degraded?, degraded?}]}`|`index_state` is `ok`/`unloaded`/`reload_failed`, so a client can see that the index being served is not the artifact on disk (REL-4); degraded counts come from the `.status.json` sidecar next to a **local** index, and a sidecar member whose type or sign contradicts this schema is omitted rather than echoed|
 
 "Nothing matched" is a **normal result with `isError: true`**, an explanation, and
 `structuredContent` shaped like the tool's `outputSchema` (empty `matches`/`results`,
@@ -458,10 +458,14 @@ Per `.zig` file under `root` (kept by an `--include` directory prefix, dropped b
      yields nothing. Doc comments always win; the module `//!` record never falls back.
 6. A declaration with neither an attached `///` run nor a `//` fallback is skipped.
 7. Output sorted (§7); status sidecar defaults to `<out minus .jsonl>.status.json`:
-   `{"projects":{"<p>":{"commit","records","files_total","files_degraded",
-   ["skipped","previous_records"],"degraded":[{"path","reason?","diagnostics":[{"tag","line"}]}]}}}`.
-   `reason` is set when the file was not parsed at all (unreadable, oversized, or
-   too deeply nested), in which case `diagnostics` is empty.
+   `{"projects":{"<p>":{"commit","records","declarations","files_total",
+   "files_degraded",["skipped","previous_records"],"degraded":[{"path","reason?",
+   "diagnostics":[{"tag","line"}]}]}}}`. `reason` is set when the file was not parsed
+   at all (unreadable, oversized, or too deeply nested), in which case `diagnostics` is
+   empty. `declarations` counts every site the walk visited that can carry a record — a
+   fn/var/field declaration, a named parameter, an error-set member — documented or not,
+   so `records / declarations` is the yield of the documentation rule (IDX-10); a file's
+   `//!` record has no declaration behind it, which is why the ratio is a floor.
 
 **Incremental:** with `--previous`, a project whose `(project, commit)` already has
 records there is skipped and those records are carried over verbatim — but only when
