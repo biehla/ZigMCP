@@ -340,7 +340,7 @@ them, so a schema change is one edit and all three targets recompile.
 |`commit`|Upstream commit the record came from (provenance)|
 |`path`, `line`|Source location, `/`-separated, 1-based|
 |`kind`|`fn` / `var` / `field` / `container` / `error` / `param`|
-|`symbol`|Syntactic container path; module path is the file path with `/` → `.` and `.zig` stripped|
+|`symbol`|Syntactic container path; module path is the file path with `/` → `.` and `.zig` stripped, and a `..` component is rejected (IDX-6)|
 |`container`|Enclosing symbol (`""` for a module's `//!` record)|
 |`doc`|`///` or `//!` stripped (the space after it is kept), lines joined with `\n`; an invalid UTF-8 byte becomes U+FFFD before hashing (IDX-5)|
 |`doc_hash`|Lowercase hex SHA-256 of `doc`; recomputed and compared at load, so a mismatch rejects the artifact (REL-9)|

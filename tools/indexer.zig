@@ -611,15 +611,21 @@ fn sanitizeUtf8(gpa: std.mem.Allocator, s: []const u8) ![]const u8 {
     return out.toOwnedSlice(gpa);
 }
 
-fn modulePath(gpa: std.mem.Allocator, rel: []const u8) ![]const u8 {
+/// The module path is the file path with `/` → `.` and `.zig` stripped. A `..`
+/// component escapes the source root; refuse it rather than collapsing
+/// `../x.zig` and `x.zig` onto the same symbol (IDX-6). Only an exact leading
+/// `./` is removed — a dotfile's leading dot is part of its name.
+pub fn modulePath(gpa: std.mem.Allocator, rel: []const u8) ![]const u8 {
     var s = rel;
+    if (std.mem.startsWith(u8, s, "./")) s = s[2..];
     if (std.mem.endsWith(u8, s, ".zig")) s = s[0 .. s.len - 4];
+    var parts = std.mem.splitScalar(u8, s, '/');
+    while (parts.next()) |part| {
+        if (std.mem.eql(u8, part, "..")) return error.PathEscapesRoot;
+    }
     var out = try gpa.alloc(u8, s.len);
     for (s, 0..) |c, i| out[i] = if (c == '/' or c == '\\') '.' else c;
-    // Trim leading "./" artifacts: strip leading dots.
-    var start: usize = 0;
-    while (start < out.len and out[start] == '.') start += 1;
-    return out[start..];
+    return out;
 }
 
 fn hashDoc(gpa: std.mem.Allocator, doc: []const u8) ![]const u8 {
@@ -846,4 +852,19 @@ fn handleField(gpa: std.mem.Allocator, tree: *Ast, line_table: *const LineTable,
         np[sym.len] = '.';
         try walkDecls(gpa, tree, line_table, cd.ast.members, np, project, commit, rel, records, unattached);
     }
+}
+
+test "modulePath keeps dotfiles distinct and rejects a parent escape" {
+    // IDX-6: stripping every leading dot turned `../x.zig` into `x` — the same
+    // symbol as `x.zig` — and a dotfile lost its leading dot.
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    try std.testing.expectEqualStrings("x", try modulePath(gpa, "x.zig"));
+    try std.testing.expectEqualStrings("x", try modulePath(gpa, "./x.zig"));
+    try std.testing.expectEqualStrings(".hidden", try modulePath(gpa, ".hidden.zig"));
+    try std.testing.expectEqualStrings("lib.std.mem", try modulePath(gpa, "lib/std/mem.zig"));
+    try std.testing.expectError(error.PathEscapesRoot, modulePath(gpa, "../x.zig"));
+    try std.testing.expectError(error.PathEscapesRoot, modulePath(gpa, "lib/../x.zig"));
 }
