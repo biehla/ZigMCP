@@ -38,6 +38,35 @@ const DegradedFile = struct {
 /// aborting the run (IDX-1).
 const max_file_bytes = 64 * 1024 * 1024;
 
+/// Nesting beyond this is treated as hostile and the file is not parsed.
+///
+/// Real Zig source stays far below it; the parser's Debug overflow point is
+/// 2 000 levels and a ReleaseSafe one is 10 000 (IDX-8).
+const max_nesting_depth = 256;
+
+/// The deepest run of `{`, `(` or `[` in a source file.
+///
+/// `std.zig.Ast.parse` recurses once per nesting level, so a pathological file
+/// overflows the stack inside the parser — 4 KB of nested parens killed a Debug
+/// indexer, 20 KB a ReleaseSafe one — and that aborted every project in the run
+/// (IDX-8). A byte counter is deliberately crude: a bracket inside a string or
+/// a comment can only make it more conservative.
+fn maximumBracketDepth(source: []const u8) usize {
+    var depth: usize = 0;
+    var deepest: usize = 0;
+    for (source) |c| {
+        switch (c) {
+            '{', '(', '[' => {
+                depth += 1;
+                if (depth > deepest) deepest = depth;
+            },
+            '}', ')', ']' => depth -|= 1,
+            else => {},
+        }
+    }
+    return deepest;
+}
+
 const ProjectStatus = struct {
     project: []const u8,
     commit: []const u8,
@@ -332,6 +361,15 @@ fn indexSource(io: std.Io, gpa: std.mem.Allocator, src: Source, includes: []cons
 }
 
 fn indexFile(gpa: std.mem.Allocator, project: []const u8, commit: []const u8, rel: []const u8, source_z: [:0]const u8, records: *std.ArrayList(Record), st: *ProjectStatus) !void {
+    if (maximumBracketDepth(source_z) > max_nesting_depth) {
+        try st.degraded.append(gpa, .{
+            .path = rel,
+            .reason = "nesting exceeds the depth limit",
+            .diagnostics = &.{},
+        });
+        return;
+    }
+
     var tree = try Ast.parse(gpa, source_z, .{ .mode = .zig });
     defer tree.deinit(gpa);
 

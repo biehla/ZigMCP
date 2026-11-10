@@ -161,3 +161,72 @@ test "an oversized file is recorded as degraded instead of aborting the run" {
     try std.testing.expect(std.mem.indexOf(u8, status, "\"reason\":\"file exceeds the per-file size limit\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, status, "\"files_degraded\":1") != null);
 }
+
+test "a pathologically nested file is degraded instead of overflowing the stack" {
+    // IDX-8: `Ast.parse` recurses once per nesting level, so 2 000 nested
+    // parens killed a Debug indexer — and with it every project in the run,
+    // writing neither records nor a status sidecar.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const root = try std.fmt.allocPrint(std.testing.allocator, ".zig-cache/tmp/{s}", .{&tmp.sub_path});
+    defer std.testing.allocator.free(root);
+
+    try writeFixture(tmp.dir, "small.zig", "/// the docs\npub fn ok() void {}\n");
+
+    var deep: std.ArrayList(u8) = .empty;
+    defer deep.deinit(std.testing.allocator);
+    try deep.appendSlice(std.testing.allocator, "pub const v = ");
+    var level: usize = 0;
+    while (level < 2000) : (level += 1) try deep.append(std.testing.allocator, '(');
+    try deep.append(std.testing.allocator, '1');
+    level = 0;
+    while (level < 2000) : (level += 1) try deep.append(std.testing.allocator, ')');
+    try deep.appendSlice(std.testing.allocator, ";\n");
+    try writeFixture(tmp.dir, "deep.zig", deep.items);
+
+    const output = try std.fmt.allocPrint(std.testing.allocator, "{s}/index.jsonl", .{root});
+    defer std.testing.allocator.free(output);
+    const source = try std.fmt.allocPrint(std.testing.allocator, "p=c={s}", .{root});
+    defer std.testing.allocator.free(source);
+
+    var child = try std.process.spawn(io, .{
+        .argv = &.{ options.indexer_exe, "--out", output, "--source", source },
+        .stdin = .ignore,
+        .stdout = .ignore,
+        .stderr = .ignore,
+    });
+    switch (try child.wait(io)) {
+        .exited => |code| try std.testing.expectEqual(@as(u8, 0), code),
+        else => return error.UnexpectedExit,
+    }
+
+    const status_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/index.status.json", .{root});
+    defer std.testing.allocator.free(status_path);
+    const status = try std.Io.Dir.cwd().readFileAllocOptions(
+        io,
+        status_path,
+        std.testing.allocator,
+        .limited(16 * 1024 * 1024),
+        .of(u8),
+        null,
+    );
+    defer std.testing.allocator.free(status);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        status,
+        "\"path\":\"deep.zig\",\"reason\":\"nesting exceeds the depth limit\"",
+    ) != null);
+
+    // The run still produced the readable file's record.
+    const produced = try std.Io.Dir.cwd().readFileAllocOptions(
+        io,
+        output,
+        std.testing.allocator,
+        .limited(16 * 1024 * 1024),
+        .of(u8),
+        null,
+    );
+    defer std.testing.allocator.free(produced);
+    try std.testing.expect(std.mem.indexOf(u8, produced, "\"symbol\":\"small.ok\"") != null);
+}

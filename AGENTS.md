@@ -372,7 +372,10 @@ Per `.zig` file under `root` (filtered by `--include` prefixes):
 
 1. Read and NUL-terminate; `std.zig.Ast.parse(gpa, source, .{ .mode = .zig })`. A file
    that cannot be read, or exceeds the 64 MiB per-file ceiling, is recorded as
-   degraded with a `reason` and skipped — it never aborts the run (IDX-1).
+   degraded with a `reason` and skipped — it never aborts the run (IDX-1). The same
+   happens to a file whose bracket nesting exceeds 256 levels: `Ast.parse` recurses
+   once per level and overflows the stack on a hostile file long before the bytes
+   run out (IDX-8).
 2. **Degrade, never skip:** extract from every file regardless of `tree.errors`;
    record each diagnostic (tag + line) and mark the file **degraded** in the status
    sidecar. No curated fatal-tag list — the stdlib has no severity field.
