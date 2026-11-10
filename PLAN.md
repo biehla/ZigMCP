@@ -3,6 +3,7 @@
 Status: one open item (§1, CI-13). Twenty-two items were fixed on 2026-11-09 and
 forty-two on 2026-11-10, and five more were closed that day because they were already
 done — the option chosen for each, its commit and its verification are in §13–§33.
+Two more were closed on 2026-11-10 as PROTO-14 and DOC-5; see §34.
 Two sources: a read-through of the tree on 2026-11-09, and a breakage campaign the
 same day that fuzzed the stdio surface and the indexer, profiled the hot paths, and
 inspected a `ReleaseSafe` PE with REA — method, measurements and negative results in
@@ -521,6 +522,23 @@ the real ones' effects.
 
 The last check for each is a live dispatch after the push: the replica proves the
 shell logic, not GitHub's environment.
+
+## 34. Resolved on 2026-11-10, reviewer suggestions
+
+Two protocol/doc items and a packaging gap, one commit (`f2e3844`). An external review
+of the published repository found that the doc tools rejected a project spelling that
+differed by case or by `_` vs `-` with an unexplained "nothing matched", and that the
+same tools promised "the full documentation" of a symbol while a record holds only its
+comment text. The same review noticed the repository had no license file at all, which
+is packaging rather than a defect, so it landed with the docs commit that updates the
+tool descriptions.
+
+|Id|Option|Commit|Verification|
+|---|---|---|---|
+|PROTO-14|(a) resolve the argument exactly first, then ignoring case and `_` vs `-`, and only when that names one project|`f2e3844`|handler tests: `project: "zig-std"` reaches the `zig_std` records and `doc_get` echoes `ZIG_STD` back; `FIXTURE` over `Fixture`+`fixture` is `isError` with both keys named and no merging; `nope` lists `Known projects: mcp_zig, zig_std`; the PROTO-13 test still passes|
+|DOC-5|(a) state "documentation comments only" in the tool descriptions and the readme|`f2e3844`|`tools/list` description text from a live server; readme "The doc index" paragraph|
+|DOC-6|add `LICENSE` (MIT), `build.zig.zon` `paths`, and the release tarball copy|`f2e3844`|`head -1 LICENSE`; `grep '"LICENSE"' build.zig.zon`; the packaging step copies it into `dist/pkg`|
+
 
 
 
