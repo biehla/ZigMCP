@@ -1,8 +1,8 @@
 # PLAN.md — defects, edge cases, limitations, and guideline deviations
 
-Status: open backlog. Twenty-two items were fixed on 2026-11-09, twenty-seven on
+Status: open backlog. Twenty-two items were fixed on 2026-11-09, twenty-eight on
 2026-11-10, and five more were closed that day because they were already done — the
-option chosen for each, its commit and its verification are in §13–§20. Two sources: a read-through
+option chosen for each, its commit and its verification are in §13–§21. Two sources: a read-through
 of the tree on 2026-11-09, and a breakage campaign the same day that fuzzed the
 stdio surface and the indexer, profiled the hot paths, and inspected a `ReleaseSafe`
 PE with REA — method, measurements and negative results in §12.
@@ -139,19 +139,6 @@ No open items.
   first non-identifier token; (c) assert on nested tokens. Verify: a fixture with a
   nested decl inside an error set.
 
-- **IDX-9 — record line numbers rescan the file from offset 0, so the indexer is
-  quadratic in declarations per file.** `lineOf` calls
-  `std.zig.findLineColumn(tree.source, off)` for every record, which walks from the
-  first byte of the file. Measured on the default Debug build, one file of documented
-  `fn`s: 5 000 decls 1.17 s, 10 000 4.63 s, 25 000 29.65 s (4×, then 25× — clean n²),
-  50 000 decls 113 s for a 1.7 MB file — while a 4 MiB file with one documented
-  declaration takes 0.10 s, so the cost tracks record count × file size, not either
-  alone. Options:
-  (a) build a line-start table once per file and binary-search it; (b) carry the
-  previous record's line and count newlines between tokens; (c) accept and budget
-  declarations per file. Verify: the timing ladder stays linear (25 000 decls under
-  ~2 s).
-
 ---
 
 ## 5. Index loading and hot reload
@@ -232,7 +219,6 @@ must own its test, because no such layer exists yet.
 |REL-1|—|local HTTP server counting requests|
 |REL-2|—|black-hole address plus quit; timing-based|
 |REL-6|—|integration: URL index with no sidecar|
-|IDX-9|—|indexer CLI harness measuring the 5k/10k/25k ladder, or a unit test on the line table|
 |CI-9|—|actionlint 1.17+ over `.github/workflows/`; no local test|
 |DOC-4|—|`inspect_pe_resources` on a `ReleaseSafe` artifact (packaging smoke test)|
 
@@ -247,9 +233,8 @@ fixes and the data-plane trust items — are done (§13, §14, §15). What remai
 order:
 
 1. Remaining limitations by demand: REL-1.
-2. Measured hot spots: IDX-9 (quadratic indexer).
-3. Contract and packaging gaps: DOC-4, CI-9.
-4. Everything else in §1–§6 by demand.
+2. Contract and packaging gaps: DOC-4, CI-9.
+3. Everything else in §1–§6 by demand.
 
 ---
 
@@ -463,6 +448,16 @@ the indexer finally honours the `exclude` scope it was given.
 |---|---|---|---|
 |CI-4|(a)+(b)|`c4994bc`|indexer test `an --exclude pattern removes matching files from the index` (bare prefix vs `**`, one run per form); CLI check: the fixture's two `lib/std/nested/container.zig` records vanish under `--exclude lib/std/nested` and no other record changes|
 |CI-5|(a)+(b)|`c4994bc`|`src/util/sources.zig` unit test parses a reformatted, one-line, no-scope ZON file and gets every include and exclude; `zig build plan-sources` prints both real sources; `zig build test`, `check`, `workflows`, `zig fmt` and actionlint 1.7.7 pass|
+
+## 21. Resolved on 2026-11-10, seventh chunk
+
+One indexer item, one commit (`fbc7026`): record line numbers no longer rescan
+from byte 0. `tools/line_table.zig` records the line starts once per file and
+binary-searches them, which turned a clean n² ladder into a linear one.
+
+|Id|Option|Commit|Verification|
+|---|---|---|---|
+|IDX-9|(a)|`fbc7026`|`lineOf agrees with findLineColumn at every offset` (unit test); the golden index is still byte-identical, and it pins every `line`; Debug ladder 5k/10k/25k = 0.109/0.119/0.296 s (was 1.17/4.63/29.65 s), ReleaseSafe 0.035/0.033/0.071 s|
 
 
 
