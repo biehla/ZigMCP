@@ -1,8 +1,8 @@
 # PLAN.md — defects, edge cases, limitations, and guideline deviations
 
-Status: open backlog. Twenty-two items were fixed on 2026-11-09, seven on 2026-11-10,
+Status: open backlog. Twenty-two items were fixed on 2026-11-09, twenty on 2026-11-10,
 and five more were closed that day because they were already done — the option chosen
-for each, its commit and its verification are in §13–§16. Two sources: a read-through
+for each, its commit and its verification are in §13–§17. Two sources: a read-through
 of the tree on 2026-11-09, and a breakage campaign the same day that fuzzed the
 stdio surface and the indexer, profiled the hot paths, and inspected a `ReleaseSafe`
 PE with REA — method, measurements and negative results in §12.
@@ -126,64 +126,14 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri"
 
 ## 2. Protocol / MCP surface
 
-- **PROTO-3 — `initialize` is `-32601` on current-revision requests.** Spec-legal,
-  but clients that send `initialize` with `_meta` get an error instead of a
-  discovery-shaped result. Options: (a) always answer it; (b) answer with `-32601`
-  plus `data.supportedVersions`; (c) leave. Verify: send both shapes.
-
-- **PROTO-4 — `logLevel` is parsed but nothing is emitted.** A client that opts into
-  logging gets no `notifications/message` ever. Options: (a) implement the
-  notification stream; (b) reject `logLevel`; (c) document it as unsupported.
-  Verify: set `logLevel` and expect (or not) a notification.
-
-- **PROTO-5 — `recommend_approach` silently ignores `constraints`.** The argument is
-  accepted and unused, so callers believe it filters. Options: (a) fold constraint
-  text into the signal tokens; (b) drop it from the input schema; (c) return
-  `isError: true` when it is non-empty. Verify: pass a constraint that would change
-  the match.
-
-- **PROTO-7 — question mode truncates to 5 matches with no indication.** Options:
-  (a) return `match_count` and `truncated`; (b) raise the cap; (c) include scores
-  and tokens used. Verify: a question matching 6+ patterns.
-
-- **PROTO-8 — JSON-RPC batches become `-32600`.** An array of requests is not an
-  object, so it is rejected with `id: null`. Options: (a) accept arrays and reply
-  with an array; (b) keep rejecting and document; (c) reply `-32600` per element.
-  Verify: send `[{…},{…}]`.
-
-- **PROTO-10 — `docs://{project}/index` is unbounded.** One read returns every
-  symbol of a project, unbounded in size. Options: (a) add a cursor/offset argument;
-  (b) cap and append a truncation marker; (c) drop the resource in favour of
-  `doc_search`. Verify: read it against a full index and measure bytes.
-
 ---
 
 ## 3. Server runtime
-
-- **SRV-2 — `buildResponse` assumes an object result.** `result.value.object` is
-  taken unchecked; a handler returning a non-object panics. Options: (a) `switch`
-  with a `-32603` fallback; (b) `std.debug.assert(result.value == .object)`; (c) type
-  the handler return as an object. Verify: unit test with a string result.
-
-- **SRV-3 — OOM during a request produces no response.** `handleLine` errors are
-  logged and the request is dropped, leaving the client waiting. Options: (a) reply
-  `-32603` when the failure is OOM; (b) reset the pool and retry once; (c) leave.
-  Verify: fault-inject an allocator failure in a test.
 
 - **SRV-5 — index reclamation runs under the spin lock.** `reclaimLocked` frees an
   index while holding the store lock, so readers spin for the duration. Options:
   (a) move the free outside the lock into an owner thread; (b) accept it (index free
   is short); (c) use a mutex instead of spinning. Verify: bench under a reload loop.
-
-- **SRV-7 — search cost scales with query tokens × records, so one request can hold
-  the server for tens of seconds.** `docs/search.zig` walks every token of the query
-  for every record, and a 60 KB line yields ~15 000 tokens. Measured on a 50 000-record
-  index in ReleaseSafe: `"memory"` 0.24 s, `"xyz " * 15000` **19.70 s** for one
-  request and one line (a Debug build takes 131 s). The server is single-threaded, so
-  the stall is client-chosen.
-  Options: (a) cap the query (e.g. 4 KiB, 32 tokens) and return `-32602`; (b) build
-  the token inverted index that §9 lists as P11's precondition; (c) score only the
-  first N tokens. Verify: the §0 amplification recipe answers in well under 1 s.
 
 ---
 
@@ -233,18 +183,9 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri"
   timeout/deadline; (b) fail the fetch after N seconds via a watchdog thread; (c)
   accept (process is exiting). Verify: point at a black-hole address and quit.
 
-- **REL-3 — `file://` URLs are treated as relative paths.** `Source.fromString`
-  classifies only `http(s)://`. Options: (a) strip `file://` into a path; (b) reject
-  with a clear error; (c) document. Verify: `--index file:///tmp/i.jsonl`.
-
 - **REL-6 — remote indexes have no status sidecar,** so degraded-file data is
   invisible. Options: (a) fetch `<url>.status.json`; (b) embed status as an index
   header record; (c) accept. Verify: `doc_import_status` on a URL index.
-
-- **REL-7 — the local-change heuristic is mtime + size.** A rewrite that preserves
-  both is missed. Options: (a) compare the content hash after each mtime change;
-  (b) also compare inode/creation time; (c) always re-read on any stat change.
-  Verify: rewrite with equal size and restored mtime.
 
 ---
 
@@ -252,11 +193,6 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri"
 
 Rules being broken are in `AGENTS.md` §5, §11, §12 (code/corpus conventions) and D8
 (table-driven capabilities).
-
-- **GUIDE-4 — input sizes are not bounded.** §12 says bound every input, but
-  `question`, `query` and `symbol` accept anything the 64 KiB line allows. Options:
-  (a) cap at e.g. 4 KiB and return `-32602`; (b) cap and truncate with a flag; (c)
-  rely on the line cap. Verify: a 60 KiB query.
 
 - **GUIDE-8 — limitation lists are duplicated across three files.** `AGENTS.md` §14,
   `readme.md` Known limitations and this file will drift. Options: (a) this file is
@@ -319,29 +255,17 @@ must own its test, because no such layer exists yet.
 |CI-6|—|rerun the workflow; no local test|
 |CI-7|—|timing only|
 |CI-8|—|unpack a release and run it from an empty directory (CI smoke test)|
-|PROTO-3|—|`tests/protocol_test.zig`: `initialize` with `_meta`|
-|PROTO-4|—|protocol layer: set `logLevel`, expect a notification or `-32602`|
-|PROTO-5|—|handler test on non-empty `constraints`; write once the option is chosen|
-|PROTO-7|—|handler test: 6+ matching patterns, assert count/truncation|
-|PROTO-8|—|`json_rpc` unit test on an array; expectation depends on the option|
-|PROTO-10|—|resource test against a large index; assert a cap or cursor|
-|SRV-2|—|extract `buildResponse` out of `main.zig` first; then a unit test|
-|SRV-3|—|transport-level harness with an injected failing allocator|
 |SRV-5|—|benchmark only, not deterministic|
 |IDX-5|—|indexer CLI harness: fixture with a 0xFF byte in a comment|
 |IDX-6|—|`modulePath` is private; export it for a unit test|
 |IDX-7|—|fixture with a nested declaration inside an error set|
 |REL-1|—|local HTTP server counting requests|
 |REL-2|—|black-hole address plus quit; timing-based|
-|REL-3|—|unit test: `Source.fromString("file:///x")`|
 |REL-6|—|integration: URL index with no sidecar|
-|REL-7|—|reload integration test: equal size, restored mtime|
-|GUIDE-4|—|handler test: 60 KiB query expects `-32602`|
 |GUIDE-8|—|doc lint: each gap id appears once across the tree|
 |DOC-1|—|packaging assertion on `build.zig.zon` `.paths`|
 |DOC-2|—|doc lint comparing the two snippets|
 |DOC-3|—|same as GUIDE-8|
-|SRV-7|—|timing only (`zig build bench` and the §0 recipe); needs a large fixture index|
 |IDX-9|—|indexer CLI harness measuring the 5k/10k/25k ladder, or a unit test on the line table|
 |CI-9|—|actionlint 1.17+ over `.github/workflows/`; no local test|
 |DOC-4|—|`inspect_pe_resources` on a `ReleaseSafe` artifact (packaging smoke test)|
@@ -356,8 +280,8 @@ The first three steps of the original order — the pipeline, the cheap client-v
 fixes and the data-plane trust items — are done (§13, §14, §15). What remains, in
 order:
 
-1. Remaining limitations by demand: PROTO-10, REL-1.
-2. Measured hot spots: IDX-9 (quadratic indexer) and SRV-7 (client-chosen stall).
+1. Remaining limitations by demand: REL-1.
+2. Measured hot spots: IDX-9 (quadratic indexer).
 3. Contract and packaging gaps: DOC-4, CI-9.
 4. Everything else in §1–§6 by demand.
 
@@ -488,7 +412,6 @@ would have meant staging halves of one file.
 |GUIDE-3|(a) one shared `src/advice/schema.zig` imported as the `advice_schema` module|`20784b3`|`zig build check` + `zig build bench` compile both tools against it; `grep -n "const Pattern = struct" src tools` prints one line; `corpus.zig` pins type identity at comptime|
 |GUIDE-2|(a) a `handler` in `PromptSpec`/`ResourceSpec` (and `cache` in resources)|`20784b3`|regression tests: every prompt spec dispatches through its handler, both resource families read through the table|
 |GUIDE-1|(a) add the `//!` headers|`20784b3`|`src/root.zig` lint test names every headerless `src/**`/`tools/**` file (both tools before the fix) and passes after|
-|REL-5|(a) a `--max-index-bytes` flag|`e9624fb`|unit test: `an artifact larger than the ceiling is rejected` (the golden index, 10-byte limit); CLI accepts the flag|
 
 ## 15. Resolved on 2026-11-10, second chunk
 
@@ -518,6 +441,28 @@ of being left as phantom tasks; the evidence is what was checked, not assumed.
 |TEST-3|The test exists|`src/regressions_test.zig`: `PROTO-2: doc_import_status rejects unknown arguments`|
 |TEST-4|The test exists|`src/regressions_test.zig`: `PROTO-1: every listed resource can be read`|
 |ENV-1|Resolved on 2026-11-09 — the disk was full, not the toolchain; the symptom and its check live in the readme troubleshooting table|`zig build test` exits 0 and `zig-out/bin/zigmcp.exe` is non-zero|
+
+## 17. Resolved on 2026-11-10, third chunk
+
+Thirteen items, one commit (`e9624fb`): the protocol surface, the input bounds, the
+reload predicates and the index ceiling all landed in the same tree — their tests and
+their `PLAN.md` deletions overlap, so they share a commit.
+
+|Id|Option|Commit|Verification|
+|---|---|---|---|
+|PROTO-3|(b) `-32601` plus `data.supportedVersions`|`e9624fb`|protocol test: `initialize` on the current revision names `server/discover` and both supported versions|
+|PROTO-4|(a) implement the notification stream|`e9624fb`|protocol tests: an unknown `logLevel` is `-32602`; a reload failure reaches the client that asked for logs as `notifications/message`|
+|PROTO-5|(a) fold constraint text into the signal tokens|`e9624fb`|regression test: a constraint naming the bottleneck matches R03 while the echoed `signals` stay exactly what the caller sent|
+|PROTO-7|(a) return `match_count` and `truncated`|`e9624fb`|`advice_lookup` reports both in every result; the truncation marker names the hidden count|
+|PROTO-8|(b) keep rejecting and document|`e9624fb`|protocol test: an array envelope → `-32600` with a null id; MCP has no batching|
+|PROTO-10|(b) cap and append a truncation marker|`e9624fb`|unit test: `appendIndexListing` with a cap of 2 renders two lines plus `truncated: 1 more records`; the policy constant is 5 000|
+|SRV-2|(a) refuse a non-object result with `-32603`|`e9624fb`|unit test in `src/protocol/response.zig`: a string result is `NonObjectResult` instead of an unchecked `.object`|
+|SRV-3|(a) reply `-32603` when the failure is OOM|`e9624fb`|unit test on `errors.outOfMemory`; the serve loop answers `-32603` from a fresh pool instead of dropping the request|
+|SRV-7|(a) cap the query and return `-32602`|`e9624fb`|regression + protocol tests: a 60 KiB query and a 65-token query are both `-32602`|
+|GUIDE-4|(a) cap at 4 KiB and return `-32602`|`e9624fb`|`registry.zig` test: 4 KiB accepted, 4 KiB + 1 rejected, 64 array items accepted, 65 rejected, 4 nesting levels accepted, 5 rejected|
+|REL-3|(a) strip `file://` into a path|`e9624fb`|unit test: `file:///tmp/i.jsonl` → `/tmp/i.jsonl`, `file:///C:/x` → `C:/x`, neither is a URL|
+|REL-5|(a) a `--max-index-bytes` flag|`e9624fb`|unit test: `an artifact larger than the ceiling is rejected` (the golden index, 10-byte limit); CLI accepts the flag|
+|REL-7|(b) also compare the metadata-change time|`e9624fb`|the watcher compares `ctime` as well as size and `mtime`, so an equal-size, equal-mtime rewrite is still detected|
 
 
 
