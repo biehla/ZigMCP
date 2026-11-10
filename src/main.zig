@@ -93,20 +93,31 @@ pub fn main(init: std.process.Init) !void {
         index_path = path;
         const source = docs_reload.Source.fromString(path);
         index_source = source;
-        const loaded = gpa.create(docs_index.Index) catch |err| return err;
-        if (docs_reload.loadSource(init.io, gpa, source, options.max_index_bytes)) |result| {
-            loaded.* = result.index;
-            index_digest = result.digest;
-            store.swap(loaded);
-        } else |err| {
-            gpa.destroy(loaded);
-            // The failure is reported by `doc_import_status`, not only on
-            // stderr, so a client can see that the index in use is not the
-            // artifact on disk (REL-4).
-            store.setStatus(.reload_failed, @errorName(err));
-            // The server still serves the advice corpus; the watcher picks the
-            // artifact up as soon as it appears.
-            logStderr(init.io, "zigmcp: cannot load the doc index '{s}' ({s}); serving without an index\n", .{ path, @errorName(err) });
+        switch (source) {
+            // A local artifact is small and synchronous: load it before serving
+            // so a missing or corrupt file is reported at once.
+            .file => {
+                const loaded = gpa.create(docs_index.Index) catch |err| return err;
+                if (docs_reload.loadSource(init.io, gpa, source, options.max_index_bytes)) |result| {
+                    loaded.* = result.index;
+                    index_digest = result.digest;
+                    store.swap(loaded);
+                } else |err| {
+                    gpa.destroy(loaded);
+                    // The failure is reported by `doc_import_status`, not only on
+                    // stderr, so a client can see that the index in use is not the
+                    // artifact on disk (REL-4).
+                    store.setStatus(.reload_failed, @errorName(err));
+                    // The server still serves the advice corpus; the watcher picks the
+                    // artifact up as soon as it appears.
+                    logStderr(init.io, "zigmcp: cannot load the doc index '{s}' ({s}); serving without an index\n", .{ path, @errorName(err) });
+                }
+            },
+            // A remote artifact is fetched by the watcher, whose first poll runs
+            // immediately: a black-holed origin must not block startup (REL-2).
+            // Until the fetch lands the index is empty and `doc_import_status`
+            // reports `unloaded`.
+            .url => {},
         }
     }
 

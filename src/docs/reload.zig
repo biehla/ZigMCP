@@ -499,9 +499,18 @@ pub fn startWatcher(
 
 fn watchLoop(context: *Context) void {
     defer context.finished.store(true, .release);
+    // Poll once before the first sleep: a URL's first fetch is no longer done
+    // before the server starts (REL-2), so waiting a full interval would delay
+    // the index by `poll_interval_ms`. A file source was already loaded and
+    // seeded synchronously, so its immediate poll is a no-op.
+    var first = true;
     while (!context.stop.load(.acquire)) {
-        sleepUntilStopped(context);
-        if (context.stop.load(.acquire)) break;
+        if (first) {
+            first = false;
+        } else {
+            sleepUntilStopped(context);
+            if (context.stop.load(.acquire)) break;
+        }
 
         switch (context.source) {
             .file => |path| watchFile(context, path),

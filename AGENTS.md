@@ -435,8 +435,11 @@ trusted as before.
   active pointer is swapped. Readers hold reference-counted snapshots, so the old
   index is freed only after its last reader releases it. The watcher thread is the
   **only writer**; a failed reload leaves the previous index serving.
-- On shutdown the watcher is stopped; if it is parked in a network read it is left to
-  process exit and the store is deliberately not freed.
+- On shutdown the watcher is stopped; if it is parked in a network read (the stdlib
+  HTTP client exposes no request timeout) it is left to the process exit and the store
+  is deliberately not freed. A remote artifact is fetched by the watcher, never before
+  the server starts, so a black-holed origin cannot block startup (REL-2); it does mean
+  a fetch still in flight keeps the process alive until it is killed.
 
 ### CI workflows
 

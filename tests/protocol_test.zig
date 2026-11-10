@@ -222,6 +222,25 @@ test "initialize on the current revision names the supported versions" {
     try harness.stop();
 }
 
+test "REL-2: a black-holed index URL does not block startup" {
+    // Before the fix, main fetched the URL before serving, so this request
+    // never got an answer. The watcher owns the fetch now (its first poll runs
+    // immediately), so the server answers at once. A parked fetch still keeps
+    // the process alive at shutdown — the stdlib client has no request
+    // timeout — so teardown kills it; that residue is stated in AGENTS.md §8.
+    const harness = try Harness.startWithIndex("http://10.255.255.1/index.jsonl");
+    defer {
+        harness.kill();
+        harness.release();
+        std.testing.allocator.destroy(harness);
+    }
+
+    try harness.send("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"server/discover\",\"params\":" ++ comptime metaParams("2026-07-28") ++ "}");
+    const response = try harness.receive();
+    defer response.deinit();
+    try std.testing.expectEqualStrings("2.0", response.value.object.get("jsonrpc").?.string);
+}
+
 test "an incomplete _meta is invalid params" {
     const harness = try Harness.start();
     defer {
