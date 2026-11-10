@@ -633,3 +633,153 @@ test "a nested declaration in an error set degrades the file instead of inventin
     defer gpa.free(status);
     try std.testing.expect(std.mem.indexOf(u8, status, "\"path\":\"bad.zig\"") != null);
 }
+
+/// The member `"declarations":N` from a status sidecar, as text, or null.
+fn declarationsMember(status: []const u8) ?[]const u8 {
+    const marker = "\"declarations\":";
+    const start = (std.mem.indexOf(u8, status, marker) orelse return null) + marker.len;
+    var end = start;
+    while (end < status.len and std.ascii.isDigit(status[end])) end += 1;
+    if (end == start) return null;
+    return status[start..end];
+}
+
+test "an incremental run keeps the declaration count it did not walk" {
+    // IDX-10: `--previous` marks a project skipped and carries its records over,
+    // so a fresh counter published `declarations: 0` beside a full record count
+    // — an impossible yield in the sidecar CI republishes.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const gpa = std.testing.allocator;
+
+    const root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}", .{&tmp.sub_path});
+    defer gpa.free(root);
+    const first = try std.fmt.allocPrint(gpa, "{s}/first.jsonl", .{root});
+    defer gpa.free(first);
+    const second = try std.fmt.allocPrint(gpa, "{s}/second.jsonl", .{root});
+    defer gpa.free(second);
+
+    var whole = try std.process.spawn(io, .{
+        .argv = &.{ options.indexer_exe, "--out", first, "--source", "fixture=0000000=tests/fixtures/indexer_src" },
+        .stdin = .ignore,
+        .stdout = .ignore,
+        .stderr = .ignore,
+    });
+    switch (try whole.wait(io)) {
+        .exited => |code| try std.testing.expectEqual(@as(u8, 0), code),
+        else => return error.UnexpectedExit,
+    }
+
+    var incremental = try std.process.spawn(io, .{
+        .argv = &.{
+            options.indexer_exe,
+            "--out",
+            second,
+            "--source",
+            "fixture=0000000=tests/fixtures/indexer_src",
+            "--previous",
+            first,
+        },
+        .stdin = .ignore,
+        .stdout = .ignore,
+        .stderr = .ignore,
+    });
+    switch (try incremental.wait(io)) {
+        .exited => |code| try std.testing.expectEqual(@as(u8, 0), code),
+        else => return error.UnexpectedExit,
+    }
+
+    const first_status_path = try std.fmt.allocPrint(gpa, "{s}/first.status.json", .{root});
+    defer gpa.free(first_status_path);
+    const first_status = try std.Io.Dir.cwd().readFileAllocOptions(
+        io,
+        first_status_path,
+        gpa,
+        .limited(16 * 1024 * 1024),
+        .of(u8),
+        null,
+    );
+    defer gpa.free(first_status);
+
+    const second_status_path = try std.fmt.allocPrint(gpa, "{s}/second.status.json", .{root});
+    defer gpa.free(second_status_path);
+    const second_status = try std.Io.Dir.cwd().readFileAllocOptions(
+        io,
+        second_status_path,
+        gpa,
+        .limited(16 * 1024 * 1024),
+        .of(u8),
+        null,
+    );
+    defer gpa.free(second_status);
+
+    // The walked run knows the count; the carried-over run reports that same
+    // number, not a zero.
+    const carried = declarationsMember(first_status) orelse return error.MissingDeclarations;
+    try std.testing.expect(!std.mem.eql(u8, carried, "0"));
+    const expected = try std.fmt.allocPrint(gpa, "\"declarations\":{s}", .{carried});
+    defer gpa.free(expected);
+    try std.testing.expect(std.mem.indexOf(u8, second_status, "\"skipped\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, second_status, expected) != null);
+}
+
+test "a carried-over project with no known site count omits the member" {
+    // A sidecar from before the field existed has no count to carry. Reporting
+    // zero would claim the documentation rule filled nothing (IDX-10).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const gpa = std.testing.allocator;
+
+    const root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}", .{&tmp.sub_path});
+    defer gpa.free(root);
+
+    try writeFixture(
+        tmp.dir,
+        "prev/index.jsonl",
+        "{\"project\":\"p\",\"commit\":\"c\",\"path\":\"a.zig\",\"line\":1,\"kind\":\"fn\",\"symbol\":\"a\",\"container\":\"\",\"doc\":\"d\",\"doc_hash\":\"h\"}\n",
+    );
+    try writeFixture(
+        tmp.dir,
+        "prev/index.status.json",
+        "{\"projects\":{\"p\":{\"commit\":\"c\",\"records\":1,\"files_total\":1,\"files_degraded\":0,\"degraded\":[]}}}",
+    );
+
+    const previous = try std.fmt.allocPrint(gpa, "{s}/prev/index.jsonl", .{root});
+    defer gpa.free(previous);
+    const output = try std.fmt.allocPrint(gpa, "{s}/out.jsonl", .{root});
+    defer gpa.free(output);
+
+    var child = try std.process.spawn(io, .{
+        .argv = &.{
+            options.indexer_exe,
+            "--out",
+            output,
+            "--source",
+            "p=c=tests/fixtures/indexer_src",
+            "--previous",
+            previous,
+        },
+        .stdin = .ignore,
+        .stdout = .ignore,
+        .stderr = .ignore,
+    });
+    switch (try child.wait(io)) {
+        .exited => |code| try std.testing.expectEqual(@as(u8, 0), code),
+        else => return error.UnexpectedExit,
+    }
+
+    const status_path = try std.fmt.allocPrint(gpa, "{s}/out.status.json", .{root});
+    defer gpa.free(status_path);
+    const status = try std.Io.Dir.cwd().readFileAllocOptions(
+        io,
+        status_path,
+        gpa,
+        .limited(16 * 1024 * 1024),
+        .of(u8),
+        null,
+    );
+    defer gpa.free(status);
+
+    try std.testing.expect(std.mem.indexOf(u8, status, "\"skipped\":true") != null);
+    try std.testing.expect(declarationsMember(status) == null);
+}

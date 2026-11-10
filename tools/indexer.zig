@@ -74,10 +74,11 @@ const ProjectStatus = struct {
     project: []const u8,
     commit: []const u8,
     records: usize,
-    /// Every declaration the walk visited, documented or not (IDX-10). The
-    /// difference from `records` is the yield of the documentation rule, and
-    /// reporting it is what makes that yield a measurement rather than a claim.
-    declarations: usize = 0,
+    /// Every site the walk visited that can carry a record, documented or not
+    /// (IDX-10). Null means "not known": a project carried over from
+    /// `--previous` has no walk behind it, so reporting zero beside a full
+    /// record count would be a fabricated yield.
+    declarations: ?usize = null,
     files_total: usize,
     degraded: std.ArrayList(DegradedFile),
     skipped: bool = false,
@@ -151,6 +152,9 @@ pub fn main(init: std.process.Init) !void {
             try carryPrevious(gpa, previous, src.project, src.commit, &records);
             st.skipped = true;
             st.previous_records = countForProject(records.items, src.project);
+            // The files were not walked, so the only honest count is the one
+            // the run that did walk them reported.
+            st.declarations = previousDeclarations(io, gpa, previous_path, src.project, src.commit);
         } else {
             try indexSource(io, gpa, src, includes.items, excludes.items, &records, &st);
         }
@@ -221,19 +225,25 @@ fn reusableFromPrevious(
     const path = previous_path orelse return false;
     const present = countPreviousFor(previous, src.project, src.commit);
     if (present == 0) return false;
-    const expected = previousRecordCount(io, gpa, path, src.project, src.commit) orelse return true;
-    return expected == present;
+    const expected = previousStatus(io, gpa, path, src.project, src.commit) orelse return true;
+    return expected.records == present;
 }
 
-/// The record count the previous run reported for one project, or null when
-/// there is no sidecar, it is unreadable, or it does not describe this commit.
-fn previousRecordCount(
+const PreviousStatus = struct {
+    records: usize,
+    /// Null when the previous sidecar predates IDX-10 or was written without it.
+    declarations: ?usize,
+};
+
+/// The counts the previous run reported for one project, or null when there is
+/// no sidecar, it is unreadable, or it does not describe this commit.
+fn previousStatus(
     io: std.Io,
     gpa: std.mem.Allocator,
     previous_path: []const u8,
     project: []const u8,
     commit: []const u8,
-) ?usize {
+) ?PreviousStatus {
     const sidecar_path = deriveStatusPath(gpa, previous_path) catch return null;
     const bytes = std.Io.Dir.cwd().readFileAllocOptions(
         io,
@@ -253,7 +263,26 @@ fn previousRecordCount(
     if (entry_commit != .string or !std.mem.eql(u8, entry_commit.string, commit)) return null;
     const records = entry.object.get("records") orelse return null;
     if (records != .integer) return null;
-    return std.math.cast(usize, records.integer);
+    const record_count = std.math.cast(usize, records.integer) orelse return null;
+    var declarations: ?usize = null;
+    if (entry.object.get("declarations")) |value| {
+        if (value == .integer) declarations = std.math.cast(usize, value.integer);
+    }
+    return .{ .records = record_count, .declarations = declarations };
+}
+
+/// The declaration count the previous sidecar reported, so a carried-over
+/// project keeps a measurement instead of publishing a zero (IDX-10).
+fn previousDeclarations(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    previous_path: ?[]const u8,
+    project: []const u8,
+    commit: []const u8,
+) ?usize {
+    const path = previous_path orelse return null;
+    const status = previousStatus(io, gpa, path, project, commit) orelse return null;
+    return status.declarations;
 }
 
 fn countPreviousFor(previous: []const Record, project: []const u8, commit: []const u8) usize {
@@ -304,7 +333,11 @@ fn buildStatus(gpa: std.mem.Allocator, statuses: []ProjectStatus, report_skip: b
         try writeJsonString(gpa, w, st.project);
         try w.writeAll(":{\"commit\":");
         try writeJsonString(gpa, w, st.commit);
-        try w.print(",\"records\":{},\"declarations\":{},\"files_total\":{},\"files_degraded\":{}", .{ st.records, st.declarations, st.files_total, st.degraded.items.len });
+        try w.print(",\"records\":{}", .{st.records});
+        // Omitted rather than zero when the count is unknown: an incremental run
+        // carries records over without walking the files (IDX-10).
+        if (st.declarations) |declarations| try w.print(",\"declarations\":{}", .{declarations});
+        try w.print(",\"files_total\":{},\"files_degraded\":{}", .{ st.files_total, st.degraded.items.len });
         if (report_skip) {
             try w.print(",\"skipped\":{s}", .{if (st.skipped) "true" else "false"});
             if (st.skipped) try w.print(",\"previous_records\":{}", .{st.previous_records});
@@ -553,6 +586,9 @@ fn indexFile(gpa: std.mem.Allocator, project: []const u8, commit: []const u8, re
         }
         const doc = try std.mem.join(gpa, "\n", lines.items);
         const sym = try modulePath(gpa, rel);
+        // The `//!` record is a site too, so `records` can never exceed
+        // `declarations` (IDX-10).
+        st.declarations = (st.declarations orelse 0) + 1;
         try records.append(gpa, .{
             .project = project,
             .commit = commit,
@@ -569,7 +605,7 @@ fn indexFile(gpa: std.mem.Allocator, project: []const u8, commit: []const u8, re
     const mod_path = try modulePath(gpa, rel);
     var declarations: usize = 0;
     try walkDecls(gpa, &tree, &line_table, tree.rootDecls(), mod_path, project, commit, rel, records, &declarations, unattached);
-    st.declarations += declarations;
+    st.declarations = (st.declarations orelse 0) + declarations;
 }
 
 fn stripPrefix3(gpa: std.mem.Allocator, slice: []const u8, prefix: []const u8) ![]const u8 {

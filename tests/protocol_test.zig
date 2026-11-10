@@ -734,9 +734,10 @@ test "doc_import_status reports the declaration yield from the sidecar" {
     const fixture = projects[0].object;
     try std.testing.expectEqualStrings("fixture", fixture.get("project").?.string);
     try std.testing.expectEqual(@as(i64, 33), fixture.get("records").?.integer);
-    // More sites than records: a documented declaration is one record, but a
-    // parameter or error member is a site that may carry none.
-    try std.testing.expectEqual(@as(i64, 38), fixture.get("declarations").?.integer);
+    // `declarations` counts every site that can carry a record — fn/var/field, a
+    // named parameter, an error-set member and a file's `//!` run — so it is
+    // never below `records`; the gap is the documentation rule's yield.
+    try std.testing.expectEqual(@as(i64, 42), fixture.get("declarations").?.integer);
 }
 
 test "a missing resource is invalid params with the uri" {

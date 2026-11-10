@@ -241,9 +241,13 @@ zig-out/bin/indexer \
 | `--previous <index.jsonl>` | Reuse records for projects whose commit has not changed, and only when the old status file agrees on the count |
 
 Keep the status file next to the index: `doc_import_status` reads the degraded-file
-counts from it, plus `declarations` — every fn, var, field, named parameter and
-error-set member the walk visited, documented or not — so `records / declarations` is
-the measured yield of the documentation rule rather than a claim about it.
+counts from it, plus `declarations` — every site that can carry a record (a fn, var or
+field declaration, a named parameter, an error-set member, a file's `//!` run),
+documented or not — so `records / declarations` is the measured yield of the
+documentation rule rather than a claim about it. A project carried over from
+`--previous` reports the count its previous sidecar recorded, and omits it when that
+sidecar has none.
+
 `generated/index.jsonl` is the server's default location, so `zig build run` picks it up
 without flags.
 

@@ -463,9 +463,12 @@ Per `.zig` file under `root` (kept by an `--include` directory prefix, dropped b
    "diagnostics":[{"tag","line"}]}]}}}`. `reason` is set when the file was not parsed
    at all (unreadable, oversized, or too deeply nested), in which case `diagnostics` is
    empty. `declarations` counts every site the walk visited that can carry a record — a
-   fn/var/field declaration, a named parameter, an error-set member — documented or not,
-   so `records / declarations` is the yield of the documentation rule (IDX-10); a file's
-   `//!` record has no declaration behind it, which is why the ratio is a floor.
+   fn/var/field declaration, a named parameter, an error-set member, a file's `//!` run —
+   documented or not, so `records / declarations` never exceeds 1 and measures the yield
+   of the documentation rule (IDX-10). A project carried over from `--previous` was not
+   walked: it reports the count its previous sidecar recorded, and omits the member when
+   that sidecar has none, because zero beside a full record count would be a fabricated
+   yield.
 
 **Incremental:** with `--previous`, a project whose `(project, commit)` already has
 records there is skipped and those records are carried over verbatim — but only when
