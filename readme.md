@@ -129,14 +129,21 @@ attached alongside the tarball has no corpus; point `ZIGMCP_ADVICE_DIR` (or
 
 |Index location|Checked|Changed when|
 |---|---|---|
-|Local file|every second|modification time or size changes|
-|URL|every 60 seconds|the downloaded bytes differ (SHA-256)|
+|Local file|every `--index-poll-ms` (default 1 s)|modification time or size changes|
+|URL|every `--index-poll-ms` (default 60 s)|the downloaded bytes differ (SHA-256)|
 
 A new index is loaded and checked completely before it replaces the old one. If the
 new file is broken, the server keeps serving the previous index. Requests in
 progress always see one complete index, never a mix. Index files larger than
 256 MiB by default — or larger than the configured `--max-index-bytes` — are
 rejected.
+
+**A URL index is fetched by the watcher, not before startup.** A slow or unreachable
+origin therefore cannot stop the server from starting: it serves the advice corpus
+and an empty doc index until the first fetch lands, and `doc_import_status` reports
+`unloaded` meanwhile. The HTTP client has no request timeout, so a fetch still in
+flight keeps the process alive at shutdown until it is killed; the last good index
+keeps serving in the meantime.
 
 The server only reads. It never writes files, never contacts anything except the
 configured index URL, and prints diagnostics to stderr only.
