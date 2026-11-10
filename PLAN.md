@@ -1,8 +1,8 @@
 # PLAN.md — defects, edge cases, limitations, and guideline deviations
 
-Status: open backlog. Twenty-two items were fixed on 2026-11-09, twenty on 2026-11-10,
-and five more were closed that day because they were already done — the option chosen
-for each, its commit and its verification are in §13–§17. Two sources: a read-through
+Status: open backlog. Twenty-two items were fixed on 2026-11-09, twenty-five on
+2026-11-10, and five more were closed that day because they were already done — the
+option chosen for each, its commit and its verification are in §13–§19. Two sources: a read-through
 of the tree on 2026-11-09, and a breakage campaign the same day that fuzzed the
 stdio surface and the indexer, profiled the hot paths, and inspected a `ReleaseSafe`
 PE with REA — method, measurements and negative results in §12.
@@ -191,10 +191,7 @@ No open items.
 Rules being broken are in `AGENTS.md` §5, §11, §12 (code/corpus conventions) and D8
 (table-driven capabilities).
 
-- **GUIDE-8 — limitation lists are duplicated across three files.** `AGENTS.md` §14,
-  `readme.md` Known limitations and this file will drift. Options: (a) this file is
-  canonical and the others link to it; (b) generate the readme section at build time;
-  (c) keep a sync checklist. Verify: grep for a gap ID in all three.
+No open items. GUIDE-8 is resolved in §19.
 
 ---
 
@@ -207,14 +204,6 @@ resource can be read`, both in `src/regressions_test.zig` (recorded in §16).
 ---
 
 ## 8. Documentation and packaging
-
-- **DOC-1 — `build.zig.zon` `.paths` omits `lsp.json`.** The published package lacks
-  the editor config. Options: (a) add it; (b) drop `lsp.json` from the repo; (c)
-  accept.
-- **DOC-2 — the client snippet in `release.yml` and `readme.md` differ** (`./zigmcp`
-  vs an absolute path). Options: (a) one snippet in a file both read; (b) keep
-  (different contexts); (c) make the release note link to the readme.
-- **DOC-3 — `AGENTS.md` §14 and `readme.md` restate the same gaps** (see GUIDE-8).
 
 - **DOC-4 — the Windows release binary carries no manifest, version resource or icon,
   and no load-config.** REA on a `ReleaseSafe` build (`inspect_pe_resources`,
@@ -258,10 +247,6 @@ must own its test, because no such layer exists yet.
 |REL-1|—|local HTTP server counting requests|
 |REL-2|—|black-hole address plus quit; timing-based|
 |REL-6|—|integration: URL index with no sidecar|
-|GUIDE-8|—|doc lint: each gap id appears once across the tree|
-|DOC-1|—|packaging assertion on `build.zig.zon` `.paths`|
-|DOC-2|—|doc lint comparing the two snippets|
-|DOC-3|—|same as GUIDE-8|
 |IDX-9|—|indexer CLI harness measuring the 5k/10k/25k ladder, or a unit test on the line table|
 |CI-9|—|actionlint 1.17+ over `.github/workflows/`; no local test|
 |DOC-4|—|`inspect_pe_resources` on a `ReleaseSafe` artifact (packaging smoke test)|
@@ -469,6 +454,19 @@ detached under the lock and freed after unlocking.
 |Id|Option|Commit|Verification|
 |---|---|---|---|
 |SRV-5|(a) move the free outside the lock|`330386d`|unit test: the last release frees the retired index (the testing allocator would flag a leak) and the store's `retired` list is empty; `zig build test`, `test-regressions` and `bench` all pass|
+
+## 19. Resolved on 2026-11-10, fifth chunk
+
+Four documentation/packaging items, one commit (`891a0a3`): a canonical client
+snippet and a canonical backlog. They share a theme — a second copy that drifts —
+so they landed together, with a test per copy.
+
+|Id|Option|Commit|Verification|
+|---|---|---|---|
+|DOC-1|(a) add `lsp.json` to `.paths`|`891a0a3`|`build.zig.zon` ships `lsp.json` and `client-config.json`; `zig build test` still passes|
+|DOC-2|(a) one snippet in a file both read|`891a0a3`|`DOC-2: the readme embeds client-config.json verbatim` (unit test); `release.yml` cats the same file into the release body|
+|DOC-3|(a) this file is canonical|`891a0a3`|covered by GUIDE-8's test; §14 and the readme's Known limitations are pointers|
+|GUIDE-8|(a) this file is canonical and the others link to it|`891a0a3`|`GUIDE-8: the limitation lists live only in PLAN.md` (unit test): neither section restates the backlog|
 
 
 
