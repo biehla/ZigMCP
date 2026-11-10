@@ -783,3 +783,37 @@ test "a carried-over project with no known site count omits the member" {
     try std.testing.expect(std.mem.indexOf(u8, status, "\"skipped\":true") != null);
     try std.testing.expect(declarationsMember(status) == null);
 }
+
+test "the golden sidecar counts at least as many sites as records" {
+    // IDX-10: `records` counts emitted records, `declarations` every site that
+    // can carry one, so the second can never be the smaller number. A record
+    // kind that is emitted without counting its site would break the ratio's
+    // meaning silently; this is where it shows.
+    const gpa = std.testing.allocator;
+    const status = try std.Io.Dir.cwd().readFileAllocOptions(
+        io,
+        "tests/golden/index.status.json",
+        gpa,
+        .limited(16 * 1024 * 1024),
+        .of(u8),
+        null,
+    );
+    defer gpa.free(status);
+
+    const record_count = try countMember(status, "records");
+    const site_count = try countMember(status, "declarations");
+    try std.testing.expect(record_count > 0);
+    try std.testing.expect(site_count >= record_count);
+}
+
+/// The integer that follows `"<key>":` in a status sidecar.
+fn countMember(status: []const u8, key: []const u8) !usize {
+    var marker_buf: [64]u8 = undefined;
+    const marker = try std.fmt.bufPrint(&marker_buf, "\"{s}\":", .{key});
+    const pos = std.mem.indexOf(u8, status, marker) orelse return error.MissingMember;
+    var end = pos + marker.len;
+    const start = end;
+    while (end < status.len and std.ascii.isDigit(status[end])) end += 1;
+    if (end == start) return error.MissingMember;
+    return std.fmt.parseInt(usize, status[start..end], 10);
+}

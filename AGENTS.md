@@ -577,7 +577,7 @@ the cross-cutting handler tests on their own.
 |Corpus validation|`zig build check` (§12)|
 |Cross-cutting handler tests|`src/regressions_test.zig` — the tests that need the real corpus and a loaded index at once; the `Harness` builds both|
 |Workflow consistency|`src/util/workflow.zig` (logic, in the main suite) and `tools/workflow_check.zig` (CLI) — `zig build workflows`|
-|Doc invariants|`src/root.zig` — the readme embeds `client-config.json` verbatim (DOC-2) and the limitation sections are pointers to `PLAN.md`, not copies (GUIDE-8)|
+|Doc invariants|`src/root.zig` — the readme embeds `client-config.json` verbatim (DOC-2); the limitation sections are pointers to `PLAN.md`, not copies (GUIDE-8); every `§N` citation in the tree resolves to a heading of the document it names, every `Dn` to a row of §3, and every id cited anywhere exists in `PLAN.md`, which carries one ledger row per id|
 
 ### Rules the tests follow
 

@@ -17,10 +17,10 @@ that the fix worked. [§2](#2-verification) lists the gates and the recipes that
 performs, and [§2.3](#23-where-each-check-lives) maps an id to the test layer that owns
 it.
 
-*Reorganised on 2026-11-10: the per-chunk sections that were §13–§35 are now one ledger
-([§4](#4-resolved-ledger)) and one batch log ([§5](#5-batch-log)). No id changed; an old
-commit that cites "PLAN §23" is citing a batch that now appears as its rows and its
-batch-log line.*
+*Reorganised on 2026-11-10: the per-chunk sections, 13–35 in the old numbering, are now
+one ledger ([§4](#4-resolved-ledger)) and one batch log ([§5](#5-batch-log)). No id
+changed; a commit from before then that cites a chunk number is citing a batch that now
+appears as its rows and its batch-log line.*
 
 ---
 

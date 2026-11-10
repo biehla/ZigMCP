@@ -195,8 +195,8 @@ test "GUIDE-2: prompts dispatch through the table" {
 }
 
 test "GUIDE-4/SRV-7: a query beyond the input bounds is invalid params" {
-    // The §0 amplification recipe: a 60 KB query used to be scored token by
-    // token against every record (19.7 s on a 50 000-record index), and
+    // The amplification recipe in `PLAN.md` §2.2: a 60 KB query used to be scored
+    // token by token against every record (19.7 s on a 50 000-record index), and
     // nothing bounded the string at all before the search.
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -360,6 +360,112 @@ test "PROTO-16: a unique dotted tail reaches the stored symbol" {
     const ambiguous_structured = ambiguous.structured.?.object;
     try std.testing.expect(!ambiguous_structured.get("found").?.bool);
     try std.testing.expect(ambiguous_structured.get("candidates").?.array.items.len >= 2);
+}
+
+test "PROTO-16: only a dotted tail of one stored symbol resolves" {
+    // One case per guard: case-insensitivity, the `.` boundary on both sides,
+    // an empty argument, and a name that exists only as a container record.
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const harness = try startHarnessWithIndex(gpa,
+        \\{"project":"zig_std","commit":"c","path":"lib/std/mem.zig","line":238,"kind":"fn","symbol":"lib.std.mem.copyForwards","container":"lib.std.mem","doc":"Copies source into dest.","doc_hash":"5b9b51d9a8c4c3a5174688eb4c984931a3874fe30db40b99c862e57c26ef97fa"}
+        \\{"project":"zig_std","commit":"c","path":"lib/std/std.zig","line":48,"kind":"container","symbol":"lib.std.std.ArrayList","container":"","doc":"Copies source into dest.","doc_hash":"5b9b51d9a8c4c3a5174688eb4c984931a3874fe30db40b99c862e57c26ef97fa"}
+    );
+
+    var args: std.json.ObjectMap = .{};
+    try args.put(gpa, "project", .{ .string = "zig_std" });
+
+    // Case is forgiven here as in the exact lookup, and the argument is echoed
+    // as sent.
+    try args.put(gpa, "symbol", .{ .string = "MEM.COPYFORWARDS" });
+    const upper = try tools.docGet(&harness.ctx, .{ .object = args });
+    try std.testing.expect(!upper.is_error);
+    const upper_structured = upper.structured.?.object;
+    try std.testing.expectEqualStrings("MEM.COPYFORWARDS", upper_structured.get("resolved_from").?.string);
+    try std.testing.expectEqualStrings(
+        "lib.std.mem.copyForwards",
+        upper_structured.get("matches").?.array.items[0].object.get("symbol").?.string,
+    );
+
+    // A leading dot is the separator, not part of the tail; a trailing dot names
+    // nothing stored.
+    for ([_][]const u8{ ".copyForwards", "mem.copyForwards." }) |spelling| {
+        try args.put(gpa, "symbol", .{ .string = spelling });
+        const miss = try tools.docGet(&harness.ctx, .{ .object = args });
+        try std.testing.expect(miss.is_error);
+        try std.testing.expect(!miss.structured.?.object.get("found").?.bool);
+    }
+
+    // The last component on its own is a tail, so it resolves.
+    try args.put(gpa, "symbol", .{ .string = "copyForwards" });
+    const component = try tools.docGet(&harness.ctx, .{ .object = args });
+    try std.testing.expect(!component.is_error);
+    try std.testing.expectEqualStrings(
+        "lib.std.mem.copyForwards",
+        component.structured.?.object.get("matches").?.array.items[0].object.get("symbol").?.string,
+    );
+
+    // The container record's own name is a tail of itself, so a type name reaches
+    // its `//!` doc rather than a miss.
+    try args.put(gpa, "symbol", .{ .string = "ArrayList" });
+    const type_name = try tools.docGet(&harness.ctx, .{ .object = args });
+    try std.testing.expect(!type_name.is_error);
+    const type_structured = type_name.structured.?.object;
+    try std.testing.expectEqualStrings("ArrayList", type_structured.get("resolved_from").?.string);
+    try std.testing.expectEqualStrings(
+        "lib.std.std.ArrayList",
+        type_structured.get("matches").?.array.items[0].object.get("symbol").?.string,
+    );
+
+    // An empty argument resolves nothing and resembles nothing.
+    try args.put(gpa, "symbol", .{ .string = "" });
+    const empty = try tools.docGet(&harness.ctx, .{ .object = args });
+    try std.testing.expect(empty.is_error);
+    try std.testing.expectEqual(
+        @as(usize, 0),
+        empty.structured.?.object.get("candidates").?.array.items.len,
+    );
+
+    // A member of a type whose members are not indexed is a miss, and the miss
+    // names the type: this is the `std.ArrayList` case from `TODO.md`.
+    try args.put(gpa, "symbol", .{ .string = "ArrayList.create" });
+    const near = try tools.docGet(&harness.ctx, .{ .object = args });
+    try std.testing.expect(near.is_error);
+    try std.testing.expectEqualStrings(
+        "lib.std.std.ArrayList",
+        near.structured.?.object.get("candidates").?.array.items[0].string,
+    );
+}
+
+test "PROTO-15: the candidate list is bounded" {
+    // The list is a next step, not a result set: a spelling that resembles many
+    // symbols must not turn a miss into an unbounded payload.
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const harness = try startHarnessWithIndex(gpa,
+        \\{"project":"zig_std","commit":"c","path":"mod/w0.zig","line":1,"kind":"fn","symbol":"mod.widget0","container":"mod","doc":"shared widget docs.","doc_hash":"1a02e09bd08d42878bcfd694455c744688b8f480ca353def4f35ef5c5ca1c546"}
+        \\{"project":"zig_std","commit":"c","path":"mod/w1.zig","line":1,"kind":"fn","symbol":"mod.widget1","container":"mod","doc":"shared widget docs.","doc_hash":"1a02e09bd08d42878bcfd694455c744688b8f480ca353def4f35ef5c5ca1c546"}
+        \\{"project":"zig_std","commit":"c","path":"mod/w2.zig","line":1,"kind":"fn","symbol":"mod.widget2","container":"mod","doc":"shared widget docs.","doc_hash":"1a02e09bd08d42878bcfd694455c744688b8f480ca353def4f35ef5c5ca1c546"}
+        \\{"project":"zig_std","commit":"c","path":"mod/w3.zig","line":1,"kind":"fn","symbol":"mod.widget3","container":"mod","doc":"shared widget docs.","doc_hash":"1a02e09bd08d42878bcfd694455c744688b8f480ca353def4f35ef5c5ca1c546"}
+        \\{"project":"zig_std","commit":"c","path":"mod/w4.zig","line":1,"kind":"fn","symbol":"mod.widget4","container":"mod","doc":"shared widget docs.","doc_hash":"1a02e09bd08d42878bcfd694455c744688b8f480ca353def4f35ef5c5ca1c546"}
+        \\{"project":"zig_std","commit":"c","path":"mod/w5.zig","line":1,"kind":"fn","symbol":"mod.widget5","container":"mod","doc":"shared widget docs.","doc_hash":"1a02e09bd08d42878bcfd694455c744688b8f480ca353def4f35ef5c5ca1c546"}
+        \\{"project":"zig_std","commit":"c","path":"mod/w6.zig","line":1,"kind":"fn","symbol":"mod.widget6","container":"mod","doc":"shared widget docs.","doc_hash":"1a02e09bd08d42878bcfd694455c744688b8f480ca353def4f35ef5c5ca1c546"}
+    );
+
+    var args: std.json.ObjectMap = .{};
+    try args.put(gpa, "project", .{ .string = "zig_std" });
+    try args.put(gpa, "symbol", .{ .string = "widget" });
+
+    const miss = try tools.docGet(&harness.ctx, .{ .object = args });
+    try std.testing.expect(miss.is_error);
+    try std.testing.expectEqual(
+        tools.max_get_candidates,
+        miss.structured.?.object.get("candidates").?.array.items.len,
+    );
 }
 
 test "PROTO-15: a miss names the stored path-qualified symbols" {

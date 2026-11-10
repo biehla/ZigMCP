@@ -973,12 +973,16 @@ test "a mistyped sidecar member never reaches structuredContent" {
     const parsed = try std.json.parseFromSlice(
         std.json.Value,
         gpa,
-        "{\"files_total\":\"oops\",\"files_degraded\":1.5,\"degraded\":\"nope\"}",
+        "{\"files_total\":\"oops\",\"files_degraded\":1.5,\"declarations\":\"many\",\"degraded\":\"nope\"}",
         .{},
     );
     const entry = parsed.value.object;
 
     var item: std.json.ObjectMap = .{};
+    try std.testing.expectEqual(
+        @as(?usize, null),
+        try putSidecarCount(&item, gpa, entry, "declarations"),
+    );
     try std.testing.expectEqual(
         @as(?usize, null),
         try putSidecarCount(&item, gpa, entry, "files_total"),
@@ -989,6 +993,7 @@ test "a mistyped sidecar member never reaches structuredContent" {
     );
     try putSidecarArray(&item, gpa, entry, "degraded");
 
+    try std.testing.expect(item.get("declarations") == null);
     try std.testing.expect(item.get("files_total") == null);
     try std.testing.expect(item.get("files_degraded") == null);
     try std.testing.expect(item.get("degraded") == null);
