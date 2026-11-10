@@ -96,11 +96,12 @@ On Windows the binary is `zig-out\bin\zigmcp.exe`; in JSON, escape backslashes
 
 The index can also be a URL (`"args": ["--index", "https://example.org/index.jsonl"]`).
 
-Release builds (see [CI/CD](#cicd)) ship the binary on its own. A released binary
-still needs the advice corpus. The default `data/advice` is resolved against the
-server's **working directory**, not the binary's location, so ship `data/advice/`
-alongside it and point `ZIGMCP_ADVICE_DIR` (or `--advice-dir`) at it with an
-absolute path.
+Release builds (see [CI/CD](#cicd)) ship a per-OS `zigmcp-<os>.tar.gz` that contains
+the binary **and** `data/advice/`. Unpack it into an empty directory and run the
+binary from there: the default `data/advice` is resolved against the server's
+**working directory**, so the unpacked layout is a working install. The raw binary
+attached alongside the tarball has no corpus; point `ZIGMCP_ADVICE_DIR` (or
+`--advice-dir`) at one with an absolute path if you use it.
 
 ---
 

@@ -28,10 +28,20 @@ jobs:
       - name: Package artifacts
         shell: bash
         run: |
-          mkdir -p dist
+          mkdir -p dist/pkg/data
           bin="zig-out/bin/zigmcp"
           [ -f "$bin" ] || bin="zig-out/bin/zigmcp.exe"
-          cp "$bin" "dist/zigmcp-${{ matrix.os }}${bin##*.}"
+          base="${bin##*/}"
+          ext=""
+          case "$base" in *.exe) ext=".exe" ;; esac
+          # The binary loads data/advice at startup (D2): a release without the
+          # corpus cannot start (CI-8). The tarball ships the two together, so
+          # unpacking it into an empty directory is a working install.
+          cp "$bin" "dist/pkg/$base"
+          cp -r data/advice "dist/pkg/data/"
+          tar -C dist/pkg -czf "dist/zigmcp-${{ matrix.os }}.tar.gz" .
+          # The raw binary stays for callers that point at their own corpus.
+          cp "$bin" "dist/zigmcp-${{ matrix.os }}${ext}"
           # The canonical index asset is the rolling `index` release published by
           # index.yml (CI-2); attaching it here as well is only a convenience
           # for someone holding a version tag, so it stays conditional.
@@ -49,6 +59,10 @@ jobs:
             echo '```json'
             cat client-config.json
             echo '```'
+            echo
+            echo '> `zigmcp-<os>.tar.gz` contains the binary **and** `data/advice/`; unpack it'
+            echo '> and run the binary from that directory (or set `ZIGMCP_ADVICE_DIR`). A'
+            echo '> bare binary cannot start without the corpus.'
             echo
             echo '> The server resolves its index from `--index` / `ZIGMCP_INDEX` (a **local'
             echo '> path** or an HTTP(S) URL) and hot-reloads it; the index artifact attached'
