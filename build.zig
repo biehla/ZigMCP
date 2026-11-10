@@ -15,7 +15,7 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(exe);
 
-    // The doc indexer: upstream tree -> generated/index.jsonl (PLAN §8.1).
+    // The doc indexer: upstream tree -> generated/index.jsonl (AGENTS.md §8).
     const indexer = b.addExecutable(.{
         .name = "indexer",
         .root_module = b.createModule(.{
@@ -27,7 +27,7 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(indexer);
 
     // The corpus validator fails the build on a dangling source id or a
-    // missing evidence label (PLAN §11 M1).
+    // missing evidence label (AGENTS.md §12).
     const advice_check = b.addExecutable(.{
         .name = "advice_check",
         .root_module = b.createModule(.{
@@ -37,7 +37,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
-    // The verification report tool (PLAN §10.3): startup time, per-tool
+    // The verification report tool (AGENTS.md §9): startup time, per-tool
     // latency quantiles, error counts and peak RSS.
     const bench = b.addExecutable(.{
         .name = "bench",
@@ -58,7 +58,7 @@ pub fn build(b: *std.Build) void {
     // is gitignored and absent in CI.
     run_bench.addArg("--index");
     run_bench.addArg("tests/golden/index.jsonl");
-    const bench_step = b.step("bench", "Produce the verification report (PLAN §10.3)");
+    const bench_step = b.step("bench", "Produce the verification report (AGENTS.md §9)");
     bench_step.dependOn(&run_bench.step);
 
     const run_step = b.step("run", "Run the MCP server over stdio");
@@ -84,7 +84,7 @@ pub fn build(b: *std.Build) void {
     const run_unit_tests = b.addRunArtifact(unit_tests);
 
     // Protocol tests: drive the built binary as a subprocess, exactly as a
-    // client would (PLAN §10.2).
+    // client would (AGENTS.md §9).
     const server_options = b.addOptions();
     server_options.addOptionPath("server_exe", exe.getEmittedBin());
 
@@ -132,4 +132,18 @@ pub fn build(b: *std.Build) void {
     // subprocess, so it is useful on its own when debugging the wire format.
     const protocol_step = b.step("test-protocol", "Run the protocol tests only");
     protocol_step.dependOn(&run_protocol_tests.step);
+
+    // The PLAN.md regression tests: each one asserts the behaviour the backlog
+    // wants, so it fails until its item is fixed. Kept out of `test` on purpose
+    // (src/root.zig does not import the file) so the main suite stays green.
+    const regression_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/regressions_test.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_regression_tests = b.addRunArtifact(regression_tests);
+    const regression_step = b.step("test-regressions", "Run the PLAN.md regression tests (red until each item is fixed)");
+    regression_step.dependOn(&run_regression_tests.step);
 }

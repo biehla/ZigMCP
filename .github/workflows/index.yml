@@ -1,6 +1,6 @@
 name: Rebuild index
 
-# PLAN §8.6: after the bump PR merges, re-run the indexer over the merged
+# AGENTS.md §8: after the bump PR merges, re-run the indexer over the merged
 # pinned trees and publish generated/index.jsonl (sorted by (project, symbol)).
 # Degrade-don't-skip (AGENTS.md): a file with parse diagnostics still
 # contributes usable records and is reported as degraded — never fail the run.
@@ -72,7 +72,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # PLAN §8.3: a project whose commit is unchanged is skipped entirely
+          # AGENTS.md §8: a project whose commit is unchanged is skipped entirely
           # and its records are carried over from the published index. Without
           # a published release the index is rebuilt from scratch.
           gh release download --pattern index.jsonl --dir published 2>/dev/null || true

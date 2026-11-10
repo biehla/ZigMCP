@@ -1,4 +1,4 @@
-//! Golden test for the doc indexer (PLAN §10.2).
+//! Golden test for the doc indexer (AGENTS.md §9).
 //!
 //! The indexer is run over the checked-in fixture tree and its output must be
 //! byte-identical to `tests/golden/index.jsonl`. This pins the doc-attachment

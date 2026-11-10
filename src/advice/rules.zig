@@ -1,4 +1,4 @@
-//! Rule matcher over the SELECT rules (PLAN §6.1, P05).
+//! Rule matcher over the SELECT rules (AGENTS.md §7, P05).
 //!
 //! The 12 conditional rules are relational data over
 //! `(condition → consider → constraint)`. `recommend_approach` is a join over

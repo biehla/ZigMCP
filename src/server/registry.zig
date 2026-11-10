@@ -1,5 +1,5 @@
 //! Capability registry: one source of truth for names, descriptions, schemas
-//! and handlers (PLAN D8).
+//! and handlers (AGENTS.md D8).
 //!
 //! Every advertised capability lives in one comptime table. The JSON Schema of
 //! a tool is derived from that table, so the advertised surface cannot drift

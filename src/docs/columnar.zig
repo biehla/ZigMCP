@@ -1,4 +1,4 @@
-//! Columnar layout for the doc index (PLAN §9, P03).
+//! Columnar layout for the doc index (AGENTS.md §13, P03).
 //!
 //! The index is held as parallel arrays over one shared string table instead
 //! of per-record heap objects: the common query — "list the symbols of a
@@ -43,7 +43,7 @@ pub const Span = struct {
     len: u32,
 };
 
-/// The record shape of the JSONL index (PLAN §6.2).
+/// The record shape of the JSONL index (AGENTS.md §7).
 pub const Record = struct {
     project: []const u8,
     commit: []const u8,

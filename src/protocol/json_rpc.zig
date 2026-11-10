@@ -1,6 +1,6 @@
 //! JSON-RPC 2.0 envelope parsing for the stdio transport.
 //!
-//! One message per line, no embedded newlines (PLAN §7.4). A line that is not
+//! One message per line, no embedded newlines (AGENTS.md §6). A line that is not
 //! JSON at all is a parse error (-32700); a JSON document that is not a
 //! well-formed JSON-RPC request is an invalid request (-32600).
 

@@ -1,5 +1,5 @@
 //! Tool handlers: advice lookup, approach recommendation and doc retrieval
-//! (PLAN §7.1).
+//! (AGENTS.md §5).
 //!
 //! All five tools are read-only. A tool-level failure ("nothing matched") is a
 //! normal result with `isError: true`; only dispatch failures (unknown tool,

@@ -1,4 +1,4 @@
-//! Hot reload of the doc index: validate-then-atomic-swap (PLAN D3, §8.5).
+//! Hot reload of the doc index: validate-then-atomic-swap (AGENTS.md D3, §8).
 //!
 //! The watcher thread is the only writer of the active index pointer. A new
 //! artifact is parsed and validated in full before it becomes active; the
@@ -14,7 +14,7 @@ pub const Index = index_module.Index;
 /// Digest of an index artifact's bytes (SHA-256).
 pub const Digest = [32]u8;
 
-/// Where the index artifact comes from (PLAN §4, §8.5).
+/// Where the index artifact comes from (AGENTS.md §2, §8).
 ///
 /// The server resolves its index from `ZIGMCP_INDEX` / `--index`, which may be
 /// a local path or an HTTP(S) URL pointing at the published artifact.
@@ -69,7 +69,7 @@ pub fn loadSource(io: std.Io, gpa: std.mem.Allocator, source: Source) !Loaded {
 ///
 /// The stdlib client has no conditional-GET support (no `ETag` plumbing), so a
 /// remote index is refreshed by re-fetching and comparing content hashes
-/// (PLAN §8.5). The download is bounded by the same ceiling the local loader
+/// (AGENTS.md §8). The download is bounded by the same ceiling the local loader
 /// enforces, so a hostile artifact cannot exhaust memory.
 fn fetchUrl(io: std.Io, gpa: std.mem.Allocator, url: []const u8) ![]u8 {
     var client: std.http.Client = .{ .allocator = gpa, .io = io };
@@ -520,7 +520,7 @@ test "an index location is classified as a file or a URL" {
 }
 
 test "a reload concurrent with in-flight reads never tears an index" {
-    // The integration layer from PLAN §10.2: the watcher is the only writer of
+    // The integration layer from AGENTS.md §9: the watcher is the only writer of
     // the active pointer, and a reader that holds a snapshot must see one
     // whole index version, never a mix of two.
     const gpa = std.testing.allocator;

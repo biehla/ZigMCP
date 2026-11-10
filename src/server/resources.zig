@@ -1,4 +1,4 @@
-//! Resource listing and reading (PLAN §7.2).
+//! Resource listing and reading (AGENTS.md §5).
 //!
 //! `advice://*` resources are stable (long, public cache). `docs://*` resources
 //! are derived from the current index (short, private cache). A missing resource

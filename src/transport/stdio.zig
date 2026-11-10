@@ -1,4 +1,4 @@
-//! Newline-framed stdio transport (PLAN §7.4).
+//! Newline-framed stdio transport (AGENTS.md §6).
 //!
 //! * one JSON-RPC message per line, no embedded newlines;
 //! * stdout carries MCP messages only — diagnostics go to stderr;

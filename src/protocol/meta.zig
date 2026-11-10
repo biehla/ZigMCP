@@ -1,4 +1,4 @@
-//! Per-request `_meta` parsing and protocol-version resolution (PLAN D10).
+//! Per-request `_meta` parsing and protocol-version resolution (AGENTS.md D10).
 //!
 //! Rules, in order:
 //!   * `params._meta` entirely absent  -> legacy request (protocol `2025-06-18`).
@@ -173,7 +173,7 @@ test "a non-object params member is invalid params" {
 }
 
 test "property: a _meta is accepted only when it is well formed" {
-    // The property layer from PLAN §10.2. A deterministic generator stands in
+    // The property layer from AGENTS.md §9. A deterministic generator stands in
     // for a fuzzer: the invariant is that the resolver never accepts an
     // incomplete or mistyped `_meta`, and never rejects a well-formed one
     // with invalid params.

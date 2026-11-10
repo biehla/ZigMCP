@@ -1,4 +1,4 @@
-//! Doc index loader: JSONL artifact -> columnar in-memory index (PLAN §6.2, D3).
+//! Doc index loader: JSONL artifact -> columnar in-memory index (AGENTS.md §7, D3).
 //!
 //! The index is a runtime artifact, never embedded in the binary. It is parsed
 //! once into flat, arena-owned structures; a republished index is validated
@@ -11,7 +11,7 @@ pub const Columnar = columnar.Columnar;
 pub const Kind = columnar.Kind;
 pub const Record = columnar.Record;
 
-/// Maximum index size the server will load (candidate ceiling from PLAN §10.1).
+/// Maximum index size the server will load (candidate ceiling from AGENTS.md §9).
 pub const max_index_bytes = 256 * 1024 * 1024;
 
 /// A loaded index together with the arena that owns its strings.
@@ -88,7 +88,7 @@ pub fn loadFile(io: std.Io, gpa: std.mem.Allocator, path: []const u8) !Index {
 }
 
 test "property: a mutated JSONL record loads whole or is rejected" {
-    // The property layer from PLAN §10.2: a malformed artifact must never
+    // The property layer from AGENTS.md §9: a malformed artifact must never
     // become a partially loaded index, and a truncated UTF-8 sequence in the
     // doc text must never crash the loader.
     var prng = std.Random.DefaultPrng.init(0xc0ffee);

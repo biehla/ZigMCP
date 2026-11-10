@@ -1,5 +1,5 @@
 //! Protocol tests: drive the built server as a subprocess over pipes, exactly
-//! as a client would (PLAN §10.2, protocol layer).
+//! as a client would (AGENTS.md §9, protocol layer).
 //!
 //! The client writes one request and blocks on the response, so these tests
 //! also pin the "flush the response before reading the next request" rule: a
@@ -395,7 +395,7 @@ test "a prompt is returned with its messages" {
 }
 
 test "a scripted client session walks the whole surface" {
-    // The end-to-end layer from PLAN §10.2: discover → list tools → call
+    // The end-to-end layer from AGENTS.md §9: discover → list tools → call
     // every tool → read a resource → get a prompt, in one session.
     const harness = try Harness.start();
     defer {

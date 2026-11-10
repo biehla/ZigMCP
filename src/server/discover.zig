@@ -1,4 +1,4 @@
-//! `server/discover` and the legacy `initialize` alias (PLAN D7, D10).
+//! `server/discover` and the legacy `initialize` alias (AGENTS.md D7, D10).
 
 const std = @import("std");
 const registry = @import("registry.zig");

@@ -1,6 +1,6 @@
 name: Bump upstream masters
 
-# PLAN §8.5/§8.6, D6: upstream sources are hash-pinned in data/sources.zon
+# AGENTS.md §8, D6: upstream sources are hash-pinned in data/sources.zon
 # and re-resolved here (`zig fetch --save` pins a branch to a commit).
 # The diff baseline is the index.jsonl asset of the most recent published
 # release, downloaded before indexing; before the first release the baseline
@@ -81,7 +81,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # PLAN §8.6: the baseline is the index.jsonl asset of the most recent
+          # AGENTS.md §8: the baseline is the index.jsonl asset of the most recent
           # published release. Without a release (first run) the baseline stays
           # the index rebuilt from the current pins above.
           if gh release download --pattern index.jsonl --dir published 2>/dev/null; then

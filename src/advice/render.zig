@@ -1,5 +1,5 @@
 //! Rendering advice records to MCP resources, tool results and prompt text
-//! (PLAN §7.1–§7.3).
+//! (AGENTS.md §5).
 //!
 //! Every rendering keeps the evidence label and the source ids attached to the
 //! claim they belong to. `GUIDANCE` is never rendered as `FACT`.

@@ -1,4 +1,4 @@
-//! Verification report tool (PLAN §10.3).
+//! Verification report tool (AGENTS.md §9).
 //!
 //! Spawns the built server once over pipes, sends `server/discover` and one
 //! `tools/call` per tool per iteration, and reports startup time, per-tool

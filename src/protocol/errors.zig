@@ -1,6 +1,6 @@
 //! JSON-RPC / MCP error codes and error-object construction.
 //!
-//! PLAN §7.4 fixes the code mapping:
+//! AGENTS.md §6 fixes the code mapping:
 //!   -32700 unparseable line, -32600 malformed envelope, -32601 unknown method,
 //!   -32602 invalid params, -32603 internal error, -32022 unsupported version.
 //! `-32002` (legacy resource-not-found) MUST NOT be emitted, and the HTTP-only

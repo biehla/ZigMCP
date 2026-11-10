@@ -1,4 +1,4 @@
-//! Symbol / path / token search over the columnar doc index (PLAN §7.1).
+//! Symbol / path / token search over the columnar doc index (AGENTS.md §5).
 //!
 //! The query is matched against the symbol, the path and the doc text; symbol
 //! hits outrank path hits, which outrank prose hits. Results are limited and
@@ -107,7 +107,7 @@ fn lessThan(index: *const Columnar, a: Match, b: Match) bool {
 }
 
 test "property: a pathological query never escapes the limit" {
-    // The property layer from PLAN §10.2: pathological queries must neither
+    // The property layer from AGENTS.md §9: pathological queries must neither
     // crash the matcher nor return more than the clamped limit.
     var prng = std.Random.DefaultPrng.init(0xfeed);
     const random = prng.random();

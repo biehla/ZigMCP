@@ -12,7 +12,7 @@
 # Anchored to the root: `src/docs/` is the doc-index module and is tracked.
 /docs/
 
-# CI-produced data artifacts (PLAN §5: published, not hand-edited)
+# CI-produced data artifacts (published by CI, never hand-edited)
 /generated/
 
 # Native build byproducts (e.g. `zig build-lib` leaves a .lib next to the source)

@@ -1,4 +1,4 @@
-//! Prompts: `systems_review` and `approach_selection` (PLAN §7.3).
+//! Prompts: `systems_review` and `approach_selection` (AGENTS.md §5).
 //!
 //! Both prompts keep GUIDANCE separate from FACT and state which checks were
 //! not run, and the approach prompt cites the matched rule ids.

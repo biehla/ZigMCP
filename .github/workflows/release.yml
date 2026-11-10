@@ -1,6 +1,6 @@
 name: Release
 
-# PLAN D9: release binaries are built with the pinned stable Zig (0.16.0),
+# AGENTS.md D9: release binaries are built with the pinned stable Zig (0.17.1),
 # never master. Attaches binaries + the current index artifact and publishes
 # client configuration snippets.
 on:

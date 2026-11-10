@@ -1,5 +1,5 @@
 .{
-    // Upstream sources whose documentation is imported (PLAN §6.3, D6).
+    // Upstream sources whose documentation is imported (AGENTS.md §7, D6).
     //
     // The pins are frozen to a commit: `zig fetch` resolves a branch to a
     // commit and writes the content hash, and the bump job re-resolves them.

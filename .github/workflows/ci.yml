@@ -1,6 +1,6 @@
 name: CI
 
-# PLAN §11 M3 / D9: pinned stable Zig (0.16.0) is the release toolchain and
+# AGENTS.md D9: pinned stable Zig (0.17.1) is the release toolchain and
 # blocks merges; the master (nightly) leg is a non-publishing canary that
 # only surfaces breakage early (continue-on-error, never blocks).
 on:

@@ -1,4 +1,4 @@
-//! Advice corpus: the runtime-loaded ZON data plane (PLAN §6.1, D2).
+//! Advice corpus: the runtime-loaded ZON data plane (AGENTS.md §7, D2).
 //!
 //! The corpus is data, not code: editing advice never touches a handler. Every
 //! record carries an evidence label (`FACT` / `RESULT` / `SYNTHESIS` /
