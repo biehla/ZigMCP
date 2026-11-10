@@ -49,6 +49,7 @@ jobs:
       - name: Write the release notes
         shell: bash
         run: |
+          # shellcheck disable=SC2016  # the backticks below are literal markdown
           # DOC-2: the client snippet lives in client-config.json, which the
           # readme embeds verbatim, so the release note cannot drift from it.
           {

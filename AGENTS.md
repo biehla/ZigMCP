@@ -533,6 +533,10 @@ zig fmt --check . --exclude tests/fixtures   # the fixture tree is deliberately 
   `action-gh-release@v3`); `mlugg/setup-zig@v2` is the one remaining node20 action,
   because upstream has no node24 release yet (CI-9). actionlint 1.7.7 does not
   inspect action metadata, so it stays silent about it.
+  actionlint also shells out to `shellcheck` for every `run:` body **when it finds
+  one on `PATH`** — the `ubuntu-latest` runner carries one, a bare Windows box does
+  not. A body that trips a shellcheck rule is therefore green here and red there
+  (CI-12), so run the gate with shellcheck 0.11.0 installed before calling it green.
 - **Toolchain:** Zig 0.17.1 at `C:\Users\Sethticles\scoop\apps\zig\0.17.1`;
   `.minimum_zig_version = "0.17.1"`; global cache `C:\Users\Sethticles\AppData\Local\zig`.
   The CI canary leg builds with the `master` entry of
@@ -623,6 +627,11 @@ skill).
     `Param{ first_doc_comment, name_token, … }`.
 - **`zig build-lib -femit-docs`** writes `docs/` and a `.lib` into the **current
   directory** (no output-dir flag). Clean them up before committing.
+- **`zig fetch --save[=<name>]`** resolves the ref and writes the dependency block into
+  the `build.zig.zon` of the **package root it runs in**, printing only
+  `info: resolved ref …`. Run it from a parent directory and it edits that parent's
+  manifest instead — the first `bump-master.yml` run wrote the pin into the checked-out
+  project's own `build.zig.zon` while the parser read the scratch copy (CI-11).
 - **Build API:** `root_module` is a field of the options struct; `b.addOptions()` +
   `addOptionPath` is how tests receive built binary paths.
 

@@ -87,7 +87,12 @@ jobs:
           : > bump-results/pins.tsv
           while IFS='|' read -r name repo branch commit includes excludes; do
             old_commit="$commit"
-            if zig fetch --save="$name" "git+${repo}#${branch}" >>bump-results/fetch.log 2>&1; then
+            # `zig fetch --save` writes the dependency block into the package
+            # root it runs in, and the parser below reads `scratch/build.zig.zon`.
+            # Running the fetch from the checkout root wrote the block into this
+            # project's own build.zig.zon, so the parse found nothing and the
+            # step aborted (CI-11). The subshell keeps cwd for everything else.
+            if (cd scratch && zig fetch --save="$name" "git+${repo}#${branch}") >>bump-results/fetch.log 2>&1; then
               new_commit=$(python3 - "$name" <<'PY'
           import re, sys, pathlib
           name = sys.argv[1]

@@ -69,8 +69,10 @@ jobs:
 
       - name: Build the index (degrade-don't-skip)
         run: |
-          : > generated/index.jsonl
-          : > generated/index.status.json
+          # Every file in `generated/` is written by this run. Pre-seeding one
+          # inside the directory the merge step globs fed that step its own
+          # empty file (`index.status.json`) and aborted it on a JSON parse
+          # error (CI-10).
           while IFS='|' read -r name _repo _branch commit includes excludes; do
             # The indexer never fails the run because one upstream file is
             # broken: its usable records are still emitted and the file is
