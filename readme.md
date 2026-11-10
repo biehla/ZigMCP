@@ -112,7 +112,7 @@ schema — that is an answer, not a failure.
 |`advice_lookup`|`concept` (e.g. `"P03"`) **or** `question` (free text)|The full paradigm record: what it controls, facts with labels and sources, candidate uses, boundaries, checks. A question returns up to 5 best matches|
 |`recommend_approach`|`signals` (non-empty list of observations); `constraints` (optional object, currently unused)|The decision rules your signals match, best first: paradigms to consider, the "only if" constraint, its `GUIDANCE` label and a match score|
 |`doc_search`|`query`; `project` (optional — case and `-`/`_` forgiven when the spelling names one project); `limit` (default 20, max 100)|Matching doc records with `path:line`, symbol, kind and text. Exact symbol first, then partial symbol, then path, then text matches|
-|`doc_get`|`project`, `symbol` (project resolved as above, symbol case-insensitive)|Every record with that symbol — usually one — with its source location and upstream commit. `found` is always present, so a miss is still schema-shaped|
+|`doc_get`|`project`, `symbol` (project resolved as above, symbol case-insensitive)|Every record with that path-qualified symbol — usually one — with its source location and upstream commit. `symbol` must be the spelling the index stores (`lib.std.mem.copyForwards`); `doc_search` finds it, and a miss lists the closest stored symbols in `candidates`. `found` is always present, so a miss is still schema-shaped|
 |`doc_import_status`|none|`index_state` (`ok`, `unloaded`, `reload_failed`), `index_error` when a load failed, and per project the commit, record count and degraded-file counts for a local index|
 
 A `project` argument is matched exactly first, so two projects whose keys differ only in
@@ -128,7 +128,7 @@ Questions map to tools like this:
 |"Show me pattern P03"|`advice_lookup` — `{"concept":"P03"}`|
 |"Which approach fits repeated recomputation?"|`recommend_approach` — `{"signals":["repeated recomputation over changing inputs"]}`|
 |"Find allocator docs in std"|`doc_search` — `{"query":"allocator","project":"zig_std","limit":10}`|
-|"What does `mem.copyForwards` do?"|`doc_get` — `{"project":"zig_std","symbol":"mem.copyForwards"}`|
+|"What does `mem.copyForwards` do?"|`doc_get` — `{"project":"zig_std","symbol":"lib.std.mem.copyForwards"}`|
 |"Is the index loaded?"|`doc_import_status` — `{}`|
 
 An unknown member, a missing required argument or a wrong type is rejected as invalid
@@ -182,7 +182,7 @@ an author, title and URL.
 The index is [JSON Lines](https://jsonlines.org): one indexed declaration per line.
 
 ```json
-{"project":"zig_std","commit":"738d2be9…","path":"lib/std/mem.zig","line":812,"kind":"fn","symbol":"mem.copyForwards","container":"mem","doc":" Copies …","doc_hash":"…"}
+{"project":"zig_std","commit":"738d2be9…","path":"lib/std/mem.zig","line":238,"kind":"fn","symbol":"lib.std.mem.copyForwards","container":"lib.std.mem","doc":" Copies …","doc_hash":"…"}
 ```
 
 |Field|Meaning|
@@ -209,6 +209,19 @@ file.
 A record holds comment text only: a signature, a body or a type is never stored, so
 `doc_get` returns the comment and not the declaration. `path:line` plus the record's
 `commit` is how you get from a record to the declaration itself.
+
+### Finding a symbol
+
+Symbols are **path-qualified**: the module path derived from the file path, then the
+nesting of declarations. `mem.copyForwards` is stored as `lib.std.mem.copyForwards`, and
+a `lib/std/std.zig` container record is `lib.std.std.ArrayList`. An unqualified name
+therefore finds nothing, and `doc_get` answers with the closest stored symbols in
+`candidates`; `doc_search` is the tool that discovers a spelling, and a shorter query
+finds more.
+
+Only documented declarations are indexed, under the rules above, so an undocumented
+`pub fn` is absent rather than misspelled. An array type can be indexed by its container
+doc while its methods are not.
 
 ### Building one yourself
 
@@ -266,6 +279,11 @@ cannot stop the server from starting — it serves the advice and an empty doc i
 until the first fetch lands, and `doc_import_status` reports `unloaded` meanwhile. The
 HTTP client has no request timeout, so a fetch still in flight keeps the process alive
 at shutdown until it is killed.
+
+A URL is also re-downloaded **in full** on every poll: the pinned standard-library HTTP
+client has no conditional GET, so a 6 MB artifact costs 6 MB per interval. When that
+matters, download the artifact once, pin it by hash, and point `--index` at the local
+file — the watcher then re-reads it only when its size or modification time changes.
 
 ## Configuration
 

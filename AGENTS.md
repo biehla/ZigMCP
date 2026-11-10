@@ -253,7 +253,7 @@ item), `structuredContent` matching the output schema, and `isError`.
 |`advice_lookup`|`concept` (e.g. `P03`) **or** `question` (free text); at least one|`{query, matches[]}` — full pattern records|Question mode: token overlap over name, controls, facts, candidate uses; top 5|
 |`recommend_approach`|`signals: string[]` (non-empty), optional `constraints: object` (opaque)|`{signals, matches[{rule_id, condition, consider[], and_only_if?, evidence, score}]}`|A rule matches on ≥2 shared tokens, or 1 token covering ≥50% of its condition|
 |`doc_search`|`query`, optional `project`, optional `limit` (default 20, max 100; ≤0 → 20)|`{query, count, results[{project, commit, path, line, kind, symbol, container, doc}]}`|Score: exact symbol 100 / symbol substring 60 / token-in-symbol 40, +25 path, +10 doc substring or +5 token-in-doc; ties by symbol, path, line. `project` resolves exactly first, then ignoring case and `_` vs `-` when the spelling names exactly one project (PROTO-14). The index holds comment text only — no signature or body is stored|
-|`doc_get`|`project`, `symbol` (case-insensitive)|`{found, project?, symbol?, matches[{commit, path, line, kind, symbol, container, doc, doc_hash}]}`|Every record sharing the symbol path — a `//!` container record and a declaration from the sibling `<dir>.zig` can collide — in `(path, line)` order; `found` is always present so a miss is still schema-shaped. `project` resolves as in `doc_search` (PROTO-14); a record holds comment text only, never a signature or body|
+|`doc_get`|`project`, `symbol` (case-insensitive)|`{found, project?, symbol?, matches[{commit, path, line, kind, symbol, container, doc, doc_hash}], candidates?}`|`symbol` is the path-qualified spelling the index stores (`lib.std.mem.copyForwards`); `doc_search` finds it, and a miss lists the closest stored symbols in `candidates` (PROTO-15). Every record sharing the symbol path — a `//!` container record and a declaration from the sibling `<dir>.zig` can collide — comes back in `(path, line)` order; `found` is always present so a miss is still schema-shaped. `project` resolves as in `doc_search` (PROTO-14); a record holds comment text only, never a signature or body|
 |`doc_import_status`|`{}`|`{index_path?, index_state, index_error?, index_records, projects[{project, commit, records, files_total?, files_degraded?, degraded?}]}`|`index_state` is `ok`/`unloaded`/`reload_failed`, so a client can see that the index being served is not the artifact on disk (REL-4); degraded counts come from the `.status.json` sidecar next to a **local** index, and a sidecar member whose type or sign contradicts this schema is omitted rather than echoed|
 
 "Nothing matched" is a **normal result with `isError: true`**, an explanation, and
@@ -382,7 +382,7 @@ them, so a schema change is one edit and all three targets recompile.
 ### Doc index record (JSONL, one minified object per line)
 
 ```json
-{"project":"zig_std","commit":"738d2be…","path":"lib/std/mem.zig","line":812,"kind":"fn","symbol":"mem.copyForwards","container":"mem","doc":" Copies …","doc_hash":"<sha256 hex>"}
+{"project":"zig_std","commit":"738d2be…","path":"lib/std/mem.zig","line":238,"kind":"fn","symbol":"lib.std.mem.copyForwards","container":"lib.std.mem","doc":" Copies …","doc_hash":"<sha256 hex>"}
 ```
 
 |Field|Meaning|
@@ -925,6 +925,7 @@ to prevent than to debug, and each already has a guard here.
 |20|The lint gate is green locally and red in CI|CI-12|run actionlint with `shellcheck` visible on `PATH`|
 |21|The release tarball cannot start|CI-8|unpack into an empty directory and run it|
 |22|A project spelling differing by `-`/`_` or case silently matched nothing|PROTO-14|exact-first resolution, ambiguity reported, a miss names the known keys|
+|23|A path-qualified symbol typed unqualified returns a bare miss|PROTO-15|`doc_get` lists the closest stored symbols in `candidates`; the readme examples use the stored spelling|
 
 Add a row when a defect is fixed and no existing row would have caught it. A row that
 has never fired is still worth keeping: it is the checklist, not the history.
