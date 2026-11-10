@@ -1,8 +1,8 @@
 # PLAN.md — defects, edge cases, limitations, and guideline deviations
 
-Status: open backlog. Twenty-two items were fixed on 2026-11-09, thirty-three on
+Status: open backlog. Twenty-two items were fixed on 2026-11-09, thirty-four on
 2026-11-10, and five more were closed that day because they were already done — the
-option chosen for each, its commit and its verification are in §13–§26. Two sources: a read-through
+option chosen for each, its commit and its verification are in §13–§27. Two sources: a read-through
 of the tree on 2026-11-09, and a breakage campaign the same day that fuzzed the
 stdio surface and the indexer, profiled the hot paths, and inspected a `ReleaseSafe`
 PE with REA — method, measurements and negative results in §12.
@@ -83,11 +83,6 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri"
 ---
 
 ## 1. CI/CD
-
-- **CI-6 — bump rerun collides with its own branch.** The branch name is
-  `bump/upstream-<date>`; a second run the same day fails `git checkout -b` or the
-  push. Options: (a) append the run id; (b) `git push --force-with-lease`; (c) close
-  and reopen the PR. Verify: run `bump-master.yml` twice in a day.
 
 - **CI-7 — no dependency caching.** Both jobs clone every upstream repo and re-fetch
   toolchains each run. Options: (a) `actions/cache` keyed by project+commit; (b) reuse
@@ -179,7 +174,6 @@ must own its test, because no such layer exists yet.
 
 |Id|Regression test|If not: what must own it|
 |---|---|---|
-|CI-6|—|rerun the workflow; no local test|
 |CI-7|—|timing only|
 |REL-1|—|local HTTP server counting requests|
 |REL-2|—|black-hole address plus quit; timing-based|
@@ -473,6 +467,16 @@ that one).
 |Id|Option|Commit|Verification|
 |---|---|---|---|
 |CI-9|(a), plus (c) for `setup-zig`|`f7fb720`|each action.yml declares `runs.using`: `checkout@v5`, `upload-artifact@v6`, `setup-go@v6`, `action-gh-release@v3` = node24; `setup-zig@v2` = node20 (upstream, no v3). `zig build workflows`, `zig fmt --check` and actionlint 1.7.7 pass|
+
+## 27. Resolved on 2026-11-10, thirteenth chunk
+
+One CI item, one commit (`a02c46b`): the bump branch carries the run id, so a second
+run the same day cannot collide with the first run's branch. The diff gate runs
+before the branch, so a no-op rerun still creates nothing.
+
+|Id|Option|Commit|Verification|
+|---|---|---|---|
+|CI-6|(a)|`a02c46b`|branch is `bump/upstream-<date>-${GITHUB_RUN_ID}`, unique per run; `zig build workflows` and the pinned actionlint pass. The live twice-a-day rerun is a CI-only check (the layer §10 named)|
 
 
 
