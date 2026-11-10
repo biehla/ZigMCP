@@ -466,6 +466,22 @@ fn sidecarProject(value: std.json.Value, name: []const u8) ?std.json.ObjectMap {
     return entry.object;
 }
 
+/// Copies a sidecar array member verbatim, but only when it really is an array.
+///
+/// The advertised output schema says `degraded` is an array; echoing a string
+/// or a number there would contradict it, so a mistyped member is dropped
+/// (PROTO-11).
+fn putSidecarArray(
+    item: *std.json.ObjectMap,
+    gpa: std.mem.Allocator,
+    entry: std.json.ObjectMap,
+    key: []const u8,
+) !void {
+    const value = entry.get(key) orelse return;
+    if (value != .array) return;
+    try item.put(gpa, key, value);
+}
+
 /// Copies one sidecar count into the result when it is a non-negative integer
 /// that fits `usize`, returning the count it reported.
 ///
@@ -534,13 +550,9 @@ pub fn docImportStatus(ctx: *Context, args: std.json.Value) ToolError!ToolOutcom
         var degraded_files: ?usize = null;
         if (sidecar) |value| {
             if (sidecarProject(value, stat.name)) |entry| {
-                if (entry.get("files_total")) |files_total| {
-                    try item.put(gpa, "files_total", files_total);
-                }
+                _ = try putSidecarCount(&item, gpa, entry, "files_total");
                 degraded_files = try putSidecarCount(&item, gpa, entry, "files_degraded");
-                if (entry.get("degraded")) |degraded| {
-                    try item.put(gpa, "degraded", degraded);
-                }
+                try putSidecarArray(&item, gpa, entry, "degraded");
             }
         }
         try project_values.append(.{ .object = item });
@@ -588,4 +600,46 @@ test "a negative sidecar count is dropped instead of cast" {
         try putSidecarCount(&item, gpa, entry, "files_total"),
     );
     try std.testing.expectEqual(@as(i64, 3), item.get("files_total").?.integer);
+}
+
+test "a mistyped sidecar member never reaches structuredContent" {
+    // PROTO-11: `files_total:"oops"`, `files_degraded:1.5` and a non-array
+    // `degraded` were echoed verbatim, so the tool result contradicted the
+    // `integer`/`array` types it advertises in `tools/list`.
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const parsed = try std.json.parseFromSlice(
+        std.json.Value,
+        gpa,
+        "{\"files_total\":\"oops\",\"files_degraded\":1.5,\"degraded\":\"nope\"}",
+        .{},
+    );
+    const entry = parsed.value.object;
+
+    var item: std.json.ObjectMap = .{};
+    try std.testing.expectEqual(
+        @as(?usize, null),
+        try putSidecarCount(&item, gpa, entry, "files_total"),
+    );
+    try std.testing.expectEqual(
+        @as(?usize, null),
+        try putSidecarCount(&item, gpa, entry, "files_degraded"),
+    );
+    try putSidecarArray(&item, gpa, entry, "degraded");
+
+    try std.testing.expect(item.get("files_total") == null);
+    try std.testing.expect(item.get("files_degraded") == null);
+    try std.testing.expect(item.get("degraded") == null);
+
+    // A well-formed member is still copied verbatim.
+    const good = try std.json.parseFromSlice(
+        std.json.Value,
+        gpa,
+        "{\"degraded\":[{\"path\":\"a.zig\"}]}",
+        .{},
+    );
+    try putSidecarArray(&item, gpa, good.value.object, "degraded");
+    try std.testing.expectEqual(@as(usize, 1), item.get("degraded").?.array.items.len);
 }
