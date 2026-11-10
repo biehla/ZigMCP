@@ -1,8 +1,8 @@
 # PLAN.md — defects, edge cases, limitations, and guideline deviations
 
-Status: open backlog. Twenty-two items were fixed on 2026-11-09, thirty-six on
+Status: open backlog. Twenty-two items were fixed on 2026-11-09, thirty-seven on
 2026-11-10, and five more were closed that day because they were already done — the
-option chosen for each, its commit and its verification are in §13–§29. Two sources: a read-through
+option chosen for each, its commit and its verification are in §13–§30. Two sources: a read-through
 of the tree on 2026-11-09, and a breakage campaign the same day that fuzzed the
 stdio surface and the indexer, profiled the hot paths, and inspected a `ReleaseSafe`
 PE with REA — method, measurements and negative results in §12.
@@ -132,17 +132,6 @@ resource can be read`, both in `src/regressions_test.zig` (recorded in §16).
 
 ## 8. Documentation and packaging
 
-- **DOC-4 — the Windows release binary carries no manifest, version resource or icon,
-  and no load-config.** REA on a `ReleaseSafe` build (`inspect_pe_resources`,
-  `inspect_pe_load_config`) reports `resources: []` and `load_config: null` for a
-  PE32+ image importing only `ntdll.dll` (65), `KERNEL32.dll` (1) and `CRYPT32.dll`
-  (9), with no delay imports: no `VERSIONINFO` (Explorer shows no product or version),
-  no `asInvoker` manifest (Windows applies compatibility heuristics), no icon, and no
-  CFG/GS metadata. Options: (a) add a manifest and version resource through
-  `build.zig`'s Windows options; (b) ship a `.rc` and compile it with `zig rc`;
-  (c) accept and note it in the release notes. Verify: `inspect_pe_resources` shows a
-  manifest and a version entry.
-
 ---
 
 ## 9. Environment
@@ -165,7 +154,6 @@ must own its test, because no such layer exists yet.
 |---|---|---|
 |CI-7|—|timing only|
 |REL-6|—|integration: URL index with no sidecar|
-|DOC-4|—|`inspect_pe_resources` on a `ReleaseSafe` artifact (packaging smoke test)|
 
 Every item above that names a handler can use the `Harness` in
 `src/regressions_test.zig` — it builds a real corpus and an empty index, so a new
@@ -177,8 +165,8 @@ The first three steps of the original order — the pipeline, the cheap client-v
 fixes and the data-plane trust items — are done (§13, §14, §15). What remains, in
 order:
 
-1. Remaining limitations by demand: REL-1.
-2. Contract and packaging gaps: DOC-4, CI-9.
+1. Remaining limitation: REL-6 (remote status sidecar).
+2. CI run time: CI-7 (dependency caching).
 3. Everything else in §1–§6 by demand.
 
 ---
@@ -486,6 +474,16 @@ until it is killed — is option (c), documented in AGENTS.md §8.
 |Id|Option|Commit|Verification|
 |---|---|---|---|
 |REL-2|(c), plus removing the startup block|`9b19761`|protocol test `REL-2: a black-holed index URL does not block startup`: with `--index http://10.255.255.1/...` the server answers `server/discover`; before the fix the same probe hung (reproduced: still running 3 s after EOF). `zig build test`, `check`, `workflows` and `zig fmt --check` pass|
+
+## 30. Resolved on 2026-11-10, sixteenth chunk
+
+One packaging item, one commit (`e9c8057`): the Windows binary carries a manifest
+(asInvoker, supported OS) and a version resource, so Explorer shows a product and
+version and Windows applies no compatibility heuristics.
+
+|Id|Option|Commit|Verification|
+|---|---|---|---|
+|DOC-4|(b)|`e9c8057`|pefile on the Debug and ReleaseSafe images: resource types `RT_MANIFEST` + `RT_VERSION`, with `CompanyName`/`FileDescription`/`FileVersion`/`ProductName`/`ProductVersion` = ZigMCP / ZigMCP MCP server / 0.1.0 / ZigMCP / 0.1.0; `zig build test` passes|
 
 
 
