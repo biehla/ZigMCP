@@ -32,35 +32,14 @@ jobs:
         id: plan
         run: |
           mkdir -p upstream scratch generated bump-results
-          python3 - <<'PY'
-          import pathlib, re, sys
-          text = pathlib.Path("data/sources.zon").read_text()
-          blocks = re.findall(r'\.(\w+)\s*=\s*\.\{(.*?)\n    \},', text, re.S)
-          if not blocks:
-              sys.exit("::error::no sources parsed from data/sources.zon")
-          rows = []
-          for name, body in blocks:
-              url = re.search(r'\.url\s*=\s*"([^"]+)"', body)
-              branch = re.search(r'\.branch\s*=\s*"([^"]+)"', body)
-              commit = re.search(r'\.commit\s*=\s*"([^"]+)"', body)
-              include = re.search(r'\.include\s*=\s*\.\{([^}]*)\}', body, re.S)
-              if not url or not branch or not commit:
-                  sys.exit(f"::error::source {name} missing url/branch/commit")
-              repo = url.group(1).removeprefix("git+")
-              repo = re.sub(r'\?ref=[^#]*', '', repo).split('#')[0]
-              inc = "."
-              if include:
-                  parts = re.findall(r'"([^"]+)"', include.group(1))
-                  inc = parts[0].removesuffix("/**") if parts else "."
-              rows.append((name, repo, branch.group(1), commit.group(1), inc))
-          pathlib.Path("upstream/plan.tsv").write_text(
-              "".join("\t".join(r) + "\n" for r in rows))
-          print("\n".join("\t".join(r) for r in rows))
-          PY
+          # One parser for both workflows (CI-4/CI-5): every include and
+          # exclude, `|`-separated, from the ZON AST rather than a regex.
+          zig build plan-sources > upstream/plan.tsv
+          cat upstream/plan.tsv
 
       - name: Fetch the currently pinned trees (baseline side)
         run: |
-          while IFS=$'\t' read -r name repo _branch commit _include; do
+          while IFS='|' read -r name repo _branch commit _includes _excludes; do
             git clone --filter=blob:none --no-checkout "$repo" "upstream/$name"
             git -C "upstream/$name" checkout --detach "$commit"
           done < upstream/plan.tsv
@@ -68,11 +47,16 @@ jobs:
       - name: Build the baseline index from the current pins
         run: |
           : > baseline.jsonl
-          while IFS=$'\t' read -r name _repo _branch commit include; do
-            zig run tools/indexer.zig -- \
-              --out "bump-results/$name.jsonl" \
-              --source "$name=$commit=upstream/$name" \
-              --include "$include" || true
+          while IFS='|' read -r name _repo _branch commit includes excludes; do
+            args=(--out "bump-results/$name.jsonl" --source "$name=$commit=upstream/$name")
+            # `read -ra` splits without pathname expansion, so `**` survives.
+            incs=()
+            if [ -n "$includes" ]; then IFS=' ' read -ra incs <<< "$includes"; fi
+            for inc in "${incs[@]}"; do args+=(--include "$inc"); done
+            excs=()
+            if [ -n "$excludes" ]; then IFS=' ' read -ra excs <<< "$excludes"; fi
+            for exc in "${excs[@]}"; do args+=(--exclude "$exc"); done
+            zig run tools/indexer.zig -- "${args[@]}" || true
           done < upstream/plan.tsv
           cat bump-results/*.jsonl > baseline.jsonl || true
 
@@ -98,7 +82,7 @@ jobs:
           zig init >/dev/null 2>&1 || true
           cd ..
           : > bump-results/pins.tsv
-          while IFS=$'\t' read -r name repo branch commit include; do
+          while IFS='|' read -r name repo branch commit includes excludes; do
             old_commit="$commit"
             if zig fetch --save="$name" "git+${repo}#${branch}" >>bump-results/fetch.log 2>&1; then
               new_commit=$(python3 - "$name" <<'PY'
@@ -113,11 +97,11 @@ jobs:
           print(commit)
           PY
               )
-              echo -e "$name\t$repo\t$branch\t$old_commit\t$new_commit\t$include" >> bump-results/pins.tsv
+              echo "$name|$repo|$branch|$old_commit|$new_commit|$includes|$excludes" >> bump-results/pins.tsv
               echo "$name OK old=$old_commit new=$new_commit" >> bump-results/summary.txt
             else
               # A dead branch fails only this project; its previous pin is kept.
-              echo -e "$name\t$repo\t$branch\t$old_commit\t$old_commit\t$include" >> bump-results/pins.tsv
+              echo "$name|$repo|$branch|$old_commit|$old_commit|$includes|$excludes" >> bump-results/pins.tsv
               echo "$name FAILED branch=$branch (previous pin kept)" >> bump-results/failures.txt
               echo "$name FAILED old=$old_commit new=$old_commit" >> bump-results/summary.txt
             fi
@@ -126,14 +110,17 @@ jobs:
       - name: Fetch the newly pinned trees and index them
         run: |
           rm -rf upstream && mkdir -p upstream
-          while IFS=$'\t' read -r name repo _branch _old_commit new_commit include; do
+          while IFS='|' read -r name repo _branch _old_commit new_commit includes excludes; do
             git clone --filter=blob:none --no-checkout "$repo" "upstream/$name" || continue
             git -C "upstream/$name" checkout --detach "$new_commit" || continue
-            zig run tools/indexer.zig -- \
-              --out "bump-results/$name.jsonl" \
-              --source "$name=$new_commit=upstream/$name" \
-              --include "$include" \
-              --previous baseline.jsonl || true
+            args=(--out "bump-results/$name.jsonl" --source "$name=$new_commit=upstream/$name")
+            incs=()
+            if [ -n "$includes" ]; then IFS=' ' read -ra incs <<< "$includes"; fi
+            for inc in "${incs[@]}"; do args+=(--include "$inc"); done
+            excs=()
+            if [ -n "$excludes" ]; then IFS=' ' read -ra excs <<< "$excludes"; fi
+            for exc in "${excs[@]}"; do args+=(--exclude "$exc"); done
+            zig run tools/indexer.zig -- "${args[@]}" --previous baseline.jsonl || true
           done < bump-results/pins.tsv
           python3 - <<'PY'
           import json, pathlib
@@ -189,7 +176,7 @@ jobs:
           import pathlib, re
           pins = {}
           for line in pathlib.Path("bump-results/pins.tsv").read_text().splitlines():
-              name, repo, branch, old_commit, new_commit, include = line.split("\t")
+              name, repo, branch, old_commit, new_commit, _includes, _excludes = line.split("|")
               pins[name] = (repo, branch, old_commit, new_commit)
           # The content hash written by `zig fetch --save` (scratch/build.zig.zon).
           scratch = pathlib.Path("scratch/build.zig.zon").read_text()

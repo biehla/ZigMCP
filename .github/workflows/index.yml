@@ -34,36 +34,14 @@ jobs:
       - name: Plan the fetch (parse data/sources.zon)
         run: |
           mkdir -p upstream generated
-          python3 - <<'PY'
-          import pathlib, re, sys
-          text = pathlib.Path("data/sources.zon").read_text()
-          blocks = re.findall(r'\.(\w+)\s*=\s*\.\{(.*?)\n    \},', text, re.S)
-          if not blocks:
-              sys.exit("::error::no sources parsed from data/sources.zon")
-          rows = []
-          for name, body in blocks:
-              url = re.search(r'\.url\s*=\s*"([^"]+)"', body)
-              commit = re.search(r'\.commit\s*=\s*"([^"]+)"', body)
-              include = re.search(r'\.include\s*=\s*\.\{([^}]*)\}', body, re.S)
-              if not url or not commit:
-                  sys.exit(f"::error::source {name} missing url/commit")
-              repo = url.group(1)
-              repo = repo.removeprefix("git+")
-              repo = re.sub(r'\?ref=[^#]*', '', repo)
-              repo = repo.split('#')[0]
-              inc = "."
-              if include:
-                  parts = re.findall(r'"([^"]+)"', include.group(1))
-                  inc = parts[0].removesuffix("/**") if parts else "."
-              rows.append((name, repo, commit.group(1), inc))
-          pathlib.Path("upstream/plan.tsv").write_text(
-              "".join("\t".join(r) + "\n" for r in rows))
-          print("\n".join("\t".join(r) for r in rows))
-          PY
+          # One parser for both workflows (CI-4/CI-5): every include and
+          # exclude, `|`-separated, from the ZON AST rather than a regex.
+          zig build plan-sources > upstream/plan.tsv
+          cat upstream/plan.tsv
 
       - name: Fetch the pinned upstream trees
         run: |
-          while IFS=$'\t' read -r name repo commit _include; do
+          while IFS='|' read -r name repo _branch commit _includes _excludes; do
             echo "fetching $name @ $commit"
             git clone --filter=blob:none --no-checkout "$repo" "upstream/$name"
             git -C "upstream/$name" checkout --detach "$commit"
@@ -90,23 +68,23 @@ jobs:
         run: |
           : > generated/index.jsonl
           : > generated/index.status.json
-          while IFS=$'\t' read -r name _repo commit include; do
+          while IFS='|' read -r name _repo _branch commit includes excludes; do
             # The indexer never fails the run because one upstream file is
             # broken: its usable records are still emitted and the file is
             # reported as degraded in the status sidecar.
+            args=(--out "generated/$name.jsonl" --status "generated/$name.status.json"
+                  --source "$name=$commit=upstream/$name")
+            # `read -ra` splits without pathname expansion, so `**` survives.
+            incs=()
+            if [ -n "$includes" ]; then IFS=' ' read -ra incs <<< "$includes"; fi
+            for inc in "${incs[@]}"; do args+=(--include "$inc"); done
+            excs=()
+            if [ -n "$excludes" ]; then IFS=' ' read -ra excs <<< "$excludes"; fi
+            for exc in "${excs[@]}"; do args+=(--exclude "$exc"); done
             if [ -f previous.jsonl ]; then
-              zig run tools/indexer.zig -- \
-                --out "generated/$name.jsonl" \
-                --status "generated/$name.status.json" \
-                --source "$name=$commit=upstream/$name" \
-                --include "$include" \
-                --previous previous.jsonl || true
+              zig run tools/indexer.zig -- "${args[@]}" --previous previous.jsonl || true
             else
-              zig run tools/indexer.zig -- \
-                --out "generated/$name.jsonl" \
-                --status "generated/$name.status.json" \
-                --source "$name=$commit=upstream/$name" \
-                --include "$include" || true
+              zig run tools/indexer.zig -- "${args[@]}" || true
             fi
           done < upstream/plan.tsv
 

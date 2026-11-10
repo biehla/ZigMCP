@@ -100,6 +100,7 @@ pub fn main(init: std.process.Init) !void {
     var previous_path: ?[]const u8 = null;
     var sources = std.ArrayList(Source).empty;
     var includes = std.ArrayList([]const u8).empty;
+    var excludes = std.ArrayList([]const u8).empty;
 
     while (args_iter.next()) |raw| {
         const arg: []const u8 = raw;
@@ -116,6 +117,9 @@ pub fn main(init: std.process.Init) !void {
         } else if (std.mem.eql(u8, arg, "--include")) {
             const v = args_iter.next() orelse usage(io);
             includes.append(gpa, v) catch unreachable;
+        } else if (std.mem.eql(u8, arg, "--exclude")) {
+            const v = args_iter.next() orelse usage(io);
+            excludes.append(gpa, v) catch unreachable;
         } else {
             usage(io);
         }
@@ -143,7 +147,7 @@ pub fn main(init: std.process.Init) !void {
             st.skipped = true;
             st.previous_records = countForProject(records.items, src.project);
         } else {
-            try indexSource(io, gpa, src, includes.items, &records, &st);
+            try indexSource(io, gpa, src, includes.items, excludes.items, &records, &st);
         }
         st.records = countForProject(records.items, src.project);
         try statuses.append(gpa, st);
@@ -339,7 +343,7 @@ fn usage(io: std.Io) noreturn {
     const f = std.Io.File.stderr();
     var w = f.writer(io, &buf);
     w.interface.writeAll(
-        \\usage: indexer --out <index.jsonl> --source <project>=<commit>=<root> [--source ...] [--include <subpath> ...] [--status <path>] [--previous <index.jsonl>]
+        \\usage: indexer --out <index.jsonl> --source <project>=<commit>=<root> [--source ...] [--include <subpath> ...] [--exclude <subpath> ...] [--status <path>] [--previous <index.jsonl>]
     ) catch {};
     w.interface.writeAll("\n") catch {};
     w.flush() catch {};
@@ -379,9 +383,78 @@ fn matchesInclude(rel: []const u8, include: []const u8) bool {
     return next == '/';
 }
 
-fn indexSource(io: std.Io, gpa: std.mem.Allocator, src: Source, includes: []const []const u8, records: *std.ArrayList(Record), st: *ProjectStatus) !void {
+/// `lib/std/**/testdata/**` is how `data/sources.zon` spells "every testdata
+/// directory under lib/std": `**` matches zero or more path segments, and a
+/// bare directory prefix excludes everything below it (CI-4).
+fn excludeSegments(gpa: std.mem.Allocator, exclude: []const u8) ![]const []const u8 {
+    var pat = try normalizeSlashes(gpa, exclude);
+    while (pat.len > 0 and (pat[pat.len - 1] == '/' or pat[pat.len - 1] == '\\')) pat = pat[0 .. pat.len - 1];
+    var out: std.ArrayList([]const u8) = .empty;
+    var it = std.mem.splitScalar(u8, pat, '/');
+    while (it.next()) |seg| {
+        if (seg.len == 0) continue;
+        try out.append(gpa, seg);
+    }
+    if (out.items.len > 0 and !std.mem.eql(u8, out.items[out.items.len - 1], "**")) {
+        try out.append(gpa, "**");
+    }
+    return out.toOwnedSlice(gpa);
+}
+
+fn matchesExclude(rel: []const u8, segments: []const []const u8) bool {
+    var rel_segs: [256][]const u8 = undefined;
+    var n: usize = 0;
+    var it = std.mem.splitScalar(u8, rel, '/');
+    while (it.next()) |seg| {
+        if (seg.len == 0) continue;
+        if (n == rel_segs.len) return false;
+        rel_segs[n] = seg;
+        n += 1;
+    }
+    return matchExcludeSegments(rel_segs[0..n], segments);
+}
+
+/// Greedy wildcard match over path segments: `**` consumes zero or more
+/// segments. One backtrack point suffices, so this is O(path × pattern) and
+/// cannot recurse on a hostile pattern.
+fn matchExcludeSegments(rel: []const []const u8, pat: []const []const u8) bool {
+    var i: usize = 0;
+    var j: usize = 0;
+    var star: ?usize = null;
+    var mark: usize = 0;
+    while (i < rel.len) {
+        if (j < pat.len and std.mem.eql(u8, pat[j], "**")) {
+            star = j;
+            mark = i;
+            j += 1;
+            continue;
+        }
+        if (j < pat.len and std.mem.eql(u8, pat[j], rel[i])) {
+            i += 1;
+            j += 1;
+            continue;
+        }
+        if (star) |s| {
+            mark += 1;
+            i = mark;
+            j = s + 1;
+            continue;
+        }
+        return false;
+    }
+    while (j < pat.len and std.mem.eql(u8, pat[j], "**")) j += 1;
+    return j == pat.len;
+}
+
+fn indexSource(io: std.Io, gpa: std.mem.Allocator, src: Source, includes: []const []const u8, excludes: []const []const u8, records: *std.ArrayList(Record), st: *ProjectStatus) !void {
     var root_dir = try std.Io.Dir.cwd().openDir(io, src.root, .{ .iterate = true });
     defer root_dir.close(io);
+    // Normalize the filters once; a per-file re-normalization would allocate a
+    // copy for every file in the tree.
+    const include_n = try gpa.alloc([]const u8, includes.len);
+    for (includes, 0..) |inc, i| include_n[i] = try normalizeSlashes(gpa, inc);
+    const exclude_n = try gpa.alloc([]const []const u8, excludes.len);
+    for (excludes, 0..) |exc, i| exclude_n[i] = try excludeSegments(gpa, exc);
     var walker = try root_dir.walk(gpa);
     defer walker.deinit();
     while (try walker.next(io)) |entry| {
@@ -390,17 +463,24 @@ fn indexSource(io: std.Io, gpa: std.mem.Allocator, src: Source, includes: []cons
         if (!std.mem.endsWith(u8, base, ".zig")) continue;
         const rel_raw: []const u8 = entry.path;
         const rel = try normalizeSlashes(gpa, rel_raw);
-        if (includes.len > 0) {
+        if (include_n.len > 0) {
             var ok = false;
-            for (includes) |inc| {
-                const ninc = try normalizeSlashes(gpa, inc);
-                if (matchesInclude(rel, ninc)) {
+            for (include_n) |inc| {
+                if (matchesInclude(rel, inc)) {
                     ok = true;
                     break;
                 }
             }
             if (!ok) continue;
         }
+        var excluded = false;
+        for (exclude_n) |seg| {
+            if (matchesExclude(rel, seg)) {
+                excluded = true;
+                break;
+            }
+        }
+        if (excluded) continue;
         st.files_total += 1;
         // Degrade, never skip: one unreadable or oversized file must not abort
         // every project in the run (IDX-1).

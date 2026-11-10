@@ -83,6 +83,12 @@ test "the golden index contains the records of the degraded files" {
 }
 
 fn writeFixture(dir: std.Io.Dir, sub_path: []const u8, data: []const u8) !void {
+    if (std.fs.path.dirname(sub_path)) |parent| {
+        dir.createDirPath(io, parent) catch |err| switch (err) {
+            error.PathAlreadyExists => {},
+            else => return err,
+        };
+    }
     const file = try dir.createFile(io, sub_path, .{});
     defer file.close(io);
     var buffer: [4096]u8 = undefined;
@@ -387,4 +393,78 @@ test "an --include glob selects the same files as its directory prefix" {
     // A non-empty result first: two empty files would also be byte-equal.
     try std.testing.expect(std.mem.indexOf(u8, plain, "\"lib.std.sample") != null);
     try std.testing.expectEqualStrings(plain, glob);
+}
+
+test "an --exclude pattern removes matching files from the index" {
+    // CI-4: `data/sources.zon` declares `lib/std/**/testdata/**`, but the
+    // indexer ignored exclusions and published the testdata files anyway.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const gpa = std.testing.allocator;
+
+    try writeFixture(tmp.dir, "src/a.zig", "/// keep me\npub fn a() void {}\n");
+    try writeFixture(tmp.dir, "src/testdata/b.zig", "/// drop me\npub fn b() void {}\n");
+    try writeFixture(tmp.dir, "src/foo/testdata/c.zig", "/// drop me too\npub fn c() void {}\n");
+
+    const root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}", .{&tmp.sub_path});
+    defer gpa.free(root);
+    const source = try std.fmt.allocPrint(gpa, "p=c={s}", .{root});
+    defer gpa.free(source);
+
+    const Run = struct {
+        name: []const u8,
+        exclude: []const u8,
+        want_b: bool,
+        want_c: bool,
+    };
+    // A bare directory prefix drops only its own subtree; the `**` form also
+    // matches a `testdata` directory at any depth, including zero segments
+    // (the top-level `src/testdata`). One run per form pins both.
+    const runs = [_]Run{
+        .{ .name = "prefix", .exclude = "src/testdata", .want_b = false, .want_c = true },
+        .{ .name = "glob", .exclude = "src/**/testdata/**", .want_b = false, .want_c = false },
+    };
+    for (runs) |run| {
+        const output = try std.fmt.allocPrint(gpa, "{s}/{s}.jsonl", .{ root, run.name });
+        defer gpa.free(output);
+
+        var child = try std.process.spawn(io, .{
+            .argv = &.{
+                options.indexer_exe,
+                "--out",
+                output,
+                "--source",
+                source,
+                "--include",
+                "src",
+                "--exclude",
+                run.exclude,
+            },
+            .stdin = .ignore,
+            .stdout = .ignore,
+            .stderr = .ignore,
+        });
+        switch (try child.wait(io)) {
+            .exited => |code| try std.testing.expectEqual(@as(u8, 0), code),
+            else => return error.UnexpectedExit,
+        }
+
+        const produced = try std.Io.Dir.cwd().readFileAllocOptions(
+            io,
+            output,
+            gpa,
+            .limited(16 * 1024 * 1024),
+            .of(u8),
+            null,
+        );
+        defer gpa.free(produced);
+
+        // The kept file is always indexed ...
+        try std.testing.expect(std.mem.indexOf(u8, produced, "\"src/a.zig\"") != null);
+        // ... and each excluded tree is absent exactly when the pattern matches it.
+        const got_b = std.mem.indexOf(u8, produced, "\"src/testdata/b.zig\"") != null;
+        const got_c = std.mem.indexOf(u8, produced, "\"src/foo/testdata/c.zig\"") != null;
+        try std.testing.expectEqual(run.want_b, got_b);
+        try std.testing.expectEqual(run.want_c, got_c);
+    }
 }

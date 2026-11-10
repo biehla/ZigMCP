@@ -79,6 +79,27 @@ pub fn build(b: *std.Build) void {
     // `zig build run -- <args>` forwards the arguments to the server.
     run_cmd.addPassthruArgs();
 
+    // `data/sources.zon` plan parsing (CI-4/CI-5): one parser shared by both
+    // workflows, so their regex copies cannot drift.
+    const sources_module = b.createModule(.{
+        .root_source_file = b.path("src/util/sources.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const sources_plan = b.addExecutable(.{
+        .name = "sources_plan",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/sources_plan.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "sources", .module = sources_module }},
+        }),
+    });
+    const run_sources_plan = b.addRunArtifact(sources_plan);
+    run_sources_plan.addArg("data/sources.zon");
+    const plan_step = b.step("plan-sources", "Print the upstream plan from data/sources.zon");
+    plan_step.dependOn(&run_sources_plan.step);
+
     // Workflow trigger/expression consistency (CI-1): actionlint accepts a
     // `github.event.X` its triggers cannot produce, this does not.
     const workflow_module = b.createModule(.{

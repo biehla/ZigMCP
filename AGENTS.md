@@ -168,10 +168,12 @@ server would put upstream-parse failure modes on the request path.
 |`src/util/json_array.zig`|`std.json.Array` construction/append for both toolchains (0.17.1 managed, 0.18.0-dev unmanaged)|
 |`src/util/text.zig`|Tokenizer + case-insensitive helpers|
 |`src/util/workflow.zig`|Workflow trigger/expression consistency (CI-1)|
+|`src/util/sources.zig`|`data/sources.zon` parser: every include and exclude, from the ZON AST (CI-4/CI-5)|
 |`src/util/sleep.zig`|Thread sleep that does not share the server's `Io`|
 |`data/advice/`|`patterns.zon` (P01–P12), `rules.zon` (R01–R12), `guarantees.zon`, `limits.zon` (+ evidence legend), `sources.zon` (S01–S24)|
 |`data/sources.zon`|Upstream projects: url, hash, branch, commit, scope (the pin home, D6)|
 |`tools/indexer.zig`|Upstream tree → JSONL + `.status.json` sidecar|
+|`tools/sources_plan.zig`|`data/sources.zon` → one plan line per source for both workflows (`zig build plan-sources`, CI-4/CI-5)|
 |`tools/advice_check.zig`|Corpus validator (`zig build check`)|
 |`tools/workflow_check.zig`|CLI for the workflow check (`zig build workflows`)|
 |`tools/bench.zig`|Verification report (`zig build bench`)|
@@ -357,9 +359,10 @@ order (REL-10).
 },
 ```
 
-The CI workflows parse this file with a regex: keep one source per top-level block,
-closing with `\n    },`. Only the **first** `include` entry is honoured (with `/**`
-stripped) and `exclude` is not applied yet (§14).
+The plan step parses this file with `std.zig.Ast` in `.zon` mode (`src/util/sources.zig`),
+so comments, line breaks and whitespace cannot change the plan. It emits every
+`include` and `exclude` per source; both workflows pass each one through as repeated
+`--include` / `--exclude` flags. Run it as `zig build plan-sources` (CI-4/CI-5).
 
 ---
 
@@ -369,10 +372,11 @@ stripped) and `exclude` is not applied yet (§14).
 
 ```
 indexer --out <index.jsonl> --source <project>=<commit>=<root> [--source …]
-        [--include <subpath> …] [--status <path>] [--previous <index.jsonl>]
+        [--include <subpath> …] [--exclude <subpath> …] [--status <path>] [--previous <index.jsonl>]
 ```
 
-Per `.zig` file under `root` (filtered by `--include` prefixes):
+Per `.zig` file under `root` (kept by an `--include` directory prefix, dropped by an
+`--exclude` pattern; a `**` segment matches zero or more path segments, CI-4):
 
 1. Read and NUL-terminate; `std.zig.Ast.parse(gpa, source, .{ .mode = .zig })`. A file
    that cannot be read, or exceeds the 64 MiB per-file ceiling, is recorded as
@@ -509,6 +513,7 @@ zig build test-protocol      # protocol layer only
 zig build test-regressions   # cross-cutting handler tests (also in `test`)
 zig build check              # advice corpus validation
 zig build workflows          # workflow trigger/expression consistency (CI-1)
+zig build plan-sources       # print the upstream plan from data/sources.zon (CI-4/CI-5)
 zig build bench              # verification report
 zig build run -- --index tests/golden/index.jsonl
 zig build -Doptimize=ReleaseSafe

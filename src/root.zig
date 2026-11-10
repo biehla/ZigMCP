@@ -22,6 +22,9 @@ test {
     _ = @import("transport/stdio.zig");
     _ = @import("util/arena_pool.zig");
     _ = @import("util/sleep.zig");
+    // `data/sources.zon` plan parsing (CI-4/CI-5); its CLI is
+    // `tools/sources_plan.zig`, run as `zig build plan-sources`.
+    _ = @import("util/sources.zig");
     _ = @import("util/text.zig");
     // The workflow trigger/expression check (CI-1); its CLI is
     // `tools/workflow_check.zig`.

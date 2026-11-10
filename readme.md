@@ -255,7 +255,8 @@ git -C upstream/zig checkout 738d2be9d6b6ef3ff3559130c05159ef53336224
 zig-out/bin/indexer \
   --out generated/index.jsonl \
   --source zig_std=738d2be9d6b6ef3ff3559130c05159ef53336224=upstream/zig \
-  --include lib/std
+  --include lib/std \
+  --exclude "lib/std/**/testdata/**"
 ```
 
 |Option|Meaning|
@@ -263,6 +264,7 @@ zig-out/bin/indexer \
 |`--out <file>`|Output index (required)|
 |`--source <project>=<commit>=<dir>`|A source tree to index; repeat for several projects (at least one)|
 |`--include <subdir>`|Only index files under this directory; repeatable|
+|`--exclude <pattern>`|Skip files under a directory or matching a `**` glob, e.g. `lib/std/**/testdata/**`; repeatable|
 |`--status <file>`|Where to write the status file (default: next to `--out`, `.jsonl` replaced by `.status.json`)|
 |`--previous <index.jsonl>`|Reuse records from an older index for every project whose commit has not changed|
 
@@ -273,7 +275,8 @@ each degraded file with its parser diagnostics. Keep it next to the index: the
 `generated/index.jsonl` is the server's default location, so `zig build run` picks
 it up without flags.
 
-The upstream projects and their pinned commits live in `data/sources.zon`.
+The upstream projects, their pinned commits and their include/exclude scope live in
+`data/sources.zon`. `zig build plan-sources` prints the plan both CI workflows use.
 
 ---
 
