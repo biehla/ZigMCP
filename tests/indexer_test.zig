@@ -162,6 +162,103 @@ test "an oversized file is recorded as degraded instead of aborting the run" {
     try std.testing.expect(std.mem.indexOf(u8, status, "\"files_degraded\":1") != null);
 }
 
+test "a truncated --previous index is not reused" {
+    // IDX-3: any single matching record marked the project "already indexed",
+    // so a partial previous artifact was republished as if it were complete.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const root = try std.fmt.allocPrint(std.testing.allocator, ".zig-cache/tmp/{s}", .{&tmp.sub_path});
+    defer std.testing.allocator.free(root);
+
+    try writeFixture(tmp.dir, "small.zig", "/// the docs\npub fn ok() void {}\n");
+
+    const hash = "18ac3e7343f016890c510e93f935261169d9e3f565436429830faf0934f4f8e4";
+    var previous: std.ArrayList(u8) = .empty;
+    defer previous.deinit(std.testing.allocator);
+    for ([_][]const u8{ "old.one", "old.two" }, 0..) |symbol, index| {
+        const line = try std.fmt.allocPrint(
+            std.testing.allocator,
+            "{{\"project\":\"p\",\"commit\":\"c\",\"path\":\"old.zig\",\"line\":{d},\"kind\":\"fn\",\"symbol\":\"{s}\",\"container\":\"\",\"doc\":\"d\",\"doc_hash\":\"{s}\"}}\n",
+            .{ index + 1, symbol, hash },
+        );
+        defer std.testing.allocator.free(line);
+        try previous.appendSlice(std.testing.allocator, line);
+    }
+    try writeFixture(tmp.dir, "previous.jsonl", previous.items);
+
+    const output = try std.fmt.allocPrint(std.testing.allocator, "{s}/index.jsonl", .{root});
+    defer std.testing.allocator.free(output);
+    const source = try std.fmt.allocPrint(std.testing.allocator, "p=c={s}", .{root});
+    defer std.testing.allocator.free(source);
+    const previous_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/previous.jsonl", .{root});
+    defer std.testing.allocator.free(previous_path);
+    const status_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/index.status.json", .{root});
+    defer std.testing.allocator.free(status_path);
+
+    // The sidecar says five records; the JSONL holds two — the run was
+    // truncated. The project must be re-indexed, not carried over.
+    try writeFixture(tmp.dir, "previous.status.json", "{\"projects\":{\"p\":{\"commit\":\"c\",\"records\":5}}}");
+
+    var child = try std.process.spawn(io, .{
+        .argv = &.{ options.indexer_exe, "--out", output, "--source", source, "--previous", previous_path },
+        .stdin = .ignore,
+        .stdout = .ignore,
+        .stderr = .ignore,
+    });
+    switch (try child.wait(io)) {
+        .exited => |code| try std.testing.expectEqual(@as(u8, 0), code),
+        else => return error.UnexpectedExit,
+    }
+
+    const produced = try std.Io.Dir.cwd().readFileAllocOptions(
+        io,
+        output,
+        std.testing.allocator,
+        .limited(16 * 1024 * 1024),
+        .of(u8),
+        null,
+    );
+    defer std.testing.allocator.free(produced);
+    try std.testing.expect(std.mem.indexOf(u8, produced, "small.ok") != null);
+    try std.testing.expect(std.mem.indexOf(u8, produced, "old.one") == null);
+
+    const status = try std.Io.Dir.cwd().readFileAllocOptions(
+        io,
+        status_path,
+        std.testing.allocator,
+        .limited(16 * 1024 * 1024),
+        .of(u8),
+        null,
+    );
+    defer std.testing.allocator.free(status);
+    try std.testing.expect(std.mem.indexOf(u8, status, "\"skipped\":false") != null);
+
+    // With a sidecar that agrees, the same project is carried over.
+    try writeFixture(tmp.dir, "previous.status.json", "{\"projects\":{\"p\":{\"commit\":\"c\",\"records\":2}}}");
+    var second = try std.process.spawn(io, .{
+        .argv = &.{ options.indexer_exe, "--out", output, "--source", source, "--previous", previous_path },
+        .stdin = .ignore,
+        .stdout = .ignore,
+        .stderr = .ignore,
+    });
+    switch (try second.wait(io)) {
+        .exited => |code| try std.testing.expectEqual(@as(u8, 0), code),
+        else => return error.UnexpectedExit,
+    }
+    const carried = try std.Io.Dir.cwd().readFileAllocOptions(
+        io,
+        output,
+        std.testing.allocator,
+        .limited(16 * 1024 * 1024),
+        .of(u8),
+        null,
+    );
+    defer std.testing.allocator.free(carried);
+    try std.testing.expect(std.mem.indexOf(u8, carried, "old.one") != null);
+    try std.testing.expect(std.mem.indexOf(u8, carried, "small.ok") == null);
+}
+
 test "a pathologically nested file is degraded instead of overflowing the stack" {
     // IDX-8: `Ast.parse` recurses once per nesting level, so 2 000 nested
     // parens killed a Debug indexer — and with it every project in the run,

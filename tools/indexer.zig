@@ -136,7 +136,7 @@ pub fn main(init: std.process.Init) !void {
             .files_total = 0,
             .degraded = .empty,
         };
-        if (previous_path != null and countPreviousFor(previous, src.project, src.commit) > 0) {
+        if (reusableFromPrevious(io, gpa, previous, previous_path, src)) {
             try carryPrevious(gpa, previous, src.project, src.commit, &records);
             st.skipped = true;
             st.previous_records = countForProject(records.items, src.project);
@@ -189,6 +189,60 @@ fn loadPrevious(io: std.Io, gpa: std.mem.Allocator, path: []const u8) ![]const R
         try out.append(gpa, parsed.value);
     }
     return out.toOwnedSlice(gpa);
+}
+
+/// Whether a project's records can be carried over from `--previous` instead of
+/// being re-indexed.
+///
+/// A matching `(project, commit)` alone is not enough: a truncated previous
+/// index still holds *some* record for that commit, and reusing it published a
+/// partial project as if it were complete (IDX-3). When the previous run left a
+/// status sidecar, its record count must equal what the JSONL actually holds.
+/// Without a sidecar there is no oracle — a release baseline ships only the
+/// JSONL — so the records are trusted as before.
+fn reusableFromPrevious(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    previous: []const Record,
+    previous_path: ?[]const u8,
+    src: Source,
+) bool {
+    const path = previous_path orelse return false;
+    const present = countPreviousFor(previous, src.project, src.commit);
+    if (present == 0) return false;
+    const expected = previousRecordCount(io, gpa, path, src.project, src.commit) orelse return true;
+    return expected == present;
+}
+
+/// The record count the previous run reported for one project, or null when
+/// there is no sidecar, it is unreadable, or it does not describe this commit.
+fn previousRecordCount(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    previous_path: []const u8,
+    project: []const u8,
+    commit: []const u8,
+) ?usize {
+    const sidecar_path = deriveStatusPath(gpa, previous_path) catch return null;
+    const bytes = std.Io.Dir.cwd().readFileAllocOptions(
+        io,
+        sidecar_path,
+        gpa,
+        .limited(16 * 1024 * 1024),
+        .of(u8),
+        null,
+    ) catch return null;
+    const parsed = std.json.parseFromSlice(std.json.Value, gpa, bytes, .{}) catch return null;
+    if (parsed.value != .object) return null;
+    const projects = parsed.value.object.get("projects") orelse return null;
+    if (projects != .object) return null;
+    const entry = projects.object.get(project) orelse return null;
+    if (entry != .object) return null;
+    const entry_commit = entry.object.get("commit") orelse return null;
+    if (entry_commit != .string or !std.mem.eql(u8, entry_commit.string, commit)) return null;
+    const records = entry.object.get("records") orelse return null;
+    if (records != .integer) return null;
+    return std.math.cast(usize, records.integer);
 }
 
 fn countPreviousFor(previous: []const Record, project: []const u8, commit: []const u8) usize {

@@ -398,7 +398,12 @@ Per `.zig` file under `root` (filtered by `--include` prefixes):
    too deeply nested), in which case `diagnostics` is empty.
 
 **Incremental:** with `--previous`, a project whose `(project, commit)` already has
-records there is skipped and those records are carried over verbatim.
+records there is skipped and those records are carried over verbatim — but only when
+the previous run's status sidecar, if there is one, reports exactly as many records
+for that commit as the JSONL holds. A truncated previous index is therefore
+re-indexed instead of being republished as complete (IDX-3). With no sidecar (a
+release baseline ships only the JSONL) there is no oracle, so the records are
+trusted as before.
 
 ### Server-side loading and hot reload (`src/docs/reload.zig`)
 
