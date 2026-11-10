@@ -1,8 +1,8 @@
 # PLAN.md — defects, edge cases, limitations, and guideline deviations
 
-Status: open backlog. Twenty-two items were fixed on 2026-11-09, thirty on
+Status: open backlog. Twenty-two items were fixed on 2026-11-09, thirty-one on
 2026-11-10, and five more were closed that day because they were already done — the
-option chosen for each, its commit and its verification are in §13–§23. Two sources: a read-through
+option chosen for each, its commit and its verification are in §13–§24. Two sources: a read-through
 of the tree on 2026-11-09, and a breakage campaign the same day that fuzzed the
 stdio surface and the indexer, profiled the hot paths, and inspected a `ReleaseSafe`
 PE with REA — method, measurements and negative results in §12.
@@ -123,12 +123,6 @@ No open items.
 
 ## 4. Indexer
 
-- **IDX-7 — error-set extraction is token-scan based.** Members are identifiers
-  between the braces, so a nested construct inside an error set would be
-  misattributed. Options: (a) keep (error sets are flat by grammar); (b) stop at the
-  first non-identifier token; (c) assert on nested tokens. Verify: a fixture with a
-  nested decl inside an error set.
-
 ---
 
 ## 5. Index loading and hot reload
@@ -203,7 +197,6 @@ must own its test, because no such layer exists yet.
 |CI-6|—|rerun the workflow; no local test|
 |CI-7|—|timing only|
 |CI-8|—|unpack a release and run it from an empty directory (CI smoke test)|
-|IDX-7|—|fixture with a nested declaration inside an error set|
 |REL-1|—|local HTTP server counting requests|
 |REL-2|—|black-hole address plus quit; timing-based|
 |REL-6|—|integration: URL index with no sidecar|
@@ -465,6 +458,17 @@ dotfile keeps its name.
 |Id|Option|Commit|Verification|
 |---|---|---|---|
 |IDX-6|(a)|`1d0a99a`|indexer unit test `modulePath keeps dotfiles distinct and rejects a parent escape`: `x.zig`/`./x.zig` → `x`, `.hidden.zig` → `.hidden`, `lib/std/mem.zig` → `lib.std.mem`, `../x.zig` and `lib/../x.zig` → `error.PathEscapesRoot`; the golden index is unchanged|
+
+## 24. Resolved on 2026-11-10, tenth chunk
+
+One indexer item, one commit (`4d33172`), resolved with option (a): error sets are
+flat by grammar, so `handleErrorSet` only ever receives a valid set. A nested
+declaration is invalid Zig; the parser recovers it and the file is degraded. The new
+test pins that no error member is invented.
+
+|Id|Option|Commit|Verification|
+|---|---|---|---|
+|IDX-7|(a) keep|`4d33172`|indexer test `a nested declaration in an error set degrades the file instead of inventing a member`: exit 0, no `kind:error` record for the nested name, `bad.zig` listed as degraded; the `if`/`struct`/`@import`/string variants were probed too (all exit 0, no records, never a misattributed member)|
 
 
 
