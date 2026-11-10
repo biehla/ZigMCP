@@ -1,8 +1,8 @@
 # PLAN.md — defects, edge cases, limitations, and guideline deviations
 
-Status: open backlog. Twenty-two items were fixed on 2026-11-09, twenty-five on
+Status: open backlog. Twenty-two items were fixed on 2026-11-09, twenty-seven on
 2026-11-10, and five more were closed that day because they were already done — the
-option chosen for each, its commit and its verification are in §13–§19. Two sources: a read-through
+option chosen for each, its commit and its verification are in §13–§20. Two sources: a read-through
 of the tree on 2026-11-09, and a breakage campaign the same day that fuzzed the
 stdio surface and the indexer, profiled the hot paths, and inspected a `ReleaseSafe`
 PE with REA — method, measurements and negative results in §12.
@@ -83,19 +83,6 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri"
 ---
 
 ## 1. CI/CD
-
-- **CI-4 — `sources.zon` scope is half-applied.** Both workflows take only the first
-  `include` and ignore `exclude`. Options: (a) parse all globs in the plan step and
-  pass repeated `--include`, adding `--exclude` to the indexer; (b) replace the regex
-  parser with a Zig tool that uses `std.zon` and emits a plan file; (c) leave the
-  scope flat and drop `exclude` from the schema. Verify: add a second include and see
-  it in the emitted records.
-
-- **CI-5 — duplicated `sources.zon` parser.** `bump-master.yml` and `index.yml` each
-  carry their own regex block, and both break on formatting changes. Options: (a) one
-  `tools/sources_plan.zig` (or `.py`) invoked by both; (b) a `zig build plan-sources`
-  step; (c) a committed generated plan file refreshed by the bump job. Verify: run
-  both workflows after reformatting `sources.zon`.
 
 - **CI-6 — bump rerun collides with its own branch.** The branch name is
   `bump/upstream-<date>`; a second run the same day fails `git checkout -b` or the
@@ -236,8 +223,6 @@ must own its test, because no such layer exists yet.
 
 |Id|Regression test|If not: what must own it|
 |---|---|---|
-|CI-4|—|indexer CLI harness, once `--exclude` exists|
-|CI-5|—|structural; testable only after the shared plan tool lands|
 |CI-6|—|rerun the workflow; no local test|
 |CI-7|—|timing only|
 |CI-8|—|unpack a release and run it from an empty directory (CI smoke test)|
@@ -467,6 +452,17 @@ so they landed together, with a test per copy.
 |DOC-2|(a) one snippet in a file both read|`891a0a3`|`DOC-2: the readme embeds client-config.json verbatim` (unit test); `release.yml` cats the same file into the release body|
 |DOC-3|(a) this file is canonical|`891a0a3`|covered by GUIDE-8's test; §14 and the readme's Known limitations are pointers|
 |GUIDE-8|(a) this file is canonical and the others link to it|`891a0a3`|`GUIDE-8: the limitation lists live only in PLAN.md` (unit test): neither section restates the backlog|
+
+## 20. Resolved on 2026-11-10, sixth chunk
+
+Two CI items, one commit (`c4994bc`): the workflow-local copies of the
+`data/sources.zon` parser are gone, replaced by one parser over the ZON AST, and
+the indexer finally honours the `exclude` scope it was given.
+
+|Id|Option|Commit|Verification|
+|---|---|---|---|
+|CI-4|(a)+(b)|`c4994bc`|indexer test `an --exclude pattern removes matching files from the index` (bare prefix vs `**`, one run per form); CLI check: the fixture's two `lib/std/nested/container.zig` records vanish under `--exclude lib/std/nested` and no other record changes|
+|CI-5|(a)+(b)|`c4994bc`|`src/util/sources.zig` unit test parses a reformatted, one-line, no-scope ZON file and gets every include and exclude; `zig build plan-sources` prints both real sources; `zig build test`, `check`, `workflows`, `zig fmt` and actionlint 1.7.7 pass|
 
 
 
