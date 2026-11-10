@@ -1,8 +1,8 @@
 # PLAN.md — defects, edge cases, limitations, and guideline deviations
 
-Status: open backlog. Twenty-two items were fixed on 2026-11-09, twenty-nine on
+Status: open backlog. Twenty-two items were fixed on 2026-11-09, thirty on
 2026-11-10, and five more were closed that day because they were already done — the
-option chosen for each, its commit and its verification are in §13–§22. Two sources: a read-through
+option chosen for each, its commit and its verification are in §13–§23. Two sources: a read-through
 of the tree on 2026-11-09, and a breakage campaign the same day that fuzzed the
 stdio surface and the indexer, profiled the hot paths, and inspected a `ReleaseSafe`
 PE with REA — method, measurements and negative results in §12.
@@ -123,11 +123,6 @@ No open items.
 
 ## 4. Indexer
 
-- **IDX-6 — `modulePath` mangles paths above the root.** `../x.zig` becomes `x.zig`
-  after leading-dot stripping, so two files can share a symbol. Options: (a) reject
-  paths containing `..`; (b) prefix the project key; (c) keep. Verify: index a tree
-  with a `../` relative entry.
-
 - **IDX-7 — error-set extraction is token-scan based.** Members are identifiers
   between the braces, so a nested construct inside an error set would be
   misattributed. Options: (a) keep (error sets are flat by grammar); (b) stop at the
@@ -208,7 +203,6 @@ must own its test, because no such layer exists yet.
 |CI-6|—|rerun the workflow; no local test|
 |CI-7|—|timing only|
 |CI-8|—|unpack a release and run it from an empty directory (CI smoke test)|
-|IDX-6|—|`modulePath` is private; export it for a unit test|
 |IDX-7|—|fixture with a nested declaration inside an error set|
 |REL-1|—|local HTTP server counting requests|
 |REL-2|—|black-hole address plus quit; timing-based|
@@ -461,6 +455,16 @@ longer turns `doc` into a byte array that the loader rejects.
 |Id|Option|Commit|Verification|
 |---|---|---|---|
 |IDX-5|(a)|`feba2d2`|indexer test `invalid UTF-8 in a doc comment is replaced, not emitted as a byte array`: a temp file with 0xFF; the output is valid UTF-8, `doc` is a string with U+FFFD, and `doc_hash` is the SHA-256 of the sanitized text|
+
+## 23. Resolved on 2026-11-10, ninth chunk
+
+One indexer item, one commit (`1d0a99a`): `modulePath` no longer strips every
+leading dot, so a parent path cannot collapse onto a sibling's symbol and a
+dotfile keeps its name.
+
+|Id|Option|Commit|Verification|
+|---|---|---|---|
+|IDX-6|(a)|`1d0a99a`|indexer unit test `modulePath keeps dotfiles distinct and rejects a parent escape`: `x.zig`/`./x.zig` → `x`, `.hidden.zig` → `.hidden`, `lib/std/mem.zig` → `lib.std.mem`, `../x.zig` and `lib/../x.zig` → `error.PathEscapesRoot`; the golden index is unchanged|
 
 
 
