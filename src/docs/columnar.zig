@@ -142,6 +142,32 @@ pub const Builder = struct {
         try self.lines.append(self.gpa, record.line);
     }
 
+    /// The record most recently appended, read back from the columnar storage.
+    ///
+    /// The loader uses it to check canonical record order without keeping a
+    /// separate copy of the previous record's strings (REL-10).
+    pub fn last(self: *const Builder) ?Record {
+        if (self.kinds.items.len == 0) return null;
+        const index = self.kinds.items.len - 1;
+        const text = struct {
+            fn at(strings: []const u8, spans: []const Span, i: usize) []const u8 {
+                const span = spans[i];
+                return strings[span.offset..][0..span.len];
+            }
+        }.at;
+        return .{
+            .project = text(self.strings.items, self.project.items, index),
+            .commit = text(self.strings.items, self.commit.items, index),
+            .path = text(self.strings.items, self.path.items, index),
+            .line = self.lines.items[index],
+            .kind = self.kinds.items[index],
+            .symbol = text(self.strings.items, self.symbol.items, index),
+            .container = text(self.strings.items, self.container.items, index),
+            .doc = text(self.strings.items, self.doc.items, index),
+            .doc_hash = text(self.strings.items, self.doc_hash.items, index),
+        };
+    }
+
     pub fn finish(self: *Builder) !Columnar {
         return .{
             .strings = try self.strings.toOwnedSlice(self.gpa),

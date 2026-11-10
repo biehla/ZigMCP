@@ -337,8 +337,9 @@ counting.
 |`doc_hash`|Lowercase hex SHA-256 of `doc`; recomputed and compared at load, so a mismatch rejects the artifact (REL-9)|
 
 Key order is fixed. Records are sorted by `(project, symbol)`, ties by `(path, line)`.
-The loader rejects the **whole** artifact if any non-blank line is malformed, or if a
-record's `doc_hash` is not the SHA-256 of its `doc`.
+The loader rejects the **whole** artifact if any non-blank line is malformed, if a
+record's `doc_hash` is not the SHA-256 of its `doc`, or if the records are not in that
+order (REL-10).
 
 ### Upstream sources (`data/sources.zon`)
 

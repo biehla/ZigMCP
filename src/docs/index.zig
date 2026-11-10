@@ -45,8 +45,13 @@ pub const LoadError = error{
 /// partially valid artifact can never become the active index.
 pub fn load(parent_gpa: std.mem.Allocator, bytes: []const u8) !Index {
     const arena = try parent_gpa.create(std.heap.ArenaAllocator);
-    errdefer parent_gpa.destroy(arena);
     arena.* = std.heap.ArenaAllocator.init(parent_gpa);
+    // A rejected artifact must free the pages the builder already allocated:
+    // destroying the `ArenaAllocator` struct alone leaks them.
+    errdefer {
+        arena.deinit();
+        parent_gpa.destroy(arena);
+    }
     const agpa = arena.allocator();
 
     var builder = columnar.Builder.init(agpa);
@@ -66,6 +71,12 @@ pub fn load(parent_gpa: std.mem.Allocator, bytes: []const u8) !Index {
         };
         const record = extractRecord(parsed.value) catch return error.MalformedRecord;
         try verifyDocHash(record);
+        // Canonical order is part of the artifact contract (AGENTS.md §7): an
+        // out-of-order artifact changes `docs://{project}/index`, the tie order
+        // in search and which duplicate `doc_get` returns (REL-10).
+        if (builder.last()) |previous| {
+            if (keyOrder(previous, record) == .gt) return error.MalformedRecord;
+        }
         try builder.append(record);
     }
 
@@ -161,6 +172,27 @@ fn optionalString(object: std.json.ObjectMap, key: []const u8) ![]const u8 {
     return value.string;
 }
 
+/// The canonical record order of AGENTS.md §7: `(project, symbol)`, ties by
+/// `(path, line)`.
+fn keyOrder(a: Record, b: Record) std.math.Order {
+    switch (std.mem.order(u8, a.project, b.project)) {
+        .lt => return .lt,
+        .gt => return .gt,
+        .eq => {},
+    }
+    switch (std.mem.order(u8, a.symbol, b.symbol)) {
+        .lt => return .lt,
+        .gt => return .gt,
+        .eq => {},
+    }
+    switch (std.mem.order(u8, a.path, b.path)) {
+        .lt => return .lt,
+        .gt => return .gt,
+        .eq => {},
+    }
+    return std.math.order(a.line, b.line);
+}
+
 /// Recomputes the record's `doc_hash`, which must be the lowercase-hex SHA-256
 /// of `doc`.
 ///
@@ -251,6 +283,26 @@ test "a record whose hash does not match its doc is rejected" {
         \\{"project":"p","commit":"c","path":"a.zig","line":1,"kind":"fn","symbol":"s","doc":"d","doc_hash":"h"}
     ;
     try std.testing.expectError(error.MalformedRecord, load(std.testing.allocator, short));
+}
+
+test "an artifact out of canonical order is rejected" {
+    // REL-10: the loader accepted any order, so a reordered artifact silently
+    // changed `docs://{project}/index`, the tie order in search and which
+    // duplicate `doc_get` returned.
+    const reversed =
+        \\{"project":"p","commit":"c","path":"a.zig","line":2,"kind":"fn","symbol":"b","doc":"d","doc_hash":"18ac3e7343f016890c510e93f935261169d9e3f565436429830faf0934f4f8e4"}
+        \\{"project":"p","commit":"c","path":"a.zig","line":1,"kind":"fn","symbol":"a","doc":"d","doc_hash":"18ac3e7343f016890c510e93f935261169d9e3f565436429830faf0934f4f8e4"}
+    ;
+    try std.testing.expectError(error.MalformedRecord, load(std.testing.allocator, reversed));
+
+    // The canonical order still loads.
+    const ordered =
+        \\{"project":"p","commit":"c","path":"a.zig","line":1,"kind":"fn","symbol":"a","doc":"d","doc_hash":"18ac3e7343f016890c510e93f935261169d9e3f565436429830faf0934f4f8e4"}
+        \\{"project":"p","commit":"c","path":"a.zig","line":2,"kind":"fn","symbol":"b","doc":"d","doc_hash":"18ac3e7343f016890c510e93f935261169d9e3f565436429830faf0934f4f8e4"}
+    ;
+    var index = try load(std.testing.allocator, ordered);
+    defer index.deinit();
+    try std.testing.expectEqual(@as(usize, 2), index.count());
 }
 
 test "a missing index keeps its own error" {
