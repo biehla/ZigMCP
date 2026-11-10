@@ -393,7 +393,7 @@ them, so a schema change is one edit and all three targets recompile.
 |`kind`|`fn` / `var` / `field` / `container` / `error` / `param`|
 |`symbol`|Syntactic container path; module path is the file path with `/` → `.` and `.zig` stripped, and a `..` component is rejected (IDX-6)|
 |`container`|Enclosing symbol (`""` for a module's `//!` record)|
-|`doc`|`///` or `//!` stripped (the space after it is kept), lines joined with `\n`; an invalid UTF-8 byte becomes U+FFFD before hashing (IDX-5). A declaration with no `///` run falls back to its `//` run (§8). Comment text only: no signature, body or type is stored|
+|`doc`|`///` or `//!` stripped (the space after it is kept), lines joined with `\n`; an invalid UTF-8 byte becomes U+FFFD before hashing (IDX-5). A declaration with no `///` run falls back to its `//` run (§8). Comment text only: no signature, body or type is stored. No field records which of the three produced the text, so a plain `//` run is indistinguishable from a `///` comment in the output: a record is the declaration's comment text, never that project's public contract for it|
 |`doc_hash`|Lowercase hex SHA-256 of `doc`; recomputed and compared at load, so a mismatch rejects the artifact (REL-9)|
 
 Key order is fixed. Records are sorted by `(project, symbol)`, ties by `(path, line)`.

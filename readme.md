@@ -201,6 +201,12 @@ comment run ending on the line directly above it. A doc comment always wins when
 are present, a blank line breaks a `//` run, and a file's `//!` module record still
 requires `//!` — a leading `//` block is usually a license header.
 
+A record does not say which of those three produced its text: `///`, `//!` and a plain
+`//` run all arrive as `doc`. A `//` run is often a note to the next reader of that file
+rather than published API documentation, so a record is the comment a declaration
+carries, not that project's public contract for it. Quote it as what the index found and
+treat the declaration at `path:line` as the authority.
+
 The indexer reads the source without compiling it, so a project that does not build on
 Zig 0.17.1 — or a file with a syntax error — still contributes every doc comment or
 plain comment run that could be parsed. Such files are listed as degraded in the status
@@ -222,6 +228,10 @@ finds more.
 Only documented declarations are indexed, under the rules above, so an undocumented
 `pub fn` is absent rather than misspelled. An array type can be indexed by its container
 doc while its methods are not.
+
+That separates the two kinds of miss: an empty `candidates` list matched nothing
+resembling the spelling, while a list of symbols is usually the same declaration under
+its path-qualified name.
 
 ### Building one yourself
 
