@@ -239,10 +239,9 @@ include/exclude scope live in `data/sources.zon`; `zig build plan-sources` print
 plan both CI workflows use.
 
 The project key is the field name in `data/sources.zon` (`zig_std`, `mcp_zig`), and
-the tool arguments accept it as written. To index several projects, run the indexer
-once per project and concatenate the files with the project keys in ascending order —
-each per-project file is already sorted, so the concatenation is sorted too. The
-server loads one file, so a project missing from it is a project the tools cannot see.
+the tool arguments accept it as written. One indexer run takes several `--source`
+flags and sorts the merged output itself, so list every project in the same run: the
+server loads one file, and a project missing from it is a project the tools cannot see.
 
 ### How updates land
 
