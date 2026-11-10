@@ -87,6 +87,9 @@ pub fn adviceLookup(ctx: *Context, args: std.json.Value) ToolError!ToolOutcome {
     const concept = registry.getString(args, "concept");
     const question = registry.getString(args, "question");
     if (concept == null and question == null) return error.InvalidParams;
+    // Two mutually exclusive selectors are never resolved silently (PROTO-6):
+    // the caller asked for two different answers.
+    if (concept != null and question != null) return error.InvalidParams;
 
     var matches: std.json.Array = .init(gpa);
     var text: std.ArrayList(u8) = .empty;
