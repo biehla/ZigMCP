@@ -200,10 +200,13 @@ item), `structuredContent` matching the output schema, and `isError`.
 |`advice_lookup`|`concept` (e.g. `P03`) **or** `question` (free text); at least one|`{query, matches[]}` — full pattern records|Question mode: token overlap over name, controls, facts, candidate uses; top 5|
 |`recommend_approach`|`signals: string[]` (non-empty), optional `constraints: object` (opaque)|`{signals, matches[{rule_id, condition, consider[], and_only_if?, evidence, score}]}`|A rule matches on ≥2 shared tokens, or 1 token covering ≥50% of its condition|
 |`doc_search`|`query`, optional `project`, optional `limit` (default 20, max 100; ≤0 → 20)|`{query, count, results[{project, commit, path, line, kind, symbol, container, doc}]}`|Score: exact symbol 100 / symbol substring 60 / token-in-symbol 40, +25 path, +10 doc substring or +5 token-in-doc; ties by symbol, path, line|
-|`doc_get`|`project`, `symbol` (case-insensitive)|`{project, commit, path, line, kind, symbol, container, doc, doc_hash}`|Exact match only|
+|`doc_get`|`project`, `symbol` (case-insensitive)|`{found, project?, commit?, path?, line?, kind?, symbol?, container?, doc?, doc_hash?}`|Exact match only; `found` is always present so a miss is still schema-shaped|
 |`doc_import_status`|`{}`|`{index_path?, index_records, projects[{project, commit, records, files_total?, files_degraded?, degraded?}]}`|Degraded counts come from the `.status.json` sidecar next to a **local** index|
 
-"Nothing matched" is a **normal result with `isError: true`** and an explanation.
+"Nothing matched" is a **normal result with `isError: true`**, an explanation, and
+`structuredContent` shaped like the tool's `outputSchema` (empty `matches`/`results`,
+or `found: false`) — a typed client must be able to tell "no result" from a malformed
+response (PROTO-12).
 Unknown tool or arguments that violate the schema (missing required, unknown member,
 wrong type) are `-32602`.
 
@@ -212,7 +215,7 @@ wrong type) are `-32602`.
 |URI|Cache|Content|
 |---|---|---|
 |`advice://overview`|advice|Version, research date, one line per pattern with label|
-|`advice://patterns`|advice|Listed as an index entry (see note)|
+|`advice://patterns`|advice|All 12 patterns in one document|
 |`advice://patterns/P01` … `P12`|advice|One full pattern, listed literally (12 fixed ids)|
 |`advice://rules`|advice|R01–R12, all GUIDANCE|
 |`advice://guarantees`|advice|Guarantees with labels, guidance, sources|
@@ -222,8 +225,7 @@ wrong type) are `-32602`.
 |`docs://{project}/symbols/{symbol}`|index|One record; exposed as a **resource template** (unbounded space)|
 
 `resources/list` itself carries the **index** cache hint because its contents depend
-on the loaded index. Note: `advice://patterns` (no id) is listed but `resources/read`
-on it returns `-32602` — see §14.
+on the loaded index. Every listed resource is readable (PROTO-1).
 
 ### Prompts (sorted by name; one required argument each)
 
@@ -643,7 +645,6 @@ summary below is the part that changes how you work in this tree.
   baselines expect.
 - `data/sources.zon` scope: only the first `include` is used by CI; `exclude` is
   ignored.
-- `advice://patterns` (no id) is listed by `resources/list` but unreadable (`-32602`).
 - `doc_import_status` has no "freshness vs upstream master" field; degraded counts are
   available only for a local index with a sidecar.
 - No `docs://` pagination, no coverage-guided fuzzing, no optional `-femit-docs`
