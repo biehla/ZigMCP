@@ -173,6 +173,7 @@ server would put upstream-parse failure modes on the request path.
 |`data/advice/`|`patterns.zon` (P01–P12), `rules.zon` (R01–R12), `guarantees.zon`, `limits.zon` (+ evidence legend), `sources.zon` (S01–S24)|
 |`data/sources.zon`|Upstream projects: url, hash, branch, commit, scope (the pin home, D6)|
 |`tools/indexer.zig`|Upstream tree → JSONL + `.status.json` sidecar|
+|`tools/line_table.zig`|Per-file line-start table, binary-searched for record line numbers (IDX-9)|
 |`tools/sources_plan.zig`|`data/sources.zon` → one plan line per source for both workflows (`zig build plan-sources`, CI-4/CI-5)|
 |`tools/advice_check.zig`|Corpus validator (`zig build check`)|
 |`tools/workflow_check.zig`|CLI for the workflow check (`zig build workflows`)|
@@ -464,7 +465,7 @@ runs the cross-cutting handler tests on their own (below).
 
 |Layer|Where|
 |---|---|
-|Unit|`test` blocks in `src/**` via `src/root.zig`|
+|Unit|`test` blocks in `src/**` via `src/root.zig`, plus `tools/line_table.zig`'s own test target|
 |Property (deterministic generators, not coverage-guided fuzzing)|`meta.zig` (random `_meta`), `index.zig` (mutated/truncated/invalid-UTF-8 JSONL loads whole or is rejected), `search.zig` (pathological queries never exceed the limit)|
 |Integration|`reload.zig` — a reader takes snapshots while the writer swaps; a torn read would mix versions|
 |Golden|`tests/indexer_test.zig` — indexer output over the fixture tree must equal `tests/golden/index.jsonl` **byte for byte**|

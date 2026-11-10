@@ -4,6 +4,7 @@ const std = @import("std");
 const Ast = std.zig.Ast;
 const Node = Ast.Node;
 const TokenIndex = Ast.TokenIndex;
+const LineTable = @import("line_table.zig").LineTable;
 
 const Record = struct {
     project: []const u8,
@@ -512,6 +513,7 @@ fn indexFile(gpa: std.mem.Allocator, project: []const u8, commit: []const u8, re
 
     var tree = try Ast.parse(gpa, source_z, .{ .mode = .zig });
     defer tree.deinit(gpa);
+    const line_table = try LineTable.init(gpa, source_z);
 
     // Collect unattached doc runs (by first token of run).
     var unattached = std.AutoHashMap(TokenIndex, void).init(gpa);
@@ -532,9 +534,7 @@ fn indexFile(gpa: std.mem.Allocator, project: []const u8, commit: []const u8, re
         for (tree.errors) |err| {
             var tok = err.token;
             if (err.token_is_prev and tok > 0) tok -= 1;
-            const off = tree.tokenStart(tok);
-            const loc = std.zig.findLineColumn(source_z, off);
-            try diags.append(gpa, .{ .tag = @tagName(err.tag), .line = @intCast(loc.line + 1) });
+            try diags.append(gpa, .{ .tag = @tagName(err.tag), .line = line_table.lineOf(tree.tokenStart(tok)) });
         }
         try st.degraded.append(gpa, .{ .path = rel, .diagnostics = try diags.toOwnedSlice(gpa) });
     }
@@ -563,7 +563,7 @@ fn indexFile(gpa: std.mem.Allocator, project: []const u8, commit: []const u8, re
     }
 
     const mod_path = try modulePath(gpa, rel);
-    try walkDecls(gpa, &tree, tree.rootDecls(), mod_path, project, commit, rel, records, unattached);
+    try walkDecls(gpa, &tree, &line_table, tree.rootDecls(), mod_path, project, commit, rel, records, unattached);
 }
 
 fn stripPrefix3(slice: []const u8, prefix: []const u8) []const u8 {
@@ -598,10 +598,8 @@ fn hashDoc(gpa: std.mem.Allocator, doc: []const u8) ![]const u8 {
     return gpa.dupe(u8, &hex);
 }
 
-fn tokenLine(tree: *Ast, tok: TokenIndex) u32 {
-    const off = tree.tokenStart(tok);
-    const loc = std.zig.findLineColumn(tree.source, off);
-    return @intCast(loc.line + 1);
+fn tokenLine(tree: *Ast, line_table: *const LineTable, tok: TokenIndex) u32 {
+    return line_table.lineOf(tree.tokenStart(tok));
 }
 
 fn collectDoc(gpa: std.mem.Allocator, tree: *Ast, first_tok: TokenIndex, unattached: *const std.AutoHashMap(TokenIndex, void)) !?[]const u8 {
@@ -639,18 +637,18 @@ fn trimSuffixDot(s: []const u8) []const u8 {
     return s;
 }
 
-fn walkDecls(gpa: std.mem.Allocator, tree: *Ast, decls: []const Node.Index, prefix: []const u8, project: []const u8, commit: []const u8, rel: []const u8, records: *std.ArrayList(Record), unattached: std.AutoHashMap(TokenIndex, void)) anyerror!void {
+fn walkDecls(gpa: std.mem.Allocator, tree: *Ast, line_table: *const LineTable, decls: []const Node.Index, prefix: []const u8, project: []const u8, commit: []const u8, rel: []const u8, records: *std.ArrayList(Record), unattached: std.AutoHashMap(TokenIndex, void)) anyerror!void {
     for (decls) |decl| {
         const tag = tree.nodeTag(decl);
         switch (tag) {
             .fn_decl, .fn_proto, .fn_proto_one, .fn_proto_multi, .fn_proto_simple => {
-                try handleFn(gpa, tree, decl, prefix, project, commit, rel, records, unattached);
+                try handleFn(gpa, tree, line_table, decl, prefix, project, commit, rel, records, unattached);
             },
             .global_var_decl, .local_var_decl, .simple_var_decl, .aligned_var_decl => {
-                try handleVar(gpa, tree, decl, prefix, project, commit, rel, records, unattached);
+                try handleVar(gpa, tree, line_table, decl, prefix, project, commit, rel, records, unattached);
             },
             .container_field_init, .container_field, .container_field_align => {
-                try handleField(gpa, tree, decl, prefix, project, commit, rel, records, unattached);
+                try handleField(gpa, tree, line_table, decl, prefix, project, commit, rel, records, unattached);
             },
             else => {
                 // Unknown / non-declaration node: skip silently (degrade, never fail the file).
@@ -659,7 +657,7 @@ fn walkDecls(gpa: std.mem.Allocator, tree: *Ast, decls: []const Node.Index, pref
     }
 }
 
-fn handleFn(gpa: std.mem.Allocator, tree: *Ast, decl: Node.Index, prefix: []const u8, project: []const u8, commit: []const u8, rel: []const u8, records: *std.ArrayList(Record), unattached: std.AutoHashMap(TokenIndex, void)) anyerror!void {
+fn handleFn(gpa: std.mem.Allocator, tree: *Ast, line_table: *const LineTable, decl: Node.Index, prefix: []const u8, project: []const u8, commit: []const u8, rel: []const u8, records: *std.ArrayList(Record), unattached: std.AutoHashMap(TokenIndex, void)) anyerror!void {
     var buf1: [1]Node.Index = undefined;
     const proto = tree.fullFnProto(&buf1, decl) orelse return;
     const first = tree.firstToken(decl);
@@ -674,7 +672,7 @@ fn handleFn(gpa: std.mem.Allocator, tree: *Ast, decl: Node.Index, prefix: []cons
                 .project = project,
                 .commit = commit,
                 .path = rel,
-                .line = tokenLine(tree, first),
+                .line = tokenLine(tree, line_table, first),
                 .kind = "fn",
                 .symbol = sym,
                 .container = trimSuffixDot(prefix),
@@ -703,7 +701,7 @@ fn handleFn(gpa: std.mem.Allocator, tree: *Ast, decl: Node.Index, prefix: []cons
                 .project = project,
                 .commit = commit,
                 .path = rel,
-                .line = tokenLine(tree, nt),
+                .line = tokenLine(tree, line_table, nt),
                 .kind = "param",
                 .symbol = sym,
                 .container = fsym,
@@ -714,7 +712,7 @@ fn handleFn(gpa: std.mem.Allocator, tree: *Ast, decl: Node.Index, prefix: []cons
     }
 }
 
-fn handleVar(gpa: std.mem.Allocator, tree: *Ast, decl: Node.Index, prefix: []const u8, project: []const u8, commit: []const u8, rel: []const u8, records: *std.ArrayList(Record), unattached: std.AutoHashMap(TokenIndex, void)) anyerror!void {
+fn handleVar(gpa: std.mem.Allocator, tree: *Ast, line_table: *const LineTable, decl: Node.Index, prefix: []const u8, project: []const u8, commit: []const u8, rel: []const u8, records: *std.ArrayList(Record), unattached: std.AutoHashMap(TokenIndex, void)) anyerror!void {
     const vd = tree.fullVarDecl(decl) orelse return;
     const name_tok = vd.ast.mut_token + 1;
     if (name_tok >= tree.tokens.items(.tag).len) return;
@@ -728,7 +726,7 @@ fn handleVar(gpa: std.mem.Allocator, tree: *Ast, decl: Node.Index, prefix: []con
             .project = project,
             .commit = commit,
             .path = rel,
-            .line = tokenLine(tree, first),
+            .line = tokenLine(tree, line_table, first),
             .kind = "var",
             .symbol = sym,
             .container = trimSuffixDot(prefix),
@@ -740,7 +738,7 @@ fn handleVar(gpa: std.mem.Allocator, tree: *Ast, decl: Node.Index, prefix: []con
     const init = vd.ast.init_node.unwrap() orelse return;
     const init_tag = tree.nodeTag(init);
     if (init_tag == .error_set_decl) {
-        try handleErrorSet(gpa, tree, init, prefix, sym, project, commit, rel, records, unattached);
+        try handleErrorSet(gpa, tree, line_table, init, prefix, sym, project, commit, rel, records, unattached);
         return;
     }
     // Container initializer -> recurse.
@@ -750,11 +748,11 @@ fn handleVar(gpa: std.mem.Allocator, tree: *Ast, decl: Node.Index, prefix: []con
         var np = try gpa.alloc(u8, new_prefix.len + 1);
         @memcpy(np[0..new_prefix.len], new_prefix);
         np[new_prefix.len] = '.';
-        try walkDecls(gpa, tree, cd.ast.members, np, project, commit, rel, records, unattached);
+        try walkDecls(gpa, tree, line_table, cd.ast.members, np, project, commit, rel, records, unattached);
     }
 }
 
-fn handleErrorSet(gpa: std.mem.Allocator, tree: *Ast, node: Node.Index, prefix: []const u8, outer_sym: []const u8, project: []const u8, commit: []const u8, rel: []const u8, records: *std.ArrayList(Record), unattached: std.AutoHashMap(TokenIndex, void)) anyerror!void {
+fn handleErrorSet(gpa: std.mem.Allocator, tree: *Ast, line_table: *const LineTable, node: Node.Index, prefix: []const u8, outer_sym: []const u8, project: []const u8, commit: []const u8, rel: []const u8, records: *std.ArrayList(Record), unattached: std.AutoHashMap(TokenIndex, void)) anyerror!void {
     _ = prefix;
     const lbrace, const rbrace = tree.nodeData(node).token_and_token;
     const toks = tree.tokens.items(.tag);
@@ -778,7 +776,7 @@ fn handleErrorSet(gpa: std.mem.Allocator, tree: *Ast, node: Node.Index, prefix: 
             .project = project,
             .commit = commit,
             .path = rel,
-            .line = tokenLine(tree, i),
+            .line = tokenLine(tree, line_table, i),
             .kind = "error",
             .symbol = sym,
             .container = outer_sym,
@@ -788,7 +786,7 @@ fn handleErrorSet(gpa: std.mem.Allocator, tree: *Ast, node: Node.Index, prefix: 
     }
 }
 
-fn handleField(gpa: std.mem.Allocator, tree: *Ast, decl: Node.Index, prefix: []const u8, project: []const u8, commit: []const u8, rel: []const u8, records: *std.ArrayList(Record), unattached: std.AutoHashMap(TokenIndex, void)) anyerror!void {
+fn handleField(gpa: std.mem.Allocator, tree: *Ast, line_table: *const LineTable, decl: Node.Index, prefix: []const u8, project: []const u8, commit: []const u8, rel: []const u8, records: *std.ArrayList(Record), unattached: std.AutoHashMap(TokenIndex, void)) anyerror!void {
     const cf = tree.fullContainerField(decl) orelse return;
     const name_tok = cf.ast.main_token;
     if (tree.tokenTag(name_tok) != .identifier) return;
@@ -800,7 +798,7 @@ fn handleField(gpa: std.mem.Allocator, tree: *Ast, decl: Node.Index, prefix: []c
             .project = project,
             .commit = commit,
             .path = rel,
-            .line = tokenLine(tree, first),
+            .line = tokenLine(tree, line_table, first),
             .kind = "field",
             .symbol = sym,
             .container = trimSuffixDot(prefix),
@@ -815,6 +813,6 @@ fn handleField(gpa: std.mem.Allocator, tree: *Ast, decl: Node.Index, prefix: []c
         var np = try gpa.alloc(u8, sym.len + 1);
         @memcpy(np[0..sym.len], sym);
         np[sym.len] = '.';
-        try walkDecls(gpa, tree, cd.ast.members, np, project, commit, rel, records, unattached);
+        try walkDecls(gpa, tree, line_table, cd.ast.members, np, project, commit, rel, records, unattached);
     }
 }
