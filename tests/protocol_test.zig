@@ -353,6 +353,48 @@ test "advice_lookup returns the record with its evidence label" {
     try std.testing.expect(record.get("sources").?.array.items.len > 0);
 }
 
+test "a tool with no match still answers with structuredContent" {
+    const harness = try Harness.start();
+    defer {
+        harness.kill();
+        harness.release();
+        std.testing.allocator.destroy(harness);
+    }
+
+    // PROTO-12: these tools declare an output schema, so "nothing matched" has
+    // to be shaped like one — a typed client cannot otherwise tell an empty
+    // result from a malformed response.
+    try harness.send(
+        "{\"jsonrpc\":\"2.0\",\"id\":12,\"method\":\"tools/call\",\"params\":{\"name\":\"doc_search\",\"arguments\":{\"query\":\"zzzznotpresent\"}}}",
+    );
+    const search = try harness.receive();
+    defer search.deinit();
+    const search_result = search.value.object.get("result").?.object;
+    try std.testing.expect(search_result.get("isError").?.bool);
+    const search_structured = search_result.get("structuredContent").?.object;
+    try std.testing.expectEqual(@as(i64, 0), search_structured.get("count").?.integer);
+    try std.testing.expectEqual(@as(usize, 0), search_structured.get("results").?.array.items.len);
+
+    try harness.send(
+        "{\"jsonrpc\":\"2.0\",\"id\":13,\"method\":\"tools/call\",\"params\":{\"name\":\"doc_get\",\"arguments\":{\"project\":\"zig_std\",\"symbol\":\"no.such.symbol\"}}}",
+    );
+    const get = try harness.receive();
+    defer get.deinit();
+    const get_result = get.value.object.get("result").?.object;
+    try std.testing.expect(get_result.get("isError").?.bool);
+    const get_structured = get_result.get("structuredContent").?.object;
+    try std.testing.expect(!get_structured.get("found").?.bool);
+    try std.testing.expectEqualStrings("zig_std", get_structured.get("project").?.string);
+
+    try harness.send(
+        "{\"jsonrpc\":\"2.0\",\"id\":14,\"method\":\"tools/call\",\"params\":{\"name\":\"advice_lookup\",\"arguments\":{\"question\":\"zzzznotpresent\"}}}",
+    );
+    const advice = try harness.receive();
+    defer advice.deinit();
+    const advice_structured = advice.value.object.get("result").?.object.get("structuredContent").?.object;
+    try std.testing.expectEqual(@as(usize, 0), advice_structured.get("matches").?.array.items.len);
+}
+
 test "a missing resource is invalid params with the uri" {
     const harness = try Harness.start();
     defer {

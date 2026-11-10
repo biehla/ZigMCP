@@ -54,17 +54,23 @@ pub const doc_get_input = registry.Schema{ .fields = &.{
     .{ .name = "symbol", .kind = .string, .description = "Fully qualified symbol path, e.g. mem.copyForwards." },
 } };
 
-pub const doc_get_output = registry.Schema{ .fields = &.{
-    .{ .name = "project", .kind = .string },
-    .{ .name = "commit", .kind = .string },
-    .{ .name = "path", .kind = .string },
-    .{ .name = "line", .kind = .integer },
-    .{ .name = "kind", .kind = .string },
-    .{ .name = "symbol", .kind = .string },
-    .{ .name = "container", .kind = .string },
-    .{ .name = "doc", .kind = .string },
-    .{ .name = "doc_hash", .kind = .string },
-} };
+pub const doc_get_output = registry.Schema{
+    .fields = &.{
+        // `found` is the only always-present member: a "no such symbol" result is
+        // still shaped like this schema (PROTO-12), so the record fields are
+        // optional and `found` carries the answer.
+        .{ .name = "found", .kind = .boolean, .description = "True when the symbol is present in the index." },
+        .{ .name = "project", .kind = .string, .required = false },
+        .{ .name = "commit", .kind = .string, .required = false },
+        .{ .name = "path", .kind = .string, .required = false },
+        .{ .name = "line", .kind = .integer, .required = false },
+        .{ .name = "kind", .kind = .string, .required = false },
+        .{ .name = "symbol", .kind = .string, .required = false },
+        .{ .name = "container", .kind = .string, .required = false },
+        .{ .name = "doc", .kind = .string, .required = false },
+        .{ .name = "doc_hash", .kind = .string, .required = false },
+    },
+};
 
 pub const doc_import_status_input = registry.Schema{ .fields = &.{} };
 
@@ -74,9 +80,23 @@ pub const doc_import_status_output = registry.Schema{ .fields = &.{
     .{ .name = "projects", .kind = .array },
 } };
 
-fn toolFailure(gpa: std.mem.Allocator, message: []const u8) ToolError!ToolOutcome {
+/// A tool-level "no result": the call succeeded, the answer is "nothing
+/// matched".
+///
+/// It still carries `structuredContent` shaped like the tool's output schema,
+/// because a typed client cannot tell an empty result from a malformed one
+/// otherwise (PROTO-12).
+fn toolFailure(gpa: std.mem.Allocator, message: []const u8, structured: std.json.Value) ToolError!ToolOutcome {
     const text = try gpa.dupe(u8, message);
-    return .{ .text = text, .is_error = true };
+    return .{ .text = text, .structured = structured, .is_error = true };
+}
+
+/// `advice_lookup`'s shape with no matches.
+fn emptyAdviceResult(gpa: std.mem.Allocator, query: []const u8) !std.json.Value {
+    var object: std.json.ObjectMap = .{};
+    try object.put(gpa, "query", .{ .string = query });
+    try object.put(gpa, "matches", .{ .array = std.json.Array.init(gpa) });
+    return .{ .object = object };
 }
 
 /// `advice_lookup`: exact concept lookup or question matching.
@@ -96,7 +116,11 @@ pub fn adviceLookup(ctx: *Context, args: std.json.Value) ToolError!ToolOutcome {
 
     if (concept) |id| {
         const pattern = ctx.corpus.findPattern(id) orelse {
-            return toolFailure(gpa, try std.fmt.allocPrint(gpa, "No advice record with concept id '{s}'.", .{id}));
+            return toolFailure(
+                gpa,
+                try std.fmt.allocPrint(gpa, "No advice record with concept id '{s}'.", .{id}),
+                try emptyAdviceResult(gpa, id),
+            );
         };
         try matches.append(try render.patternValue(gpa, pattern));
         try text.appendSlice(gpa, try render.patternText(gpa, pattern));
@@ -104,7 +128,11 @@ pub fn adviceLookup(ctx: *Context, args: std.json.Value) ToolError!ToolOutcome {
         const query = question.?;
         const scored = try scorePatterns(ctx, gpa, query);
         if (scored.len == 0) {
-            return toolFailure(gpa, try std.fmt.allocPrint(gpa, "No advice record matched the question '{s}'.", .{query}));
+            return toolFailure(
+                gpa,
+                try std.fmt.allocPrint(gpa, "No advice record matched the question '{s}'.", .{query}),
+                try emptyAdviceResult(gpa, query),
+            );
         }
         for (scored) |entry| {
             try matches.append(try render.patternValue(gpa, entry.pattern));
@@ -186,7 +214,14 @@ pub fn recommendApproach(ctx: *Context, args: std.json.Value) ToolError!ToolOutc
 
     const matches = try ctx.matcher.matchSignals(gpa, signals);
     if (matches.len == 0) {
-        return toolFailure(gpa, "No decision rule matched the given signals.");
+        // Same defect class as PROTO-12: the tool declares an output schema, so
+        // "no rule matched" still has to be shaped like one.
+        var signal_values: std.json.Array = .init(gpa);
+        for (signals) |signal| try signal_values.append(.{ .string = signal });
+        var structured: std.json.ObjectMap = .{};
+        try structured.put(gpa, "signals", .{ .array = signal_values });
+        try structured.put(gpa, "matches", .{ .array = std.json.Array.init(gpa) });
+        return toolFailure(gpa, "No decision rule matched the given signals.", .{ .object = structured });
     }
 
     var structured_matches: std.json.Array = .init(gpa);
@@ -243,7 +278,15 @@ pub fn docSearch(ctx: *Context, args: std.json.Value) ToolError!ToolOutcome {
 
     const matches = try docs_search.search(gpa, &snapshot.index.columnar, query, project, effective_limit);
     if (matches.len == 0) {
-        return toolFailure(gpa, try std.fmt.allocPrint(gpa, "No indexed documentation matched '{s}'.", .{query}));
+        var structured: std.json.ObjectMap = .{};
+        try structured.put(gpa, "query", .{ .string = query });
+        try structured.put(gpa, "count", .{ .integer = 0 });
+        try structured.put(gpa, "results", .{ .array = std.json.Array.init(gpa) });
+        return toolFailure(
+            gpa,
+            try std.fmt.allocPrint(gpa, "No indexed documentation matched '{s}'.", .{query}),
+            .{ .object = structured },
+        );
     }
 
     var results: std.json.Array = .init(gpa);
@@ -301,10 +344,19 @@ pub fn docGet(ctx: *Context, args: std.json.Value) ToolError!ToolOutcome {
     }
 
     const record = found orelse {
-        return toolFailure(gpa, try std.fmt.allocPrint(gpa, "No indexed symbol '{s}' in project '{s}'.", .{ symbol, project }));
+        var structured: std.json.ObjectMap = .{};
+        try structured.put(gpa, "found", .{ .bool = false });
+        try structured.put(gpa, "project", .{ .string = project });
+        try structured.put(gpa, "symbol", .{ .string = symbol });
+        return toolFailure(
+            gpa,
+            try std.fmt.allocPrint(gpa, "No indexed symbol '{s}' in project '{s}'.", .{ symbol, project }),
+            .{ .object = structured },
+        );
     };
 
     var structured: std.json.ObjectMap = .{};
+    try structured.put(gpa, "found", .{ .bool = true });
     try structured.put(gpa, "project", .{ .string = columnar.projectAt(record) });
     try structured.put(gpa, "commit", .{ .string = columnar.commitAt(record) });
     try structured.put(gpa, "path", .{ .string = columnar.pathAt(record) });
