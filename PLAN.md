@@ -1,11 +1,12 @@
 # PLAN.md — defects, edge cases, limitations, and guideline deviations
 
-Status: no open items. Twenty-two items were fixed on 2026-11-09, thirty-nine on
-2026-11-10, and five more were closed that day because they were already done — the
-option chosen for each, its commit and its verification are in §13–§32. Two sources: a read-through
-of the tree on 2026-11-09, and a breakage campaign the same day that fuzzed the
-stdio surface and the indexer, profiled the hot paths, and inspected a `ReleaseSafe`
-PE with REA — method, measurements and negative results in §12.
+Status: one open item (§1, CI-13). Twenty-two items were fixed on 2026-11-09 and
+forty-two on 2026-11-10, and five more were closed that day because they were already
+done — the option chosen for each, its commit and its verification are in §13–§33.
+Two sources: a read-through of the tree on 2026-11-09, and a breakage campaign the
+same day that fuzzed the stdio surface and the indexer, profiled the hot paths, and
+inspected a `ReleaseSafe` PE with REA — method, measurements and negative results in
+§12.
 `AGENTS.md` remains the spec of record for behaviour; the accepted gaps are summarised
 in its §14, which this file expands.
 
@@ -84,6 +85,19 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri"
 
 ## 1. CI/CD
 
+- **CI-13 — `main` exists but is not the default branch, so `index.yml` ignores the
+  line of development.** `index.yml` triggers on `push: branches: [main]` and
+  `bump-master.yml` opens its PR with `--base main`; `main` was created on the remote
+  at `1a3704e`, but the repository's **default** branch is still
+  `autoresearch/data-driven-programming-best-practices-for-build-20261109`, so a push
+  to the branch work actually lands on never rebuilds the index, and `main` is a
+  snapshot rather than the development line the bump PR would merge into. Options:
+  (a) make `main` the default branch and merge the current default into it; (b) read
+  the branch from `${{ github.event.repository.default_branch }}` in both workflows;
+  (c) accept dispatch-only for the index and keep `main` as the PR target on purpose.
+  Verify: `gh run list --workflow index.yml` shows a run with `event: push` after a
+  `data/sources.zon` change lands on the default branch.
+
 ---
 
 ## 2. Protocol / MCP surface
@@ -138,16 +152,20 @@ recorded in §16. The symptom and its check stay in the readme troubleshooting t
 `src/regressions_test.zig` (run as `zig build test-regressions`, and as part of
 `zig build test`) holds the cross-cutting handler tests that need the real corpus
 and a loaded doc index. It is no longer a red-by-design suite: the items it covered
-are fixed (§13). No item is open, so this map is empty — every id it ever named now
-has the test its layer owns, recorded with its commit in §13–§32.
+are fixed (§13). Every closed id now has the test its layer owns, recorded with its
+commit in §13–§33. The one open item, CI-13, has no test layer at all: its check is a
+live dispatch — `gh run list --workflow index.yml` must show a run with `event: push`
+once a `data/sources.zon` change lands on the default branch.
 
 New tests for a handler can use the `Harness` in `src/regressions_test.zig` — it
 builds a real corpus and an empty index, so a new test is a few lines.
 
 ## 11. Suggested order
 
-The queue is empty: every item this file listed is resolved in §13–§32. New work
-starts from a fresh read-through or a breakage campaign, not from this list.
+The queue holds one item: CI-13, the branch the index and bump workflows name while the
+repository's default branch is a different one. Everything else this file listed is
+resolved in §13–§33; new work starts from a fresh read-through or a breakage campaign,
+not from this list.
 
 ---
 
@@ -485,6 +503,24 @@ history it will not use.
 |Id|Option|Commit|Verification|
 |---|---|---|---|
 |CI-7|(c)|`93c6094`|the form `git init` + `remote add` + `fetch --depth 1 origin <sha>` + `checkout --detach FETCH_HEAD` was run against GitHub and resolved `FETCH_HEAD` to the pinned SHA; `zig build workflows` and the pinned actionlint pass. A before/after run-time comparison is a CI-only check|
+
+## 33. Resolved on 2026-11-10, nineteenth chunk
+
+Three CI items, one code commit (`e9dabc4`), recorded here in the follow-up. All three
+were found by the first dispatches of workflows that had never run, so none was ever
+listed in §1–§10 and nothing was deleted — the runs are the evidence, not a source
+read. Each was reproduced by extracting the failing step's `run:` body from the YAML
+and executing it in a replica tree with stub `zig`/`python3` binaries that reproduce
+the real ones' effects.
+
+|Id|Option|Commit|Verification|
+|---|---|---|---|
+|CI-10|(a) stop pre-seeding `generated/`|`e9dabc4`|`index.yml` "Build the index" → "Merge and sort" → "Merge the status sidecars": pre-fix aborts with `JSONDecodeError` on the empty `index.status.json` (run `42801043827`'s exact failure), post-fix exits 0 with two projects and two records|
+|CI-11|(a) run `zig fetch --save` inside `scratch`|`e9dabc4`|`bump-master.yml` "Re-resolve the tracked branches": pre-fix aborts with `no dependency block` (run `42800551557`'s exact failure), post-fix writes both pins with the resolved commit and `scratch/build.zig.zon` carries the dependency|
+|CI-12|(a) `# shellcheck disable=SC2016`, the backticks being literal markdown|`e9dabc4`|`actionlint -shellcheck shellcheck 0.11.0`: pre-fix reports the same three `SC2016` findings on `release.yml:51` and exits 1, post-fix exits 0; the generated `release-notes.md` is byte-identical before and after|
+
+The last check for each is a live dispatch after the push: the replica proves the
+shell logic, not GitHub's environment.
 
 
 
