@@ -233,7 +233,8 @@ server would put upstream-parse failure modes on the request path.
 
 Gitignored: `zig-out/`, `.zig-cache/`, `.probe/` (API probes), `.superpowers/`
 (planning scratch), root `docs/` (`-femit-docs` output — anchored so `src/docs/` stays
-tracked), `generated/`, native byproducts (`*.lib`, `*.a`, `*.o`, `*.obj`).
+tracked), `generated/`, CI log dumps (`logs_*/`, `job-logs*.txt` — a triage download is
+never a tracked artifact), native byproducts (`*.lib`, `*.a`, `*.o`, `*.obj`).
 
 ---
 

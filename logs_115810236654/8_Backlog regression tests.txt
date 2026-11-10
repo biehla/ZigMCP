@@ -1,7 +1,0 @@
-﻿2026-11-10T05:22:15.7861493Z ##[group]Run zig build test-regressions
-2026-11-10T05:22:15.7861773Z [36;1mzig build test-regressions[0m
-2026-11-10T05:22:15.7909914Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
-2026-11-10T05:22:15.7910136Z env:
-2026-11-10T05:22:15.7910298Z   ZIG_GLOBAL_CACHE_DIR: D:\a\ZigMCP\ZigMCP\.zig-cache
-2026-11-10T05:22:15.7910519Z   ZIG_LOCAL_CACHE_DIR: D:\a\ZigMCP\ZigMCP\.zig-cache
-2026-11-10T05:22:15.7910701Z ##[endgroup]

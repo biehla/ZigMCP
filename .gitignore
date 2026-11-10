@@ -5,6 +5,10 @@
 # Scratch used for local stdlib/API verification — never committed
 /.probe/
 
+# CI failure logs downloaded for a triage session — never committed
+/logs_*/
+/job-logs*.txt
+
 # Superpowers planning scratch (briefs, reports, ledger) — never committed
 /.superpowers/
 

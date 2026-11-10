@@ -1,7 +1,0 @@
-﻿2026-11-10T05:22:20.3748050Z ##[group]Run zig build workflows
-2026-11-10T05:22:20.3748384Z [36;1mzig build workflows[0m
-2026-11-10T05:22:20.3794347Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
-2026-11-10T05:22:20.3794565Z env:
-2026-11-10T05:22:20.3794727Z   ZIG_GLOBAL_CACHE_DIR: D:\a\ZigMCP\ZigMCP\.zig-cache
-2026-11-10T05:22:20.3794937Z   ZIG_LOCAL_CACHE_DIR: D:\a\ZigMCP\ZigMCP\.zig-cache
-2026-11-10T05:22:20.3795111Z ##[endgroup]
