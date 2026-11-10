@@ -522,16 +522,16 @@ would have meant staging halves of one file.
 
 ## 15. Resolved on 2026-11-10, second chunk
 
-Four items plus two stale entries, one commit (`<sha>`): the `--include` glob and
+Four items plus two stale entries, one commit (`aa7021b`): the `--include` glob and
 `doc_get`'s duplicate handling are two independent defects, but their tests, their
 doc rows and their `PLAN.md` deletions overlap, so they landed together.
 
 |Id|Option|Commit|Verification|
 |---|---|---|---|
-|IDX-2|(a) strip a trailing `/**` in `matchesInclude`|`<sha>`|indexer test: `--include 'lib/std/**'` and `--include lib/std` produce identical, non-empty output|
-|IDX-4|(a) `doc_get` returns every match|`<sha>`|regression test: two records sharing `mod.dup` → `matches.len == 2` in `(path, line)` order|
-|TEST-2|— closed by IDX-4|`<sha>`|`IDX-4: doc_get returns every record sharing a symbol`|
-|TEST-6|`--include` half; `--previous`/`--status` were already covered|`<sha>`|`an --include glob selects the same files as its directory prefix`; `a truncated --previous index is not reused` already asserts `skipped` and the derived `.status.json`|
+|IDX-2|(a) strip a trailing `/**` in `matchesInclude`|`aa7021b`|indexer test: `--include 'lib/std/**'` and `--include lib/std` produce identical, non-empty output|
+|IDX-4|(a) `doc_get` returns every match|`aa7021b`|regression test: two records sharing `mod.dup` → `matches.len == 2` in `(path, line)` order|
+|TEST-2|— closed by IDX-4|`aa7021b`|`IDX-4: doc_get returns every record sharing a symbol`|
+|TEST-6|`--include` half; `--previous`/`--status` were already covered|`aa7021b`|`an --include glob selects the same files as its directory prefix`; `a truncated --previous index is not reused` already asserts `skipped` and the derived `.status.json`|
 |TEST-1|already covered; removed as stale|—|`tests/protocol_test.zig`: `an oversized line is a parse error and the server keeps serving`|
 |TEST-5|already covered; removed as stale|—|`ci.yml` runs `zig build workflows` and `go run …/actionlint@v1.7.7` in both jobs|
 
