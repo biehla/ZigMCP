@@ -12,6 +12,7 @@ const render = @import("../advice/render.zig");
 const rules_module = @import("../advice/rules.zig");
 const docs_search = @import("../docs/search.zig");
 const text_util = @import("../util/text.zig");
+const json_array = @import("../util/json_array.zig");
 
 pub const Context = registry.Context;
 pub const ToolOutcome = registry.ToolOutcome;
@@ -97,7 +98,7 @@ fn toolFailure(gpa: std.mem.Allocator, message: []const u8, structured: std.json
 fn emptyAdviceResult(gpa: std.mem.Allocator, query: []const u8) !std.json.Value {
     var object: std.json.ObjectMap = .{};
     try object.put(gpa, "query", .{ .string = query });
-    try object.put(gpa, "matches", .{ .array = std.json.Array.init(gpa) });
+    try object.put(gpa, "matches", .{ .array = json_array.init(gpa) });
     return .{ .object = object };
 }
 
@@ -113,7 +114,7 @@ pub fn adviceLookup(ctx: *Context, args: std.json.Value) ToolError!ToolOutcome {
     // the caller asked for two different answers.
     if (concept != null and question != null) return error.InvalidParams;
 
-    var matches: std.json.Array = .init(gpa);
+    var matches: std.json.Array = json_array.init(gpa);
     var text: std.ArrayList(u8) = .empty;
 
     if (concept) |id| {
@@ -124,7 +125,7 @@ pub fn adviceLookup(ctx: *Context, args: std.json.Value) ToolError!ToolOutcome {
                 try emptyAdviceResult(gpa, id),
             );
         };
-        try matches.append(try render.patternValue(gpa, pattern));
+        try json_array.append(&matches, gpa, try render.patternValue(gpa, pattern));
         try text.appendSlice(gpa, try render.patternText(gpa, pattern));
     } else {
         const query = question.?;
@@ -137,7 +138,7 @@ pub fn adviceLookup(ctx: *Context, args: std.json.Value) ToolError!ToolOutcome {
             );
         }
         for (scored) |entry| {
-            try matches.append(try render.patternValue(gpa, entry.pattern));
+            try json_array.append(&matches, gpa, try render.patternValue(gpa, entry.pattern));
             try text.appendSlice(gpa, try render.patternText(gpa, entry.pattern));
         }
     }
@@ -218,23 +219,23 @@ pub fn recommendApproach(ctx: *Context, args: std.json.Value) ToolError!ToolOutc
     if (matches.len == 0) {
         // Same defect class as PROTO-12: the tool declares an output schema, so
         // "no rule matched" still has to be shaped like one.
-        var signal_values: std.json.Array = .init(gpa);
-        for (signals) |signal| try signal_values.append(.{ .string = signal });
+        var signal_values: std.json.Array = json_array.init(gpa);
+        for (signals) |signal| try json_array.append(&signal_values, gpa, .{ .string = signal });
         var structured: std.json.ObjectMap = .{};
         try structured.put(gpa, "signals", .{ .array = signal_values });
-        try structured.put(gpa, "matches", .{ .array = std.json.Array.init(gpa) });
+        try structured.put(gpa, "matches", .{ .array = json_array.init(gpa) });
         return toolFailure(gpa, "No decision rule matched the given signals.", .{ .object = structured });
     }
 
-    var structured_matches: std.json.Array = .init(gpa);
+    var structured_matches: std.json.Array = json_array.init(gpa);
     var text: std.ArrayList(u8) = .empty;
     for (matches) |match| {
         var item: std.json.ObjectMap = .{};
         try item.put(gpa, "rule_id", .{ .string = match.rule.id });
         try item.put(gpa, "condition", .{ .string = match.rule.condition });
-        var consider: std.json.Array = .init(gpa);
+        var consider: std.json.Array = json_array.init(gpa);
         for (match.rule.then.consider) |pattern_id| {
-            try consider.append(.{ .string = pattern_id });
+            try json_array.append(&consider, gpa, .{ .string = pattern_id });
         }
         try item.put(gpa, "consider", .{ .array = consider });
         if (match.rule.then.and_only_if) |constraint| {
@@ -242,13 +243,13 @@ pub fn recommendApproach(ctx: *Context, args: std.json.Value) ToolError!ToolOutc
         }
         try item.put(gpa, "evidence", .{ .string = match.rule.evidence.label() });
         try item.put(gpa, "score", .{ .float = match.score });
-        try structured_matches.append(.{ .object = item });
+        try json_array.append(&structured_matches, gpa, .{ .object = item });
 
         try text.appendSlice(gpa, try render.ruleText(gpa, match.rule));
     }
 
-    var signal_values: std.json.Array = .init(gpa);
-    for (signals) |signal| try signal_values.append(.{ .string = signal });
+    var signal_values: std.json.Array = json_array.init(gpa);
+    for (signals) |signal| try json_array.append(&signal_values, gpa, .{ .string = signal });
 
     var structured: std.json.ObjectMap = .{};
     try structured.put(gpa, "signals", .{ .array = signal_values });
@@ -283,7 +284,7 @@ pub fn docSearch(ctx: *Context, args: std.json.Value) ToolError!ToolOutcome {
         var structured: std.json.ObjectMap = .{};
         try structured.put(gpa, "query", .{ .string = query });
         try structured.put(gpa, "count", .{ .integer = 0 });
-        try structured.put(gpa, "results", .{ .array = std.json.Array.init(gpa) });
+        try structured.put(gpa, "results", .{ .array = json_array.init(gpa) });
         return toolFailure(
             gpa,
             try std.fmt.allocPrint(gpa, "No indexed documentation matched '{s}'.", .{query}),
@@ -291,7 +292,7 @@ pub fn docSearch(ctx: *Context, args: std.json.Value) ToolError!ToolOutcome {
         );
     }
 
-    var results: std.json.Array = .init(gpa);
+    var results: std.json.Array = json_array.init(gpa);
     var text: std.ArrayList(u8) = .empty;
     for (matches) |match| {
         const columnar = &snapshot.index.columnar;
@@ -304,7 +305,7 @@ pub fn docSearch(ctx: *Context, args: std.json.Value) ToolError!ToolOutcome {
         try item.put(gpa, "symbol", .{ .string = columnar.symbolAt(match.record_index) });
         try item.put(gpa, "container", .{ .string = columnar.containerAt(match.record_index) });
         try item.put(gpa, "doc", .{ .string = columnar.docAt(match.record_index) });
-        try results.append(.{ .object = item });
+        try json_array.append(&results, gpa, .{ .object = item });
 
         try text.print(gpa, "{s}:{d} {s} — {s}\n", .{
             columnar.pathAt(match.record_index),
@@ -385,7 +386,7 @@ pub fn docGet(ctx: *Context, args: std.json.Value) ToolError!ToolOutcome {
 pub fn list(ctx: *registry.Context) !registry.Result {
     const gpa = ctx.pool.allocator();
 
-    var tools: std.json.Array = .init(gpa);
+    var tools: std.json.Array = json_array.init(gpa);
     for (registry.tool_specs) |spec| {
         var object: std.json.ObjectMap = .{};
         try object.put(gpa, "name", .{ .string = spec.name });
@@ -400,7 +401,7 @@ pub fn list(ctx: *registry.Context) !registry.Result {
         try annotations.put(gpa, "openWorldHint", .{ .bool = false });
         try object.put(gpa, "annotations", .{ .object = annotations });
 
-        try tools.append(.{ .object = object });
+        try json_array.append(&tools, gpa, .{ .object = object });
     }
 
     var object: std.json.ObjectMap = .{};
@@ -416,8 +417,8 @@ pub fn result(ctx: *registry.Context, outcome: ToolOutcome) !registry.Result {
     try content.put(gpa, "type", .{ .string = "text" });
     try content.put(gpa, "text", .{ .string = outcome.text });
 
-    var contents: std.json.Array = .init(gpa);
-    try contents.append(.{ .object = content });
+    var contents: std.json.Array = json_array.init(gpa);
+    try json_array.append(&contents, gpa, .{ .object = content });
 
     var object: std.json.ObjectMap = .{};
     try object.put(gpa, "content", .{ .array = contents });
@@ -543,7 +544,7 @@ pub fn docImportStatus(ctx: *Context, args: std.json.Value) ToolError!ToolOutcom
         }
     }.lessThan);
 
-    var project_values: std.json.Array = .init(gpa);
+    var project_values: std.json.Array = json_array.init(gpa);
     var text: std.ArrayList(u8) = .empty;
     const sidecar = try loadStatusSidecar(ctx, gpa);
     for (stats.items) |stat| {
@@ -559,7 +560,7 @@ pub fn docImportStatus(ctx: *Context, args: std.json.Value) ToolError!ToolOutcom
                 try putSidecarArray(&item, gpa, entry, "degraded");
             }
         }
-        try project_values.append(.{ .object = item });
+        try json_array.append(&project_values, gpa, .{ .object = item });
         try text.print(gpa, "{s}: commit {s}, {d} records", .{ stat.name, stat.commit, stat.records });
         if (degraded_files) |count| {
             try text.print(gpa, ", {d} degraded files", .{count});

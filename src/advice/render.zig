@@ -6,6 +6,7 @@
 
 const std = @import("std");
 const corpus_module = @import("corpus.zig");
+const json_array = @import("../util/json_array.zig");
 
 pub const Corpus = corpus_module.Corpus;
 pub const Pattern = corpus_module.Pattern;
@@ -17,8 +18,8 @@ pub const Evidence = corpus_module.Evidence;
 pub const Fact = corpus_module.Fact;
 
 fn stringArrayValue(gpa: std.mem.Allocator, items: []const []const u8) !std.json.Value {
-    var array: std.json.Array = .init(gpa);
-    for (items) |item| try array.append(.{ .string = item });
+    var array: std.json.Array = json_array.init(gpa);
+    for (items) |item| try json_array.append(&array, gpa, .{ .string = item });
     return .{ .array = array };
 }
 
@@ -39,8 +40,8 @@ pub fn patternValue(gpa: std.mem.Allocator, pattern: *const Pattern) !std.json.V
         try object.put(gpa, "mechanism", .{ .string = mechanism });
     }
 
-    var facts: std.json.Array = .init(gpa);
-    for (pattern.facts) |fact| try facts.append(try factValue(gpa, fact));
+    var facts: std.json.Array = json_array.init(gpa);
+    for (pattern.facts) |fact| try json_array.append(&facts, gpa, try factValue(gpa, fact));
     try object.put(gpa, "facts", .{ .array = facts });
 
     try object.put(gpa, "candidate_uses", try stringArrayValue(gpa, pattern.candidate_uses));
@@ -92,12 +93,12 @@ pub fn limitsValue(gpa: std.mem.Allocator, limits: Limits) !std.json.Value {
     var object: std.json.ObjectMap = .{};
     try object.put(gpa, "limits", try stringArrayValue(gpa, limits.limits));
 
-    var legend: std.json.Array = .init(gpa);
+    var legend: std.json.Array = json_array.init(gpa);
     for (limits.evidence_legend) |entry| {
         var item: std.json.ObjectMap = .{};
         try item.put(gpa, "label", .{ .string = entry.label });
         try item.put(gpa, "meaning", .{ .string = entry.meaning });
-        try legend.append(.{ .object = item });
+        try json_array.append(&legend, gpa, .{ .object = item });
     }
     try object.put(gpa, "evidence_legend", .{ .array = legend });
     return .{ .object = object };
@@ -109,7 +110,7 @@ pub fn overviewValue(gpa: std.mem.Allocator, corpus: *const Corpus) !std.json.Va
     try object.put(gpa, "version", .{ .integer = corpus.version });
     try object.put(gpa, "source_research_date", .{ .string = corpus.source_research_date });
 
-    var patterns: std.json.Array = .init(gpa);
+    var patterns: std.json.Array = json_array.init(gpa);
     for (corpus.patterns) |*pattern| {
         var item: std.json.ObjectMap = .{};
         try item.put(gpa, "id", .{ .string = pattern.id });
@@ -117,7 +118,7 @@ pub fn overviewValue(gpa: std.mem.Allocator, corpus: *const Corpus) !std.json.Va
         try item.put(gpa, "what_data_controls", .{ .string = pattern.what_data_controls });
         try item.put(gpa, "evidence", .{ .string = pattern.evidence.label() });
         try item.put(gpa, "sources", try stringArrayValue(gpa, pattern.sources));
-        try patterns.append(.{ .object = item });
+        try json_array.append(&patterns, gpa, .{ .object = item });
     }
     try object.put(gpa, "patterns", .{ .array = patterns });
     return .{ .object = object };

@@ -165,7 +165,7 @@ pub fn main(init: std.process.Init) !void {
     }
     try fw.flush();
 
-    const sp = status_path orelse deriveStatusPath(gpa, out_path.?) catch unreachable;
+    const sp = (status_path orelse deriveStatusPath(gpa, out_path.?)) catch unreachable;
     try writeStatus(io, gpa, sp, statuses.items, previous_path != null);
 }
 

@@ -8,6 +8,7 @@ const registry = @import("registry.zig");
 const render = @import("../advice/render.zig");
 const rules_module = @import("../advice/rules.zig");
 const tools_module = @import("tools.zig");
+const json_array = @import("../util/json_array.zig");
 
 pub const PromptSpec = struct {
     name: []const u8,
@@ -45,21 +46,21 @@ pub fn findPrompt(name: []const u8) ?*const PromptSpec {
 pub fn list(ctx: *registry.Context) !registry.Result {
     const gpa = ctx.pool.allocator();
 
-    var prompts: std.json.Array = .init(gpa);
+    var prompts: std.json.Array = json_array.init(gpa);
     for (prompt_specs) |spec| {
         var argument: std.json.ObjectMap = .{};
         try argument.put(gpa, "name", .{ .string = spec.argument });
         try argument.put(gpa, "description", .{ .string = spec.argument_description });
         try argument.put(gpa, "required", .{ .bool = true });
-        var arguments: std.json.Array = .init(gpa);
-        try arguments.append(.{ .object = argument });
+        var arguments: std.json.Array = json_array.init(gpa);
+        try json_array.append(&arguments, gpa, .{ .object = argument });
 
         var object: std.json.ObjectMap = .{};
         try object.put(gpa, "name", .{ .string = spec.name });
         try object.put(gpa, "title", .{ .string = spec.title });
         try object.put(gpa, "description", .{ .string = spec.description });
         try object.put(gpa, "arguments", .{ .array = arguments });
-        try prompts.append(.{ .object = object });
+        try json_array.append(&prompts, gpa, .{ .object = object });
     }
 
     var result: std.json.ObjectMap = .{};
@@ -87,8 +88,8 @@ pub fn get(ctx: *registry.Context, name: []const u8, arguments: ?std.json.Value)
     try message.put(gpa, "role", .{ .string = "user" });
     try message.put(gpa, "content", .{ .object = content });
 
-    var messages: std.json.Array = .init(gpa);
-    try messages.append(.{ .object = message });
+    var messages: std.json.Array = json_array.init(gpa);
+    try json_array.append(&messages, gpa, .{ .object = message });
 
     var object: std.json.ObjectMap = .{};
     try object.put(gpa, "description", .{ .string = spec.description });

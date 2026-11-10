@@ -8,6 +8,7 @@
 //!   * any other protocol version -> `-32022` with the supported list.
 
 const std = @import("std");
+const json_array = @import("../util/json_array.zig");
 
 pub const current_version = "2026-07-28";
 pub const legacy_version = "2025-06-18";
@@ -88,9 +89,9 @@ pub fn resolve(params: ?std.json.Value) Error!Resolution {
 
 /// The `data` payload of an unsupported-version error: the supported list.
 pub fn supportedVersionsValue(gpa: std.mem.Allocator) !std.json.Value {
-    var array: std.json.Array = .init(gpa);
+    var array: std.json.Array = json_array.init(gpa);
     for (supported_versions) |version| {
-        try array.append(.{ .string = version });
+        try json_array.append(&array, gpa, .{ .string = version });
     }
     return .{ .array = array };
 }

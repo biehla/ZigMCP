@@ -3,6 +3,7 @@
 const std = @import("std");
 const registry = @import("registry.zig");
 const meta = @import("../protocol/meta.zig");
+const json_array = @import("../util/json_array.zig");
 
 const instructions =
     \\ZigMCP serves two read-only corpora: systems-programming advice (P01..P12 with
@@ -33,9 +34,9 @@ pub fn capabilities(gpa: std.mem.Allocator) !std.json.Value {
 pub fn handle(ctx: *registry.Context) !registry.Result {
     const gpa = ctx.pool.allocator();
 
-    var supported: std.json.Array = .init(gpa);
+    var supported: std.json.Array = json_array.init(gpa);
     for (meta.supported_versions) |version| {
-        try supported.append(.{ .string = version });
+        try json_array.append(&supported, gpa, .{ .string = version });
     }
 
     var object: std.json.ObjectMap = .{};

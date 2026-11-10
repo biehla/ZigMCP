@@ -164,6 +164,7 @@ server would put upstream-parse failure modes on the request path.
 |`src/docs/reload.zig`|Index source (path/URL), snapshot store, watcher thread, atomic swap|
 |`src/docs/search.zig`|Scored symbol/path/doc search, limit clamp|
 |`src/util/arena_pool.zig`|Per-request scratch arena|
+|`src/util/json_array.zig`|`std.json.Array` construction/append for both toolchains (0.17.1 managed, 0.18.0-dev unmanaged)|
 |`src/util/text.zig`|Tokenizer + case-insensitive helpers|
 |`src/util/workflow.zig`|Workflow trigger/expression consistency (CI-1)|
 |`src/util/sleep.zig`|Thread sleep that does not share the server's `Io`|
@@ -518,6 +519,10 @@ zig fmt --check . --exclude tests/fixtures   # the fixture tree is deliberately 
   that is the separate, pre-existing `CI-9` item, not a gate failure.
 - **Toolchain:** Zig 0.17.1 at `C:\Users\Sethticles\scoop\apps\zig\0.17.1`;
   `.minimum_zig_version = "0.17.1"`; global cache `C:\Users\Sethticles\AppData\Local\zig`.
+  The CI canary leg builds with the `master` entry of
+  `https://ziglang.org/download/index.json` (currently
+  `0.18.0-dev.954+60635c2bd`); unpacking its `x86_64-windows` build under `.probe/`
+  and running the same gates reproduces the canary locally.
 - **Server options:** `--index <path-or-url>` / `ZIGMCP_INDEX`; `--advice-dir <path>`
   / `ZIGMCP_ADVICE_DIR` (default `data/advice`, relative to the working directory);
   `--help`. Flags override the environment. An unknown argument or a missing option
@@ -554,9 +559,13 @@ skill).
   (`*std.heap.ArenaAllocator`), `environ_map`, `preopens`, `minimal`.
 - **Arguments:** `std.process.Args.toSlice(args, arena)`; `Args.iterate` is a compile
   error on Windows.
-- **`std.json`:** `ObjectMap` and `std.json.Array` are **managed**
-  (`map.put(gpa, k, v)`; `Array.init(gpa)` + `append(v)`); `std.ArrayList(T)` is
-  **unmanaged** (`append(gpa, v)`, `toOwnedSlice(gpa)`).
+- **`std.json`:** `ObjectMap` keeps `put(gpa, k, v)` on both toolchains.
+  `std.json.Array` is **managed** on 0.17.1 (`.init(gpa)` + `append(v)`) and the
+  **unmanaged** `std.ArrayList(Value)` on Zig master (`.empty` + `append(gpa, v)`),
+  so JSON arrays are constructed and appended only through
+  `src/util/json_array.zig` (`init`, `append`), which selects the shape at comptime
+  via `@hasDecl(std.json.Array, "init")`. `std.ArrayList(T)` is **unmanaged**
+  (`append(gpa, v)`, `toOwnedSlice(gpa)`).
   `std.json.Stringify.value(v, .{}, &writer)` on a `std.json.Value` uses its
   `jsonStringify`; passing an anonymous struct serializes the struct instead — a
   silent wire bug.

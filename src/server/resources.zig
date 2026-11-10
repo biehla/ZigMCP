@@ -10,6 +10,7 @@ const registry = @import("registry.zig");
 const corpus_module = @import("../advice/corpus.zig");
 const render = @import("../advice/render.zig");
 const text_util = @import("../util/text.zig");
+const json_array = @import("../util/json_array.zig");
 
 pub const ResourceSpec = struct {
     uri: []const u8,
@@ -75,13 +76,13 @@ fn resourceValue(gpa: std.mem.Allocator, spec: ResourceSpec) !std.json.Value {
 pub fn list(ctx: *registry.Context) !registry.Result {
     const gpa = ctx.pool.allocator();
 
-    var resources: std.json.Array = .init(gpa);
+    var resources: std.json.Array = json_array.init(gpa);
     for (resource_specs) |spec| {
-        try resources.append(try resourceValue(gpa, spec));
+        try json_array.append(&resources, gpa, try resourceValue(gpa, spec));
     }
     for (ctx.corpus.patterns) |pattern| {
         const uri = try std.fmt.allocPrint(gpa, "advice://patterns/{s}", .{pattern.id});
-        try resources.append(try resourceValue(gpa, .{
+        try json_array.append(&resources, gpa, try resourceValue(gpa, .{
             .uri = uri,
             .name = try std.fmt.allocPrint(gpa, "advice-pattern-{s}", .{pattern.id}),
             .title = try std.fmt.allocPrint(gpa, "Advice pattern {s}", .{pattern.id}),
@@ -93,7 +94,7 @@ pub fn list(ctx: *registry.Context) !registry.Result {
     defer snapshot.deinit();
     for (try projectNames(gpa, &snapshot.index.columnar)) |project| {
         const uri = try std.fmt.allocPrint(gpa, "docs://{s}/index", .{project});
-        try resources.append(try resourceValue(gpa, .{
+        try json_array.append(&resources, gpa, try resourceValue(gpa, .{
             .uri = uri,
             .name = try std.fmt.allocPrint(gpa, "{s}-index", .{project}),
             .title = try std.fmt.allocPrint(gpa, "{s} symbol index", .{project}),
@@ -117,8 +118,8 @@ pub fn listTemplates(ctx: *registry.Context) !registry.Result {
     try object.put(gpa, "description", .{ .string = "Full documentation of one imported symbol." });
     try object.put(gpa, "mimeType", .{ .string = "text/plain" });
 
-    var templates: std.json.Array = .init(gpa);
-    try templates.append(.{ .object = object });
+    var templates: std.json.Array = json_array.init(gpa);
+    try json_array.append(&templates, gpa, .{ .object = object });
 
     var list_object: std.json.ObjectMap = .{};
     try list_object.put(gpa, "resourceTemplates", .{ .array = templates });
@@ -174,8 +175,8 @@ pub fn read(ctx: *registry.Context, uri: []const u8) !registry.Result {
     try contents.put(gpa, "mimeType", .{ .string = "text/plain" });
     try contents.put(gpa, "text", .{ .string = text });
 
-    var contents_array: std.json.Array = .init(gpa);
-    try contents_array.append(.{ .object = contents });
+    var contents_array: std.json.Array = json_array.init(gpa);
+    try json_array.append(&contents_array, gpa, .{ .object = contents });
 
     var object: std.json.ObjectMap = .{};
     try object.put(gpa, "contents", .{ .array = contents_array });

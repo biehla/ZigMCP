@@ -13,6 +13,7 @@ const corpus_module = @import("../advice/corpus.zig");
 const rules_module = @import("../advice/rules.zig");
 const docs_reload = @import("../docs/reload.zig");
 const pool_module = @import("../util/arena_pool.zig");
+const json_array = @import("../util/json_array.zig");
 const tools_module = @import("tools.zig");
 
 pub const server_name = "zigmcp";
@@ -98,7 +99,7 @@ pub fn schemaFrom(gpa: std.mem.Allocator, schema: Schema) !std.json.Value {
     try object.put(gpa, "type", .{ .string = "object" });
 
     var properties: std.json.ObjectMap = .{};
-    var required: std.json.Array = .init(gpa);
+    var required: std.json.Array = json_array.init(gpa);
     for (schema.fields) |field| {
         var property: std.json.ObjectMap = .{};
         switch (field.kind) {
@@ -121,7 +122,7 @@ pub fn schemaFrom(gpa: std.mem.Allocator, schema: Schema) !std.json.Value {
             try property.put(gpa, "description", .{ .string = field.description });
         }
         try properties.put(gpa, field.name, .{ .object = property });
-        if (field.required) try required.append(.{ .string = field.name });
+        if (field.required) try json_array.append(&required, gpa, .{ .string = field.name });
     }
     try object.put(gpa, "properties", .{ .object = properties });
     if (required.items.len > 0) try object.put(gpa, "required", .{ .array = required });
