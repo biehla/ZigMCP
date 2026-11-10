@@ -228,7 +228,8 @@ it.
 |PROTO-12|(a) always emit `structuredContent`|`74691aa`|protocol test: no-match `doc_search`, `doc_get` and `advice_lookup` all carry it|
 |PROTO-13|(a) exact project keys|`e29796a`|[§2.2](#22-recipes) case-colliding index → one record per URI; handler test|
 |PROTO-14|(a) resolve the argument exactly first, then ignoring case and `_` vs `-`, and only when that names one project|`f2e3844`|handler tests: `project: "zig-std"` reaches the `zig_std` records and `doc_get` echoes `ZIG_STD` back; `FIXTURE` over `Fixture`+`fixture` is `isError` with both keys named and no merging; `nope` lists `Known projects: mcp_zig, zig_std`; the PROTO-13 test still passes|
-|PROTO-15|the miss reports the closest stored symbols in the message and a `candidates` array|`8a33da8`|regression test `doc_get: a miss names the stored path-qualified symbols`: `mem.copyForwards` → `candidates[0] == "lib.std.mem.copyForwards"`, and `ArrayList.append` → `lib.std.std.ArrayList`; protocol test: `fixture`/`comments.plain` → `candidates[0] == "lib.std.comments.plain"`|
+|PROTO-15|the miss reports the closest stored symbols in the message and a `candidates` array|`8a33da8`|regression tests `PROTO-15: a miss names the stored path-qualified symbols` (`ArrayList.append` → `candidates[0] == "lib.std.std.ArrayList"`, and a nonsense spelling → an empty list) and `PROTO-16`'s; protocol test: `fixture`/`comments.plain.line` → `candidates` names `lib.std.comments.plain`|
+|PROTO-16|a **dotted tail** resolves when exactly one stored symbol ends with it; `resolved_from` echoes the argument as sent, and two symbols sharing the tail stay a miss|`a6f48b3`|regression test `PROTO-16: a unique dotted tail reaches the stored symbol`: `mem.copyForwards` → `lib.std.mem.copyForwards` with `resolved_from`, `em.copyForwards` a miss on the `.` boundary, `.dup` shared by two symbols a miss; protocol test: `comments.plain` resolves to `lib.std.comments.plain`|
 
 ### 4.2 Server runtime and the wire
 
@@ -256,6 +257,8 @@ it.
 |IDX-7|(a) keep: error sets are flat by grammar, so a nested declaration is invalid Zig and degrades the file|`4d33172`|indexer test `a nested declaration in an error set degrades the file instead of inventing a member`: exit 0, no `kind:error` record for the nested name, `bad.zig` listed as degraded; the `if`/`struct`/`@import`/string variants were probed too (all exit 0, no records, never a misattributed member)|
 |IDX-8|(a) depth pre-scan, limit 256|`6836304`|indexer test: 2 000 nested parens → rc 0 + degraded reason|
 |IDX-9|(a) a line-start table, binary-searched|`fbc7026`|`lineOf agrees with findLineColumn at every offset` (unit test); the golden index is still byte-identical, and it pins every `line`; Debug ladder 5k/10k/25k = 0.109/0.119/0.296 s (was 1.17/4.63/29.65 s), ReleaseSafe 0.035/0.033/0.071 s|
+|IDX-10|the walk counts every site that can carry a record — fn/var/field, named parameter, error-set member — and the sidecar reports it as `declarations`|`15cfd60`|the fixture tree reports `records: 33, declarations: 38`; the regenerated `tests/golden/index.status.json` pins it and the JSONL stayed byte-identical; protocol test `doc_import_status reports the declaration yield from the sidecar` reads both members from a live server|
+|DOC-10|declined: a `source` field on the record would let a client tell `///` from `//!` from a `//` run, but it changes the artifact format for a distinction the readme already states, and `path:line` answers the question directly|—|readme "A record does not say which of those three produced its text" and `AGENTS.md` §7's `doc` row (`10ad271`)|
 
 ### 4.4 Index loading and hot reload
 
@@ -271,6 +274,7 @@ it.
 |REL-8|(a) propagate the underlying error|`6eaa06e`|`--index missing.jsonl` → `FileNotFound`, `--index tests` → `IsDir`|
 |REL-9|(a) verify at load|`977695b`|tampered `doc` → `MalformedRecord`; the golden index still loads 25 records|
 |REL-10|(a) reject out-of-order artifacts|`8b965e4`|swapped golden lines → `MalformedRecord`; unit test|
+|REL-11|declined: publishing and fetching `index.status.json` beside a URL index would report another run's health unless its `commit` were checked against the loaded index, and it doubles the poll cost for counts that describe the publisher, not the served artifact|—|`REL-6`'s unit test names `http(s)` as remote; `AGENTS.md` §5 states the local-only rule and the readme's troubleshooting row says why the counts are absent|
 
 ### 4.5 CI/CD, docs and packaging
 
@@ -296,6 +300,7 @@ it.
 |DOC-6|add `LICENSE` (MIT), `build.zig.zon` `paths`, and the release tarball copy|`f2e3844`|`head -1 LICENSE`; the `paths` entry in `build.zig.zon`; the packaging step copies it into `dist/pkg`|
 |DOC-7|examples and descriptions use the stored spelling|`85d4871`|readme `doc_get` example and record example carry `lib.std.mem.copyForwards`; `tools/list` descriptions name `///`, `//!` and plain `//`; `server/discover` instructions state the rule|
 |DOC-8|document the per-poll re-download|`85d4871`|readme "How updates land" names the full re-download and the local-file alternative|
+|DOC-9|state that every answer is retrieval|`61ff0f1`|`server/discover`'s instructions from a live server name the two corpora and say the server does not generate code or claim anything was compiled; readme Tools says the same|
 
 The last check for CI-10, CI-11 and CI-12 is a live dispatch after the push: the replica
 proves the shell logic, not GitHub's environment.
@@ -334,6 +339,20 @@ Two entries changed shape while being fixed, both recorded in `AGENTS.md`:
 `ci.yml` pins the older v1.7.7, which does not report it. The gate stays green while the
 deprecation is tracked rather than silently ignored.
 
+### 4.7 Retrieval performance
+
+The decision trigger in `AGENTS.md` §3 asks for a measured exact baseline before a cache
+or an index is added. The baseline now exists, so an inverted index is a decision with
+numbers behind it rather than a preference.
+
+|Id|Option|Commit|Verification|
+|---|---|---|---|
+|PERF-1|declined an inverted or trigram index: at the current corpus a linear scan answers in ~10 ms, and a call-graph corpus would be a new decision rather than a faster scan|—|`zig build -Doptimize=ReleaseSafe`, then `zig-out/bin/bench --server zig-out/bin/zigmcp --index generated/index.jsonl --iterations 40` over 13 482 records / 5 736 450 bytes: `doc_search` p50/p95/p99 = 9.035/10.168/10.234 ms, `doc_get` = 0.185/0.302/0.377 ms, `doc_import_status` = 0.944/1.231/1.300 ms, `advice_lookup` = 0.040/0.058/0.125 ms, 0 errors, startup 84.1 ms, peak RSS 27 766 784 bytes|
+
+Re-measure before changing the retrieval path: the same command, the same index, in
+`ReleaseSafe`. A second corpus (callers, call paths) is a new indexer pass and a new
+decision, not an optimisation of this one.
+
 ---
 
 ## 5. Batch log
@@ -367,3 +386,4 @@ commit; the ids themselves are in [§4](#4-resolved-ledger), with their commits.
 |2026-11-10|`e9dabc4`|Three CI defects found by the first dispatches of workflows that had never run: each was reproduced by extracting the failing step's `run:` body and executing it in a replica tree with stub binaries|
 |2026-11-10|`f2e3844`|An external review of the published repository: a project spelling that differed by case or `_` vs `-`, tool text that promised a signature the index never holds, and a missing `LICENSE`|
 |2026-11-10|`8a33da8`, `85d4871`|An evaluation asking `doc_get` for the readme's own unqualified spelling: the miss now names the closest stored symbols, and every example uses the spelling the indexer produces|
+|2026-11-10|`61ff0f1`, `a6f48b3`, `15cfd60`|The rest of `TODO.md`: the retrieval-only statement, dotted-tail resolution, the declaration yield, and a measured retrieval baseline — plus the items that measurement and the artifact-format rule let us decline (DOC-10, REL-11, PERF-1)|
