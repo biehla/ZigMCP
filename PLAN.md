@@ -1,8 +1,8 @@
 # PLAN.md — defects, edge cases, limitations, and guideline deviations
 
-Status: open backlog. Twenty-two items were fixed on 2026-11-09, twenty-eight on
+Status: open backlog. Twenty-two items were fixed on 2026-11-09, twenty-nine on
 2026-11-10, and five more were closed that day because they were already done — the
-option chosen for each, its commit and its verification are in §13–§21. Two sources: a read-through
+option chosen for each, its commit and its verification are in §13–§22. Two sources: a read-through
 of the tree on 2026-11-09, and a breakage campaign the same day that fuzzed the
 stdio surface and the indexer, profiled the hot paths, and inspected a `ReleaseSafe`
 PE with REA — method, measurements and negative results in §12.
@@ -123,11 +123,6 @@ No open items.
 
 ## 4. Indexer
 
-- **IDX-5 — invalid UTF-8 in a doc comment is emitted raw.** The JSON writer assumes
-  valid UTF-8, so invalid bytes can yield an index the loader rejects. Options:
-  (a) validate and replace with U+FFFD; (b) drop the file, report degraded; (c)
-  escape bytes as `\u00XX`. Verify: a fixture with a 0xFF byte in a comment.
-
 - **IDX-6 — `modulePath` mangles paths above the root.** `../x.zig` becomes `x.zig`
   after leading-dot stripping, so two files can share a symbol. Options: (a) reject
   paths containing `..`; (b) prefix the project key; (c) keep. Verify: index a tree
@@ -213,7 +208,6 @@ must own its test, because no such layer exists yet.
 |CI-6|—|rerun the workflow; no local test|
 |CI-7|—|timing only|
 |CI-8|—|unpack a release and run it from an empty directory (CI smoke test)|
-|IDX-5|—|indexer CLI harness: fixture with a 0xFF byte in a comment|
 |IDX-6|—|`modulePath` is private; export it for a unit test|
 |IDX-7|—|fixture with a nested declaration inside an error set|
 |REL-1|—|local HTTP server counting requests|
@@ -458,6 +452,15 @@ binary-searches them, which turned a clean n² ladder into a linear one.
 |Id|Option|Commit|Verification|
 |---|---|---|---|
 |IDX-9|(a)|`fbc7026`|`lineOf agrees with findLineColumn at every offset` (unit test); the golden index is still byte-identical, and it pins every `line`; Debug ladder 5k/10k/25k = 0.109/0.119/0.296 s (was 1.17/4.63/29.65 s), ReleaseSafe 0.035/0.033/0.071 s|
+
+## 22. Resolved on 2026-11-10, eighth chunk
+
+One indexer item, one commit (`feba2d2`): invalid UTF-8 in a doc comment no
+longer turns `doc` into a byte array that the loader rejects.
+
+|Id|Option|Commit|Verification|
+|---|---|---|---|
+|IDX-5|(a)|`feba2d2`|indexer test `invalid UTF-8 in a doc comment is replaced, not emitted as a byte array`: a temp file with 0xFF; the output is valid UTF-8, `doc` is a string with U+FFFD, and `doc_hash` is the SHA-256 of the sanitized text|
 
 
 
