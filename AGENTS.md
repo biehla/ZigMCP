@@ -13,7 +13,8 @@ change user-visible behaviour, update both files.
 
 **Read order for a new task:** §1 → §3 (decisions — never contradict one without
 the user's say-so) → the section for the area you touch → §11 (Zig API traps) →
-§15 (working discipline).
+§15 (working discipline) → §16 (failure catalogue) before touching a parser, a loader
+or a protocol surface.
 
 ---
 
@@ -59,6 +60,27 @@ Implemented: protocol core, advice corpus, doc indexer, columnar index, hot relo
 (local file and HTTP(S) URL), incremental re-index, all test layers, verification
 report, the four CI workflows. Open items are listed in §14. `generated/` is
 CI-produced and gitignored.
+
+**State claims are dated on purpose.** A paragraph like the one above is the only kind
+of statement in this file that can go stale, so it carries the date it was checked and
+must be re-verified with `git log --oneline -5` before it is quoted.
+
+The rule is measurable, not stylistic. In the first 109 commits, **11** are
+`docs(agents)` repairs: line pins replaced by symbol citations (twice), a branch/remote
+claim, a present-today inventory, a surface table that had drifted. That is the evidence.
+
+A further **30** are `docs(plan)` records, and they argue the other way: not rot, but
+cost. They are the bookkeeping the §9 backlog rule asks for, batched one commit per
+chunk of fixes. Counting them as decay would misread a deliberate process as a defect —
+but a process cost nobody decided to pay is still a cost, so §9 states the form
+explicitly. Both numbers come from
+`git log --format='%s' | grep -c '^docs(agents)'` (and the same for `docs(plan)`); run
+them before quoting, because this paragraph is itself a state claim. The command counts
+the whole log, so it reads 12 the moment the commit carrying this paragraph lands: the
+snapshot above is the 109 commits before it.
+
+A rule survives a refactor; a fact about the tree does not. When a sentence here can be
+falsified by the tree, either date it or turn it into a command.
 
 ---
 
@@ -126,6 +148,27 @@ request gets a scratch arena from `util/arena_pool.zig`, reset after every messa
 |D8|Capabilities live in **comptime tables**; JSON Schemas are derived from them|One source of truth for name/description/schema/handler — advertised and implemented cannot drift|Hand-written JSON Schema per tool|
 |D9|Release artifacts are built with the **pinned stable Zig (0.17.1)**, never master; the master leg is a non-publishing canary|A moving toolchain makes releases unreproducible. Upstreams are parsed (D5), never compiled in, so their churn cannot break us|Releases from master nightly|
 |D10|Legacy clients are handled by **version inference, not a second code path**: absent `_meta` ⇒ `2025-06-18`|Old clients send no `_meta`; strict `-32602` would reject them. One parser with a version flag stays single-path|A second protocol implementation; dropping legacy support|
+
+### Decision triggers
+
+Thresholds, so a decision is not reinvented mid-task. Each one is derived from a row
+above; crossing one needs a new row in the table, not a judgement call.
+
+- **Add a runtime dependency** only when the alternative is security-sensitive code we
+  would have to own (TLS, crypto, compression) **and** it can be pinned by hash.
+  Otherwise write it in-repo (D1).
+- **Add a second code path** only when both paths are observable by a client. A
+  different input shape is one path with a flag, not two implementations (D10).
+- **Add a background thread** only when its work can block longer than a request may
+  stall. It owns its data, sleeps on its own clock rather than the server's `Io` (§11),
+  and its shutdown lives in the same commit (D3).
+- **Add a cache or an index** only after measuring the exact baseline it replaces, and
+  publish the numbers beside the code (P11 exclusion, §13).
+- **Change the on-disk format** only with a version field, a reader that rejects what it
+  does not understand, and a test for each rejection (D4, §7).
+- **Add a learned component** (PGO, learned index, learned policy) only with a measured
+  exact baseline and a measurable objective; otherwise it is unverifiable complexity
+  (§13).
 
 ### Update models considered (why D3 looks the way it does)
 
@@ -459,6 +502,32 @@ release may still attach a copy when `generated/index.jsonl` happens to exist in
 tagged checkout — that is a convenience for whoever holds that tag, never a baseline
 source. Rollback = publish the previous index; no rebuild.
 
+### Workflow rules
+
+Each rule below is a recorded item, paid for by a run that failed. A new workflow
+satisfies all of them.
+
+- **A workflow triggers exactly what it reads.** A `push`-only workflow must never read
+  `github.event.pull_request.*`. `src/util/workflow.zig` checks this statically
+  (`zig build workflows`); extend the checker rather than eyeballing a diff (CI-1).
+- **One baseline, one tag.** The baseline is an asset of a release, never a workflow
+  artifact — artifacts expire, releases do not (CI-2, CI-3).
+- **Fetch exactly the commit.** `git init`, `remote add`, `fetch --depth 1 origin <sha>`,
+  `checkout --detach FETCH_HEAD`; a `--filter=blob:none` clone still downloads the tree
+  and refs (CI-7).
+- **A step never pre-seeds a file another step parses.** Every file under `generated/`
+  is written by the run that owns it; an empty placeholder that a later `json.loads`
+  reads is a failed run waiting for its first dispatch (CI-10).
+- **A branch name carries the run identity** (`…-<date>-<run>`), or a second run the
+  same day dies at `checkout -b` (CI-6).
+- **A release ships everything the binary reads at startup** — the binary alone cannot
+  start (CI-8).
+- **Lint with CI's exact toolchain.** actionlint shells out to `shellcheck` when it is
+  on `PATH`, so a local pass without it is not a pass (CI-12, §10).
+- **Reproduce the step, not the workflow.** Extract the failing `run:` body, run it in a
+  throwaway tree with stubs, and show it failing before the fix and passing after; put
+  that evidence in the commit message (CI-10, CI-11, CI-12).
+
 ---
 
 ## 9. Verification and test layers
@@ -479,11 +548,14 @@ runs the cross-cutting handler tests on their own (below).
 |Cross-cutting handler tests|`src/regressions_test.zig` — the tests that need the real corpus and a loaded doc index at once. Part of `zig build test` (`src/root.zig` imports it) and runnable alone as `zig build test-regressions`|
 |Workflow consistency|`src/util/workflow.zig` (logic, tested in the main suite) and `tools/workflow_check.zig` (CLI) — `zig build workflows`|
 
-**Backlog rule:** a commit that fixes an item must add the test its layer owns, delete
-the item from `PLAN.md`, and record the chosen option in `PLAN.md`'s resolved table
-(§13 for 2026-11-09, §14–§16 for 2026-11-10). Never weaken an expectation to match the
-code — pick the option in `PLAN.md` first, then make the test match the chosen
-behaviour.
+**Backlog rule:** a fix adds the test its layer owns, in the same commit as the fix.
+The `PLAN.md` bookkeeping — deleting the resolved item and recording the chosen option
+in the resolved table (§13 for 2026-11-09, §14–§16 for 2026-11-10) — lands in one
+`docs(plan)` commit per chunk of fixes, which keeps each fix commit's diff to code and
+its test. Both halves are mandatory; only the batching is a choice, and it is the one
+the history uses (30 such commits in the first 109). Never weaken an expectation to
+match the code — pick the option in `PLAN.md` first, then make the test match the
+chosen behaviour.
 
 **Semantics the tests pin:** doc text verbatim except prefix stripping and line
 joining; the attachment rule; `tools/list` sorted by name and the index sorted by
@@ -496,6 +568,20 @@ boundaries, invariants, transitions, precedence, errors. Not wiring, mock echoes
 source-text assertions, or bare not-throw checks. If you change the fixture tree,
 regenerate the golden file deliberately and review the diff; never "fix" the golden
 test by editing it to match new output without understanding why it changed.
+
+**Bounded waits.** Every test that waits on a child process or a response carries a
+watchdog and a teardown that terminates the child; a hang must fail, not park the suite.
+One Windows pipe test held the whole suite until it got both (4e0f03c).
+
+**Canary parity.** One tree builds on 0.17.1 and master: select the shape at comptime
+(`src/util/json_array.zig`), never fork the tree, never weaken a gate, and run every
+gate on both before claiming support (D9; `5348ac2` is the commit that established the
+comptime shape selection).
+
+**Numbers are measured.** Any figure in a report, a commit message or a summary — line
+counts, record counts, latency, "N facts" — comes from a command that was run. A
+plausible unmeasured number is the same defect class as PROTO-11: an unvalidated value
+presented as data.
 
 **Verification report:** `zig build bench` runs `tools/bench.zig` against the built
 server with `--index tests/golden/index.jsonl` and prints build config, Zig version,
@@ -634,6 +720,21 @@ skill).
   project's own `build.zig.zon` while the parser read the scratch copy (CI-11).
 - **Build API:** `root_module` is a field of the options struct; `b.addOptions()` +
   `addOptionPath` is how tests receive built binary paths.
+- **Comptime peer-type narrowing:** `@min(runtime_u64, 1)` resolves to a `u20`-width
+  result, and a multiplication of it inherits that width — a runtime overflow that no
+  annotation on the literal prevents. Give the stored computation an explicit type
+  (`@as(u64, …)`) and annotate the local. `src/util/sleep.zig` hit this; the fix is
+  already applied and must not be "simplified" back.
+- **`orelse … catch` needs grouping** when combined: `(a orelse b) catch c`. Zig master
+  rejects the ungrouped form, so it is a canary failure, not a style preference.
+- **`@hasDecl(T, "name")`** is the supported way to select a shape across toolchain
+  versions (`src/util/json_array.zig`).
+- **`zig build run -- <args>`** forwards arguments only after `run_cmd.addPassthruArgs()`.
+- **Windows resources:** `root_module.addWin32ResourceFile(.{ .file, .include_paths })`
+  behind `target.result.os.tag == .windows`, and `res/` must be listed in
+  `build.zig.zon`'s `paths` or a package build loses it (DOC-4).
+- **`zig build --help`** prints the real step list; `zig fmt --exclude <path>` takes a
+  path and is repeatable — that is how the fixture tree is skipped.
 
 ---
 
@@ -684,6 +785,12 @@ Bound every input and output (query length, clamped `limit`, artifacts bounded b
   decision it implements.
 - Diagnostics go to stderr only; stdout is the protocol.
 - `zig fmt` is the formatter; the fixture tree is excluded.
+- **`.gitignore` rules are anchored.** `/docs/` is the `-femit-docs` output; an
+  unanchored `docs/` also swallowed `src/docs/`, and a fresh clone could not build
+  (4c6c569). Anchor every directory rule.
+- **One canonical artifact form:** fixed key order, `\n` only, one record per line,
+  sorted at the boundary; `.gitattributes` pins LF so a CRLF checkout cannot change a
+  hash (01064d7).
 
 ---
 
@@ -753,11 +860,53 @@ exists, and do not restate it here.
 - **Verify before claiming.** `zig build test` is the authority on compilation and
   behaviour; also run `zig build check` after corpus edits and the `zig fmt` gate
   before committing. Report only checks you actually ran.
-- **Git:** check `git log` / `git remote -v` instead of trusting this file (as of
-  2026-11-09: branches `main` and
-  `autoresearch/data-driven-programming-best-practices-for-build-20261109`, no remote,
-  history from `50bf5cd "first"`). One logical change per commit; amend or add,
-  never rewrite a published commit. Remove stray `docs/`/`.lib` from `-femit-docs`
-  runs before committing.
+- **Git:** run `git log --oneline -5` and `git remote -v`; never quote a branch list
+  from this file. The previous text here claimed "no remote" while `origin` was
+  `github.com/biehla/ZigMCP`, and was wrong within a day — the exact failure §1
+  describes. One logical change per commit; amend or add, never rewrite a published
+  commit. Remove stray `docs/`/`.lib` from `-femit-docs` runs before committing.
 - **Never** hand-edit `generated/`, edit `systems_programming_context_v1.md` to change
   behaviour, add a runtime dependency, or print to stdout outside the transport.
+- **Document hygiene.** Cite a symbol, never a line number. Date a state claim or turn
+  it into a command (§1). Keep one canonical copy of a list — a second copy drifts.
+  A statement this change falsifies is fixed or deleted in the same commit, never
+  softened into something merely unfalsifiable.
+- **`git log` is evidence.** Before touching a guarded line, read the commit that put
+  it there: it names the failure the guard exists for (e.g. `0ca5f79` explains the
+  explicit `u64` widths in `src/util/sleep.zig`). Then write a message that names the
+  failure, not the diff.
+
+---
+
+## 16. Failure catalogue
+
+Defect classes this repository has actually hit, in the order they were found. Read the
+relevant row before writing a parser, a loader, or a protocol surface: each is cheaper
+to prevent than to debug, and each already has a guard here.
+
+|#|Symptom|Item|The check that catches it|
+|---|---|---|---|
+|1|One unreadable or oversized file aborts a whole index run|IDX-1|degrade with a `reason`, continue, exit 0|
+|2|Hostile nesting overflows the stack before the bytes run out|IDX-8|count depth before `Ast.parse`; refuse above 256|
+|3|A truncated or hand-edited artifact is served|REL-9, REL-10|`doc_hash` re-verified at load; canonical order enforced|
+|4|A truncated `--previous` index is republished as complete|IDX-3|compare the sidecar's record count with the JSONL|
+|5|An empty placeholder is parsed as JSON|CI-10|each `generated/*` file is written only by the step that owns it|
+|6|A 200-character token is split mid-token|GUIDE-6|a token longer than the buffer stays whole|
+|7|An oversized line kills the server|SRV-1|answer `-32700`, discard the rest of the line, keep serving|
+|8|A negative sidecar count aborts the process|SRV-6|validate every count before formatting it|
+|9|An unvalidated sidecar member is echoed to clients|PROTO-11|type and sign checked; omitted on mismatch|
+|10|"Nothing matched" arrives as a protocol error|PROTO-12|normal result, `isError: true`, schema-shaped|
+|11|`Fixture` and `fixture` collide|PROTO-13|project keys exact, symbol paths case-insensitive|
+|12|CRLF changes a `doc_hash` and breaks the golden test|01064d7|`.gitattributes` LF; strip `\r` before hashing|
+|13|A `lib/**` include matches nothing|IDX-2|test the pattern against a real tree, not by reading the regex|
+|14|A zero poll interval spins a core|REL-1|clamp to the 100 ms floor|
+|15|Shutdown hangs on a network read|REL-2|remote fetch owned by the watcher, never the startup path|
+|16|A stale index is served invisibly|REL-4|`index_state`/`index_error` reachable from `doc_import_status`|
+|17|`.gitignore` hides a source tree|4c6c569|anchor directory rules; `git status` on a fresh clone|
+|18|A test hangs instead of failing|4e0f03c|watchdog plus terminate-on-teardown|
+|19|`zig fetch --save` edits the wrong manifest|CI-11|run it in a subshell inside the checkout it must edit|
+|20|The lint gate is green locally and red in CI|CI-12|run actionlint with `shellcheck` visible on `PATH`|
+|21|The release tarball cannot start|CI-8|unpack into an empty directory and run it|
+
+Add a row when a defect is fixed and no existing row would have caught it. A row that
+has never fired is still worth keeping: it is the checklist, not the history.
