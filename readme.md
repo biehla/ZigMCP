@@ -131,7 +131,7 @@ An unknown member, a missing required argument or a wrong type is invalid parame
 | `advice://guarantees` | Cross-cutting guarantees |
 | `advice://limits` | The source material's limits, and the evidence-label legend |
 | `advice://sources` | The S01–S24 registry with author, title and URL |
-| `docs://{project}/index` | Every indexed symbol of one project, as `path:line symbol` |
+| `docs://{project}/index` | One project's symbols as `path:line symbol`, at most 5 000 records; past that a truncation marker says how many are missing, and `doc_search` / `doc_get` reach the rest |
 | `docs://{project}/symbols/{symbol}` | One symbol's record, as a URI template |
 
 Advice resources are cacheable for an hour (`public`); anything derived from the doc

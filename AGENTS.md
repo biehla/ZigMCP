@@ -274,7 +274,7 @@ wrong type) are `-32602`.
 |`advice://guarantees`|advice|Guarantees with labels, guidance, sources|
 |`advice://limits`|advice|Limits + evidence-label legend|
 |`advice://sources`|advice|S01–S24 with author, title, kind, URL|
-|`docs://{project}/index`|index|`path:line symbol` per record; one listed per project in the loaded index|
+|`docs://{project}/index`|index|`path:line symbol` per record, at most 5 000 of them, then a truncation marker naming the remainder (`max_index_listing_records`, PROTO-10); one listed per project in the loaded index|
 |`docs://{project}/symbols/{symbol}`|index|One record; exposed as a **resource template** (unbounded space)|
 
 `resources/list` itself carries the **index** cache hint because its contents depend
