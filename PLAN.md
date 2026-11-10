@@ -1,8 +1,11 @@
 # PLAN.md — defects, edge cases, limitations, and guideline deviations
 
-Status: open backlog; ENV-1 is resolved, nothing else is fixed yet. Scope: everything
-found by reading the tree on 2026-11-09. `AGENTS.md` remains the spec of record for
-behaviour; the accepted gaps are summarised in its §14, which this file expands.
+Status: open backlog; ENV-1 is resolved, nothing else is fixed yet. Two sources: a
+read-through of the tree on 2026-11-09, and a breakage campaign the same day that
+fuzzed the stdio surface and the indexer, profiled the hot paths, and inspected a
+`ReleaseSafe` PE with REA — method, measurements and negative results in §12.
+`AGENTS.md` remains the spec of record for behaviour; the accepted gaps are summarised
+in its §14, which this file expands.
 
 IDs are stable — reference them in commits (`fix(ci): CI-1`). Each item is one
 sentence of problem plus 2–3 options; "Verify" is the cheapest check that the fix
@@ -30,6 +33,9 @@ previously produced a 0-byte binary.
 
 ### Recipes
 
+On Windows every `zig-out/bin/<tool>` below is `zig-out/bin/<tool>.exe`, and the
+blocks assume a POSIX shell.
+
 ```bash
 # wire format: one request per line, response on the next line
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"doc_import_status","arguments":{"bogus":1},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}' | zig-out/bin/zigmcp
@@ -50,6 +56,25 @@ python -c "print(' '*70000)" | zig-out/bin/zigmcp; echo "exit=$?"
 
 # deep nesting (SRV-4): 100k nested arrays
 python -c "print('{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"x\",\"params\":'+'['*100000+']'*100000+'}')" | zig-out/bin/zigmcp
+```
+
+```bash
+# sidecar panic (SRV-6) and sidecar type leak (PROTO-11)
+printf '%s\n' '{"project":"p","commit":"c","path":"a.zig","line":1,"kind":"fn","symbol":"s","doc":"d","doc_hash":"h"}' > .probe/s.jsonl
+printf '%s' '{"projects":{"p":{"files_degraded":-1}}}' > .probe/s.status.json
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"doc_import_status","arguments":{}}}' | zig-out/bin/zigmcp --index .probe/s.jsonl; echo "exit=$?"   # exit 3, panic
+
+# indexer stack overflow (IDX-8): Debug dies at 2000 nested parens (~4 KB), ReleaseSafe at 10000
+python -c "print('pub const v = ' + '('*2000 + '1' + ')'*2000 + ';')" > .probe/deep.zig
+zig-out/bin/indexer --out .probe/deep.jsonl --source p=c=.probe --include deep.zig; echo "exit=$?"   # exit 3221225477; regenerate with 10000 for ReleaseSafe
+
+# search amplification (SRV-7): 50k-record index, then one 60 KB query
+python -c "import json;[print(json.dumps({'project':'p','commit':'c','path':'m.zig','line':i+1,'kind':'fn','symbol':'mod.fn%d'%i,'container':'mod','doc':'doc %d about memory'%i,'doc_hash':'h'})) for i in range(50000)]" > .probe/big.jsonl
+python -c "import json;print(json.dumps({'jsonrpc':'2.0','id':1,'method':'tools/call','params':{'name':'doc_search','arguments':{'query':'xyz '*15000}}}))" | zig-out/bin/zigmcp --index .probe/big.jsonl   # ~20 s for one line, ReleaseSafe
+
+# case-colliding projects (PROTO-13)
+printf '%s\n' '{"project":"Fixture","commit":"c1","path":"A.zig","line":1,"kind":"fn","symbol":"a","doc":"d","doc_hash":"h"}' '{"project":"fixture","commit":"c2","path":"b.zig","line":2,"kind":"fn","symbol":"b","doc":"d","doc_hash":"h"}' > .probe/case.jsonl
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"docs://fixture/index"}}' | zig-out/bin/zigmcp --index .probe/case.jsonl   # lists both records
 ```
 
 ---
@@ -76,7 +101,10 @@ python -c "print('{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"x\",\"params\":'+'[
 - **CI-3 — corpus validation is not in CI.** `ci.yml` runs `zig build test` and `fmt`
   but not `zig build check`, so an invalid corpus merges green. Options: (a) add a
   `zig build check` step; (b) fold `check` into `test`; (c) run it in a separate
-  workflow. Verify: break an `Sxx` id and watch CI fail.
+  workflow. Measured: a corpus whose fact cites `S99` and one whose rule considers
+  `P99` both start and serve normally, and a corpus with `P03` renamed to `P99` serves
+  11 patterns silently — only `zig build check` rejects them, and CI never runs it.
+  Verify: break an `Sxx` id and watch CI fail.
 
 - **CI-4 — `sources.zon` scope is half-applied.** Both workflows take only the first
   `include` and ignore `exclude`. Options: (a) parse all globs in the plan step and
@@ -161,6 +189,36 @@ python -c "print('{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"x\",\"params\":'+'[
   (b) cap and append a truncation marker; (c) drop the resource in favour of
   `doc_search`. Verify: read it against a full index and measure bytes.
 
+- **PROTO-11 — `doc_import_status` echoes unvalidated sidecar values, breaking its
+  own `outputSchema`.** `files_total`, `files_degraded` and `degraded` are copied
+  straight from `<index>.status.json` into `structuredContent`, so a sidecar holding
+  `"files_total":"oops"` or `"files_degraded":1.5` yields a result whose types
+  contradict the advertised schema (`integer`) and a client that validates the
+  response rejects it. Options: (a) type-check each value and omit the mismatching
+  fields; (b) parse the sidecar into one typed struct so a wrong type fails the whole
+  sidecar and is reported; (c) drop sidecar data from the response. Verify: the §0
+  sidecar recipe with a string `files_total` returns a result with no `files_total`.
+
+- **PROTO-12 — a "nothing matched" result carries no `structuredContent` although the
+  tool declares `outputSchema`.** `doc_search`, `doc_get` and `advice_lookup` all
+  advertise an `outputSchema` in `tools/list`, but the no-match path returns
+  `{content, isError}` only, so a typed client cannot tell "no result" from a
+  malformed one and its own schema validation fails. Options: (a) always emit
+  `structuredContent` (`{query, count: 0, results: []}`, `{project, symbol: null}`)
+  with `isError: true`; (b) stop advertising `outputSchema` on tools with an
+  empty-result path; (c) document that `isError` overrides the schema. Verify:
+  `doc_search` with `"query":"zzzz"` returns `structuredContent.count == 0`.
+
+- **PROTO-13 — two projects differing only in case are conflated.** Project keys are
+  compared with `eqlIgnoreCase` in the `doc_search` project filter, in
+  `docs://{project}/index` and in `docs://{project}/symbols/{symbol}`, while
+  `resources/list` and `doc_import_status` treat the keys as distinct — so an index
+  holding `Fixture` and `fixture` advertises two URIs that both return the union, and
+  a project-scoped search returns records from both. Options: (a) compare project
+  keys exactly and keep case-insensitivity for symbols only; (b) reject an index
+  whose project keys collide case-insensitively; (c) keep and document. Verify: a
+  two-record index with `Fixture`/`fixture` → `docs://fixture/index` lists one record.
+
 ---
 
 ## 3. Server runtime
@@ -181,14 +239,47 @@ python -c "print('{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"x\",\"params\":'+'[
   Verify: fault-inject an allocator failure in a test.
 
 - **SRV-4 — deep JSON nesting is unbounded.** `std.json` recursion on 100k nested
-  arrays can exhaust the stack. Options: (a) pre-scan depth and reject past a limit;
-  (b) cap line length (SRV-1) which bounds depth; (c) leave. Verify: the nesting
-  recipe in §0.
+  arrays can exhaust the stack. Measured: not reachable through stdio today — 10 000
+  nested arrays answer `-32602`, and 100 000 exceed the 64 KiB reader buffer and hit
+  SRV-1 first, which bounds depth to roughly 32 000. Fixing SRV-1 with option (b)
+  (grow the buffer to a cap) re-opens this, so bound depth in the same change; IDX-8
+  is the same recursion hazard in the indexer's parser, where it *is* reachable.
+  Options: (a) pre-scan depth and reject past a limit; (b) cap line length (SRV-1)
+  which bounds depth; (c) leave. Verify: the nesting recipe in §0.
 
 - **SRV-5 — index reclamation runs under the spin lock.** `reclaimLocked` frees an
   index while holding the store lock, so readers spin for the duration. Options:
   (a) move the free outside the lock into an owner thread; (b) accept it (index free
   is short); (c) use a mutex instead of spinning. Verify: bench under a reload loop.
+
+- **SRV-6 — a negative `files_degraded` in the status sidecar panics the server.**
+  `tools.zig` does `@intCast(files_degraded.integer)`, so `<index>.status.json`
+  holding `{"projects":{"p":{"files_degraded":-1}}}` aborts the process with
+  `panic: integer does not fit in destination type` (exit 3 in Debug **and**
+  ReleaseSafe) on the first `doc_import_status` call. The sidecar is ordinary local
+  data: a hand edit or a truncated indexer run is enough. Options: (a) validate the
+  sidecar once at load and reject entries that fail; (b) use
+  `std.math.cast(usize, …)` and drop the count when it returns null; (c) clamp to 0.
+  Verify: the §0 sidecar recipe exits 0 and omits `files_degraded`.
+
+- **SRV-7 — search cost scales with query tokens × records, so one request can hold
+  the server for tens of seconds.** `docs/search.zig` walks every token of the query
+  for every record, and a 60 KB line yields ~15 000 tokens. Measured on a 50 000-record
+  index in ReleaseSafe: `"memory"` 0.24 s, `"xyz " * 15000` **19.70 s** for one
+  request and one line (a Debug build takes 131 s). The server is single-threaded, so
+  the stall is client-chosen.
+  Options: (a) cap the query (e.g. 4 KiB, 32 tokens) and return `-32602`; (b) build
+  the token inverted index that §9 lists as P11's precondition; (c) score only the
+  first N tokens. Verify: the §0 amplification recipe answers in well under 1 s.
+
+- **SRV-8 — a bad command line reports a bare Zig error name, exits 1, and prints no
+  usage.** `zigmcp --bogus` prints `zigmcp: cannot parse arguments (UnknownArgument)`
+  then `error: UnknownArgument` (a Debug build additionally dumps a full stack trace
+  with absolute source paths) and exits 1, while `indexer --bogus` prints its usage
+  line and exits 2. `--help` exists but is never offered on error. Options: (a) catch
+  these errors in `main`, print the usage block to stderr and exit 2; (b) print one
+  line without the Zig error name; (c) keep and document the exit codes.
+  Verify: `zigmcp --bogus; echo $?` prints usage and exits 2.
 
 ---
 
@@ -232,6 +323,36 @@ python -c "print('{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"x\",\"params\":'+'[
   first non-identifier token; (c) assert on nested tokens. Verify: a fixture with a
   nested decl inside an error set.
 
+- **IDX-8 — deeply nested source overflows the stack inside `std.zig.Ast.parse` and
+  kills the whole run.** A file of nested parens is enough: the Debug `indexer` dies
+  at 2 000 (4 KB) and the **ReleaseSafe** binary survives 5 000 but dies at 10 000
+  (20 KB); nested blocks, nested anonymous structs and nested container declarations
+  all reproduce at 20 000. The death is `Stack overflow (no address available)` with
+  exit status 3221225477 (0xC0000005), writing neither records nor a status sidecar,
+  so one pathological upstream file aborts every project in that invocation — the same
+  abort class as IDX-1, different cause, and the failure "degrade, never skip"
+  forbids. Attribution: a probe that only calls `Ast.parse` on the same bytes crashes
+  identically, so the walker is not the cause; `gdb -batch` shows a SIGSEGV whose
+  frames repeat address-for-address (`#1` and `#11` are the same function), i.e.
+  unbounded recursion.
+  Options: (a) pre-scan each file for bracket depth (a byte counter over `{([`) and
+  mark it degraded above a limit; (b) run the parse on a thread with an explicit
+  `stack_size`; (c) parse one file per child process. Verify: the §0 nesting recipe
+  exits 0 and records a degraded entry.
+
+- **IDX-9 — record line numbers rescan the file from offset 0, so the indexer is
+  quadratic in declarations per file.** `lineOf` calls
+  `std.zig.findLineColumn(tree.source, off)` for every record, which walks from the
+  first byte of the file. Measured on the default Debug build, one file of documented
+  `fn`s: 5 000 decls 1.17 s, 10 000 4.63 s, 25 000 29.65 s (4×, then 25× — clean n²),
+  50 000 decls 113 s for a 1.7 MB file — while a 4 MiB file with one documented
+  declaration takes 0.10 s, so the cost tracks record count × file size, not either
+  alone. Options:
+  (a) build a line-start table once per file and binary-search it; (b) carry the
+  previous record's line and count newlines between tokens; (c) accept and budget
+  declarations per file. Verify: the timing ladder stays linear (25 000 decls under
+  ~2 s).
+
 ---
 
 ## 5. Index loading and hot reload
@@ -269,6 +390,36 @@ python -c "print('{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"x\",\"params\":'+'[
   both is missed. Options: (a) compare the content hash after each mtime change;
   (b) also compare inode/creation time; (c) always re-read on any stat change.
   Verify: rewrite with equal size and restored mtime.
+
+- **REL-8 — every index-loading failure is reported as `MalformedRecord`.**
+  `index.zig`'s `loadFile` maps all I/O errors (`FileNotFound`, `AccessDenied`, a
+  directory, `StreamTooLong` past the 256 MiB cap) onto `MalformedRecord`, so
+  `--index missing.jsonl`, `--index .` and a 300 MiB artifact all log "cannot load …
+  (MalformedRecord)". An operator cannot tell a missing file from a corrupt one, nor a
+  size rejection from a syntax error. Options: (a) propagate the underlying error and
+  print `@errorName`; (b) map the known I/O failures to distinct messages; (c) keep
+  and document the collapse. Verify: `--index missing.jsonl` and `--index <257 MiB
+  file>` produce different log lines.
+
+- **REL-9 — `doc_hash` is neither verified nor shape-checked on load.** The indexer
+  writes a lowercase-hex SHA-256 of `doc` and `doc_get` returns it, but nothing
+  recomputes or validates it and any string is accepted, so a hand-edited or partially
+  corrupted artifact serves changed documentation under a plausible-looking hash —
+  defeating the provenance the field exists for. Options: (a) verify each record at
+  load (one SHA-256 per record; measure against the 256 MiB ceiling); (b) verify
+  lazily in `doc_get`/`doc_search` output; (c) at minimum require 64 hex characters
+  and document the value as unverified. Verify: change one `doc` byte, keep the hash,
+  and expect the load to fail (or the tool to flag it).
+
+- **REL-10 — the canonical record order is not enforced on load.** §7 pins records to
+  `(project, symbol)` then `(path, line)`, but `Columnar.finish` and `load` accept any
+  order, so a reordered artifact silently changes `docs://{project}/index`, the order
+  of equal scores in search, and which record `doc_get` returns for a duplicated
+  symbol (IDX-4). Options: (a) verify the order in `load` and reject an unsorted
+  artifact;
+  (b) sort at load (one sort of the span table); (c) document that only the indexer's
+  output is canonical. Verify: reverse the two lines of a two-record index and expect
+  `load` to fail.
 
 ---
 
@@ -350,6 +501,17 @@ Rules being broken are in `AGENTS.md` §5, §11, §12 (code/corpus conventions) 
   vs an absolute path). Options: (a) one snippet in a file both read; (b) keep
   (different contexts); (c) make the release note link to the readme.
 - **DOC-3 — `AGENTS.md` §14 and `readme.md` restate the same gaps** (see GUIDE-8).
+
+- **DOC-4 — the Windows release binary carries no manifest, version resource or icon,
+  and no load-config.** REA on a `ReleaseSafe` build (`inspect_pe_resources`,
+  `inspect_pe_load_config`) reports `resources: []` and `load_config: null` for a
+  PE32+ image importing only `ntdll.dll` (65), `KERNEL32.dll` (1) and `CRYPT32.dll`
+  (9), with no delay imports: no `VERSIONINFO` (Explorer shows no product or version),
+  no `asInvoker` manifest (Windows applies compatibility heuristics), no icon, and no
+  CFG/GS metadata. Options: (a) add a manifest and version resource through
+  `build.zig`'s Windows options; (b) ship a `.rc` and compile it with `zig rc`;
+  (c) accept and note it in the release notes. Verify: `inspect_pe_resources` shows a
+  manifest and a version entry.
 
 ---
 
@@ -436,6 +598,18 @@ not exist yet, and this table says which.
 |DOC-2|—|doc lint comparing the two snippets|
 |DOC-3|—|same as GUIDE-8|
 |ENV-1|—|resolved; `zig build test` exiting 0 is the check|
+|PROTO-11|—|`regressions_test.zig` `Harness` + a temp index and sidecar; assert the field is absent|
+|PROTO-12|—|protocol layer: the no-match path returns `structuredContent` with `count: 0`|
+|PROTO-13|—|handler test with a case-colliding two-project index|
+|SRV-6|—|`regressions_test.zig` + a temp sidecar with `files_degraded: -1`; assert no panic|
+|SRV-7|—|timing only (`zig build bench` and the §0 recipe); needs a large fixture index|
+|SRV-8|—|protocol layer: spawn the binary with `--bogus`, assert usage text and exit 2|
+|IDX-8|—|indexer CLI harness with a generated deep-nesting fixture; assert rc 0 + degraded entry|
+|IDX-9|—|indexer CLI harness measuring the 5k/10k/25k ladder, or a unit test on the line table|
+|REL-8|—|unit test: `loadFile` on a missing path and on a directory yields distinct errors|
+|REL-9|—|unit test: `load` rejects a record whose `doc_hash` is not the SHA-256 of `doc`|
+|REL-10|—|unit test: `load` rejects records that are not in `(project, symbol)` order|
+|DOC-4|—|`inspect_pe_resources` on a `ReleaseSafe` artifact (packaging smoke test)|
 
 Every item above that names a handler can use the `Harness` in
 `src/regressions_test.zig` — it builds a real corpus and an empty index, so a new
@@ -451,3 +625,79 @@ test is a few lines.
    costlier.
 5. TEST-1…TEST-6 — pin each of the above so it cannot regress.
 6. Remaining limitations by demand: PROTO-10, REL-1, REL-5.
+7. Crash paths found by the campaign: SRV-6 (a data file panics the server) and IDX-8
+   (an upstream source kills the indexer) — both are cheap to bound and both are
+   reachable without a malicious peer.
+8. Measured hot spots: IDX-9 (quadratic indexer) and SRV-7 (client-chosen stall).
+9. Contract gaps: PROTO-11, PROTO-12, PROTO-13, REL-8, REL-9, REL-10, DOC-4.
+
+---
+
+## 12. Breakage campaign, 2026-11-09
+
+Everything below was executed on this machine: Zig 0.17.1, Windows 10.0.26100, x64,
+`ReleaseSafe` unless a line says otherwise.
+
+### Method
+
+|Technique|Instrument|Surface|
+|---|---|---|
+|Wire fuzzing|`wire_once.py` — one fresh server per case, asserting exit code, line count, id and JSON validity|envelope, `_meta`, ids, params, tool arguments, resources, prompts, framing|
+|Artifact fuzzing|crafted JSONL, ZON and sidecar inputs; the property tests already in `docs/index.zig`|loader, corpus, `doc_import_status`|
+|Indexer fuzzing|generated `.zig` sources, one shape per directory|AST walk, line numbers, doc extraction|
+|Attribution probe|`parse_probe.zig` — reads a file and calls `std.zig.Ast.parse` only|parser vs walker|
+|Profiling|50 000-record synthetic index, per-request wall clock, RSS from `tasklist`|search, reload, sidecar|
+|Static inspection|REA `inspect_pe_imports`, `inspect_pe_resources`, `inspect_pe_load_config`|release artifact|
+
+### What broke
+
+|Finding|Technique|Evidence|
+|---|---|---|
+|SRV-6 panics on `files_degraded: -1`|crafted sidecar|exit 3 in Debug **and** ReleaseSafe|
+|PROTO-11 sidecar types reach `structuredContent`|crafted sidecar|`"files_total":"oops"`, `"files_degraded":1.5`|
+|PROTO-12 no-match result lacks `structuredContent`|wire fuzzing|3 tools, each advertising `outputSchema`|
+|PROTO-13 case-colliding projects merge|crafted index|both URIs return both records|
+|SRV-7 60 KB query costs ~20 s|profiling|0.24 s → 19.70 s on 50 000 records (Debug 131 s)|
+|SRV-8 CLI error UX|CLI probes|exit 1, no usage; Debug adds a stack trace|
+|IDX-8 `Ast.parse` stack overflow|indexer fuzzing + probe + gdb|Debug dies at 4 KB, ReleaseSafe at 20 KB → exit 3221225477|
+|IDX-9 quadratic line lookup|profiling|Debug: 1.17 s / 4.63 s / 29.65 s at 5k / 10k / 25k decls|
+|REL-8 one error name for every I/O failure|CLI probes|missing file and a directory both `MalformedRecord`|
+|REL-9 `doc_hash` unverified|source read|—|
+|REL-10 canonical order unenforced|source read|—|
+|DOC-4 PE has no resources or load-config|REA|`resources: []`, `load_config: null`|
+
+### What held
+
+- **Wire robustness.** Duplicate keys, a BOM, raw invalid UTF-8, lone surrogates, NUL
+  escapes, `params` of every wrong type, `id` as float/bool/overflowing integer, and
+  every wrong-typed tool argument answered `-32700`, `-32600` or `-32602` — the one
+  exception is the known PROTO-2 hole, which answers a successful result.
+  Notifications never produced a reply, and no case crashed: the only process exits
+  were SRV-1's clean stdin failure on lines of 65 536 bytes or more.
+- **Index encoding.** A `doc` holding a raw `0xFF`, a truncated `0xC3` or a `\ud800`
+  escape is rejected by the loader, so invalid UTF-8 never reaches the wire; records
+  carrying U+0000 and U+001F escapes load and still produce a valid JSON response.
+- **No format-string path.** `docs://{s}/index`, `docs://%/symbols/%s`, a 60 KB URI and
+  an empty URI all return `-32602` and no crash.
+- **SRV-4 is unreachable behind SRV-1.** 10 000 nested arrays answer `-32602`;
+  100 000 exceed the reader buffer and hit SRV-1 first, which bounds JSON depth.
+- **Reload is leak-free.** Twelve swaps alternating 5 000/5 200 records held RSS at
+  7.2–7.8 MB, and a truncated write left the previous index serving (5 200 records,
+  old commit) — REL-4's degradation works.
+- **Indexer resilience.** 4 MiB doc comments, NUL-only files, empty files and unclosed
+  error sets are all handled; only nesting depth (IDX-8) and declaration count
+  (IDX-9) hurt.
+- **Release dependencies.** `ntdll.dll` (65), `KERNEL32.dll` (1), `CRYPT32.dll` (9),
+  no delay imports — no third-party runtime dependency (D1).
+- **Corpus loading is fail-fast, not fail-open.** A truncated or empty
+  `patterns.zon`, an unknown `.evidence` tag and a missing `rules.zon` each stop
+  start-up with exit 1 and a `file:line` diagnostic, and no handler is ever reached
+  with a broken tree. Parseable-but-invalid corpora are the opposite problem: they
+  serve silently (CI-3).
+- **Corpus not embedded.** A pattern name from `patterns.zon` does not appear in the
+  binary, confirming CI-8: a release needs `data/advice` beside it.
+
+The drivers and fixture trees lived in `.probe/` (gitignored). The crash and timing
+items have recipes in §0; the rest carry a `Verify:` line naming the exact command or
+tool, and REL-9/REL-10 are single-record edits over the PROTO-13 fixture.
+
