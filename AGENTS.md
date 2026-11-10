@@ -430,7 +430,7 @@ trusted as before.
 
 |Workflow|Trigger|Does|
 |---|---|---|
-|`ci.yml`|push, PR|`zig build test` + `zig fmt --check . --exclude tests/fixtures` on Zig 0.17.1 × {ubuntu, macos, windows} (blocking); same on Zig master (canary, `continue-on-error`)|
+|`ci.yml`|push, PR|`zig build test`, `zig build check`, `zig build test-regressions`, `zig build workflows`, `zig fmt --check . --exclude tests/fixtures` and the pinned actionlint on Zig 0.17.1 × {ubuntu, macos, windows} (blocking); the same on Zig master (canary, `continue-on-error`)|
 |`bump-master.yml`|daily 03:17 UTC, manual|Builds a baseline index (the rolling `index` release's `index.jsonl` asset, else rebuilt from current pins); re-resolves each branch with `zig fetch --save` in a scratch `zig init`; indexes the new pins; opens **one** PR updating `data/sources.zon` **only if the index differs**, with per-project old→new commits and changed-record counts; uploads the JSONL diff as an artifact. A dead branch fails only its project and keeps the old pin|
 |`index.yml`|push to `main` touching `data/sources.zon`, manual|Indexes the pinned trees (incremental against the rolling `index` release, rebuilt from scratch when it does not exist yet), merges and sorts, merges status sidecars, uploads `generated/` as the `index` artifact, and publishes `index.jsonl` to the rolling `index` release with `gh release upload --clobber`|
 |`release.yml`|tag `v*`|`zig build -Doptimize=ReleaseSafe` × 3 OS on 0.17.1; attaches binaries (+ `generated/index.jsonl` if present) and a client-config snippet|
@@ -505,9 +505,10 @@ zig fmt --check . --exclude tests/fixtures   # the fixture tree is deliberately 
 ```
 
 - **Workflow gates:** `zig build workflows` (trigger/expression consistency, CI-1)
-  and `actionlint -ignore 'runtime "node20" is deprecated' .github/workflows/*.yml`.
-  The ignore suppresses a runner-runtime deprecation that every `uses:` in the tree
-  shares; bumping those action majors is tracked separately as `CI-9`.
+  and `go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 .github/workflows/*.yml`
+  — the same pinned command `ci.yml` runs. Newer actionlint releases additionally
+  report that `actions/checkout@v4` and friends run on a deprecated node20 runtime;
+  that is the separate, pre-existing `CI-9` item, not a gate failure.
 - **Toolchain:** Zig 0.17.1 at `C:\Users\Sethticles\scoop\apps\zig\0.17.1`;
   `.minimum_zig_version = "0.17.1"`; global cache `C:\Users\Sethticles\AppData\Local\zig`.
 - **Server options:** `--index <path-or-url>` / `ZIGMCP_INDEX`; `--advice-dir <path>`

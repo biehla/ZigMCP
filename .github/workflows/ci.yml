@@ -31,6 +31,20 @@ jobs:
         # The indexer fixture tree contains a deliberately unparseable file and
         # a warning-only file, so it is excluded from the formatter gate.
         run: zig fmt --check . --exclude tests/fixtures
+      - name: Validate the advice corpus
+        # CI-3: without this step an invalid corpus (a dangling Sxx/Pxx id, a
+        # missing evidence label) merges green and only fails at run time.
+        run: zig build check
+      - name: Backlog regression tests
+        run: zig build test-regressions
+      - name: Workflow trigger/expression consistency
+        # CI-1: actionlint accepts an event payload reference the declared
+        # triggers cannot produce; this does not.
+        run: zig build workflows
+      - name: Lint the workflows
+        # Pinned to the version AGENTS.md §10 documents, so the local gate and
+        # this step run the same linter.
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 .github/workflows/*.yml
 
   canary:
     name: Canary (Zig master)
@@ -49,3 +63,17 @@ jobs:
         # The indexer fixture tree contains a deliberately unparseable file and
         # a warning-only file, so it is excluded from the formatter gate.
         run: zig fmt --check . --exclude tests/fixtures
+      - name: Validate the advice corpus
+        # CI-3: without this step an invalid corpus (a dangling Sxx/Pxx id, a
+        # missing evidence label) merges green and only fails at run time.
+        run: zig build check
+      - name: Backlog regression tests
+        run: zig build test-regressions
+      - name: Workflow trigger/expression consistency
+        # CI-1: actionlint accepts an event payload reference the declared
+        # triggers cannot produce; this does not.
+        run: zig build workflows
+      - name: Lint the workflows
+        # Pinned to the version AGENTS.md §10 documents, so the local gate and
+        # this step run the same linter.
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 .github/workflows/*.yml

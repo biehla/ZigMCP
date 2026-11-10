@@ -70,6 +70,9 @@ pub fn collectFindings(
     var line_number: usize = 0;
     var lines = std.mem.splitScalar(u8, text, '\n');
     while (lines.next()) |raw| : (line_number += 1) {
+        // A full-line comment never runs, so a reference quoted in prose is not
+        // a defect.
+        if (std.mem.startsWith(u8, std.mem.trimStart(u8, raw, " \t"), "#")) continue;
         var rest = raw;
         while (std.mem.indexOf(u8, rest, event_prefix)) |position| {
             const after = rest[position + event_prefix.len ..];
@@ -138,6 +141,29 @@ test "a declared trigger is not reported" {
     try std.testing.expectEqual(@as(usize, 2), triggers.items.len);
     try std.testing.expectEqualStrings("workflow_run", triggers.items[0]);
     try std.testing.expectEqualStrings("push", triggers.items[1]);
+
+    var findings: std.ArrayList(Finding) = .empty;
+    try collectFindings(gpa, text, triggers.items, &findings);
+    try std.testing.expectEqual(@as(usize, 0), findings.items.len);
+}
+
+test "a reference inside a comment is not a finding" {
+    const text =
+        \\on:
+        \\  push:
+        \\jobs:
+        \\  a:
+        \\    # the previous version tested github.event.workflow_run
+        \\    if: github.event_name == 'push'
+        \\
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    var triggers: std.ArrayList([]const u8) = .empty;
+    try collectTriggers(gpa, text, &triggers);
 
     var findings: std.ArrayList(Finding) = .empty;
     try collectFindings(gpa, text, triggers.items, &findings);
