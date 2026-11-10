@@ -1,0 +1,212 @@
+﻿2026-11-10T05:20:22.4222802Z Current runner version: '2.338.2'
+2026-11-10T05:20:22.4243211Z ##[group]Runner Image Provisioner
+2026-11-10T05:20:22.4243733Z Hosted Compute Agent
+2026-11-10T05:20:22.4244069Z Version: 20261103.629
+2026-11-10T05:20:22.4244441Z Commit: 15dbd9ccb5dbf34fae002b6ed1a2670f52df37bc
+2026-11-10T05:20:22.4244837Z Build Date: 2026-11-03T17:26:59Z
+2026-11-10T05:20:22.4245299Z Worker ID: {59ac9a0e-d3f7-4ce2-a0d9-dbaabc07119d}
+2026-11-10T05:20:22.4245694Z Region: westus2
+2026-11-10T05:20:22.4245983Z Cloud: Azure
+2026-11-10T05:20:22.4246284Z ##[endgroup]
+2026-11-10T05:20:22.4247056Z ##[group]Operating System
+2026-11-10T05:20:22.4247403Z Microsoft Windows Server 2025
+2026-11-10T05:20:22.4247733Z 10.0.26100
+2026-11-10T05:20:22.4248071Z Datacenter
+2026-11-10T05:20:22.4248365Z ##[endgroup]
+2026-11-10T05:20:22.4248666Z ##[group]Runner Image
+2026-11-10T05:20:22.4249253Z Image: windows-2025-vs2026
+2026-11-10T05:20:22.4249583Z Version: 20261103.298.1
+2026-11-10T05:20:22.4250520Z Included Software: https://github.com/actions/runner-images/blob/win25-vs2026/20261103.298/images/windows/Windows2025-VS2026-Readme.md
+2026-11-10T05:20:22.4251408Z Image Release: https://github.com/actions/runner-images/releases/tag/win25-vs2026%2F20261103.298
+2026-11-10T05:20:22.4251990Z ##[endgroup]
+2026-11-10T05:20:22.4252617Z ##[group]GITHUB_TOKEN Permissions
+2026-11-10T05:20:22.4253965Z Contents: read
+2026-11-10T05:20:22.4254270Z Metadata: read
+2026-11-10T05:20:22.4254565Z ##[endgroup]
+2026-11-10T05:20:22.4255975Z Secret source: Actions
+2026-11-10T05:20:22.4256457Z Cache mode: write
+2026-11-10T05:20:22.4256946Z Prepare workflow directory
+2026-11-10T05:20:22.4488754Z Prepare all required actions
+2026-11-10T05:20:22.4523344Z Getting action download info
+2026-11-10T05:20:22.7575802Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+2026-11-10T05:20:22.8430944Z Download action repository 'mlugg/setup-zig@v2' (SHA:d1434d08867e3ee9daa34448df10607b98908d29)
+2026-11-10T05:20:26.4098339Z Complete job name: Release (pinned Zig windows-latest)
+2026-11-10T05:20:26.5335882Z ##[group]Run actions/checkout@v4
+2026-11-10T05:20:26.5336968Z with:
+2026-11-10T05:20:26.5337370Z   repository: biehla/ZigMCP
+2026-11-10T05:20:26.5341747Z   token: ***
+2026-11-10T05:20:26.5342163Z   ssh-strict: true
+2026-11-10T05:20:26.5342574Z   ssh-user: git
+2026-11-10T05:20:26.5343001Z   persist-credentials: true
+2026-11-10T05:20:26.5343475Z   clean: true
+2026-11-10T05:20:26.5343914Z   sparse-checkout-cone-mode: true
+2026-11-10T05:20:26.5344437Z   fetch-depth: 1
+2026-11-10T05:20:26.5344845Z   fetch-tags: false
+2026-11-10T05:20:26.5345265Z   show-progress: true
+2026-11-10T05:20:26.5345694Z   lfs: false
+2026-11-10T05:20:26.5346100Z   submodules: false
+2026-11-10T05:20:26.5346556Z   set-safe-directory: true
+2026-11-10T05:20:26.5347058Z   allow-unsafe-pr-checkout: false
+2026-11-10T05:20:26.5347684Z ##[endgroup]
+2026-11-10T05:20:26.6404679Z Syncing repository: biehla/ZigMCP
+2026-11-10T05:20:26.6406208Z ##[group]Getting Git version info
+2026-11-10T05:20:26.6406879Z Working directory is 'D:\a\ZigMCP\ZigMCP'
+2026-11-10T05:20:26.6896442Z [command]"C:\Program Files\Git\bin\git.exe" version
+2026-11-10T05:20:27.0036368Z git version 2.56.0.windows.4
+2026-11-10T05:20:27.0079490Z ##[endgroup]
+2026-11-10T05:20:27.0095943Z Temporarily overriding HOME='D:\a\_temp\e6f73143-c846-4832-a6c2-8b0b8930f7fd' before making global git config changes
+2026-11-10T05:20:27.0096597Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-10T05:20:27.0103919Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\ZigMCP\ZigMCP
+2026-11-10T05:20:27.0865172Z Deleting the contents of 'D:\a\ZigMCP\ZigMCP'
+2026-11-10T05:20:27.0903329Z ##[group]Initializing the repository
+2026-11-10T05:20:27.0925003Z [command]"C:\Program Files\Git\bin\git.exe" init D:\a\ZigMCP\ZigMCP
+2026-11-10T05:20:27.1640890Z Initialized empty Git repository in D:/a/ZigMCP/ZigMCP/.git/
+2026-11-10T05:20:27.1685484Z [command]"C:\Program Files\Git\bin\git.exe" remote add origin https://github.com/biehla/ZigMCP
+2026-11-10T05:20:27.2293683Z ##[endgroup]
+2026-11-10T05:20:27.2294341Z ##[group]Disabling automatic garbage collection
+2026-11-10T05:20:27.2305091Z [command]"C:\Program Files\Git\bin\git.exe" config --local gc.auto 0
+2026-11-10T05:20:27.2657657Z ##[endgroup]
+2026-11-10T05:20:27.2658187Z ##[group]Setting up auth
+2026-11-10T05:20:27.2668003Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+2026-11-10T05:20:27.3045103Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+2026-11-10T05:20:28.6084574Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-10T05:20:28.6381949Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+2026-11-10T05:20:29.1130438Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-10T05:20:29.1445814Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "git config --local --show-origin --name-only --get-regexp remote.origin.url"
+2026-11-10T05:20:29.6020665Z [command]"C:\Program Files\Git\bin\git.exe" config --local http.https://github.com/.extraheader "AUTHORIZATION: basic ***"
+2026-11-10T05:20:29.6347788Z ##[endgroup]
+2026-11-10T05:20:29.6348202Z ##[group]Fetching the repository
+2026-11-10T05:20:29.6349230Z [command]"C:\Program Files\Git\bin\git.exe" -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +7a07039761262cc6f957fdf49263737352cdbd6a:refs/remotes/origin/autoresearch/data-driven-programming-best-practices-for-build-20261109
+2026-11-10T05:20:30.7210675Z From https://github.com/biehla/ZigMCP
+2026-11-10T05:20:30.7212139Z  * [new ref]         7a07039761262cc6f957fdf49263737352cdbd6a -> origin/autoresearch/data-driven-programming-best-practices-for-build-20261109
+2026-11-10T05:20:30.7246394Z ##[endgroup]
+2026-11-10T05:20:30.7246782Z ##[group]Determining the checkout info
+2026-11-10T05:20:30.7248718Z ##[endgroup]
+2026-11-10T05:20:30.7256662Z [command]"C:\Program Files\Git\bin\git.exe" sparse-checkout disable
+2026-11-10T05:20:30.7705988Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset-all extensions.worktreeConfig
+2026-11-10T05:20:30.8018643Z ##[group]Checking out the ref
+2026-11-10T05:20:30.8028691Z [command]"C:\Program Files\Git\bin\git.exe" checkout --progress --force -B autoresearch/data-driven-programming-best-practices-for-build-20261109 refs/remotes/origin/autoresearch/data-driven-programming-best-practices-for-build-20261109
+2026-11-10T05:20:30.8632813Z Switched to a new branch 'autoresearch/data-driven-programming-best-practices-for-build-20261109'
+2026-11-10T05:20:30.8726836Z branch 'autoresearch/data-driven-programming-best-practices-for-build-20261109' set up to track 'origin/autoresearch/data-driven-programming-best-practices-for-build-20261109'.
+2026-11-10T05:20:30.8770073Z ##[endgroup]
+2026-11-10T05:20:30.9172788Z [command]"C:\Program Files\Git\bin\git.exe" log -1 --format=%H
+2026-11-10T05:20:30.9437069Z 7a07039761262cc6f957fdf49263737352cdbd6a
+2026-11-10T05:20:30.9803037Z ##[group]Run mlugg/setup-zig@v2
+2026-11-10T05:20:30.9803261Z with:
+2026-11-10T05:20:30.9803386Z   version: 0.17.1
+2026-11-10T05:20:30.9803533Z   use-cache: true
+2026-11-10T05:20:30.9803664Z   cache-size-limit: 2048
+2026-11-10T05:20:30.9803805Z ##[endgroup]
+2026-11-10T05:20:31.2132256Z Using tool-cache: false
+2026-11-10T05:20:31.2136782Z Fetching zig-x86_64-windows-0.17.1.zip
+2026-11-10T05:20:31.5484798Z Cache miss. Fetching Zig 0.17.1
+2026-11-10T05:20:32.1488068Z Available mirrors: https://pkg.hexops.org/zig, https://zigmirror.hryx.net/zig, https://zig.linus.dev/zig, https://zig.squirl.dev, https://zig.mirror.mschae23.de/zig, https://ziglang.freetls.fastly.net, https://zig.tilok.dev, https://zig-mirror.tsimnet.eu/zig, https://zig.karearl.com/zig, https://pkg.earth/zig, https://fs.liujiacai.net/zigbuilds, https://zigmirror.com, https://zig.chainsafe.dev, https://zig.savalione.com, https://zig.bcr.ist, https://zig.vortan.dev/zig, https://pkg.alexrp.com/zig
+2026-11-10T05:20:32.1489304Z Attempting mirror: https://zig.tilok.dev
+2026-11-10T05:20:36.6107468Z [command]"C:\Program Files\Git\usr\bin\tar.exe" --posix -cf cache.tzst --exclude cache.tzst -P -C D:/a/ZigMCP/ZigMCP --files-from manifest.txt --force-local --use-compress-program "zstd -T0"
+2026-11-10T05:20:38.3256741Z Sent 3604480 of 94548738 (3.8%), 3.4 MBs/sec
+2026-11-10T05:20:39.3268718Z Sent 41746432 of 94548738 (44.2%), 19.9 MBs/sec
+2026-11-10T05:20:40.3280853Z Sent 94548738 of 94548738 (100.0%), 30.0 MBs/sec
+2026-11-10T05:20:40.9207996Z Fetch took 9706 ms
+2026-11-10T05:20:40.9208301Z Extracting tarball zig-x86_64-windows-0.17.1.zip
+2026-11-10T05:20:41.0040361Z [command]"C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Unrestricted -Command "$ErrorActionPreference = 'Stop' ; try { Add-Type -AssemblyName System.IO.Compression.ZipFile } catch { } ; try { [System.IO.Compression.ZipFile]::ExtractToDirectory('D:\a\_temp\zig-x86_64-windows-0.17.1.zip', 'D:\a\_temp\6ee4358c-4c3f-4451-afbe-ee486d15c865', $true) } catch { if (($_.Exception.GetType().FullName -eq 'System.Management.Automation.MethodException') -or ($_.Exception.GetType().FullName -eq 'System.Management.Automation.RuntimeException') ){ Expand-Archive -LiteralPath 'D:\a\_temp\zig-x86_64-windows-0.17.1.zip' -DestinationPath 'D:\a\_temp\6ee4358c-4c3f-4451-afbe-ee486d15c865' -Force } else { throw $_ } } ;"
+2026-11-10T05:20:45.5990121Z Extract took 4678 ms
+2026-11-10T05:20:45.6298635Z [command]D:\a\_temp\6ee4358c-4c3f-4451-afbe-ee486d15c865\zig-x86_64-windows-0.17.1\zig.exe version
+2026-11-10T05:20:46.0162601Z 0.17.1
+2026-11-10T05:20:46.0208470Z Resolved Zig version 0.17.1
+2026-11-10T05:20:46.0217480Z Attempting restore of Zig cache with prefix 'setup-zig-cache-v2-release-zig-x86_64-windows-0.17.1--'
+2026-11-10T05:20:46.2661298Z Cache miss: leaving Zig cache directory at D:\a\ZigMCP\ZigMCP\.zig-cache unpopulated
+2026-11-10T05:20:46.2942304Z ##[group]Run zig build --fetch=all
+2026-11-10T05:20:46.2942574Z [36;1mzig build --fetch=all[0m
+2026-11-10T05:20:46.3426029Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-11-10T05:20:46.3426273Z env:
+2026-11-10T05:20:46.3426441Z   ZIG_GLOBAL_CACHE_DIR: D:\a\ZigMCP\ZigMCP\.zig-cache
+2026-11-10T05:20:46.3426646Z   ZIG_LOCAL_CACHE_DIR: D:\a\ZigMCP\ZigMCP\.zig-cache
+2026-11-10T05:20:46.3426834Z ##[endgroup]
+2026-11-10T05:21:52.2652494Z ##[group]Run zig build test
+2026-11-10T05:21:52.2652729Z [36;1mzig build test[0m
+2026-11-10T05:21:52.2703005Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-11-10T05:21:52.2703235Z env:
+2026-11-10T05:21:52.2703393Z   ZIG_GLOBAL_CACHE_DIR: D:\a\ZigMCP\ZigMCP\.zig-cache
+2026-11-10T05:21:52.2703610Z   ZIG_LOCAL_CACHE_DIR: D:\a\ZigMCP\ZigMCP\.zig-cache
+2026-11-10T05:21:52.2703934Z ##[endgroup]
+2026-11-10T05:22:15.0001973Z test
+2026-11-10T05:22:15.0002357Z +- run test stderr
+2026-11-10T05:22:15.0002585Z zigmcp: index watcher stopped
+2026-11-10T05:22:15.0003078Z zigmcp: cannot load the doc index 'tests/no-such-index.jsonl' (FileNotFound); serving without an index
+2026-11-10T05:22:15.0003572Z zigmcp: index watcher stopped
+2026-11-10T05:22:15.0004067Z failed command: ".\\.zig-cache\\o\\f9946631a85c7173a657e72e97ad790c\\test.exe" "--cache-dir=.\\.zig-cache" --seed=0x76b30d5c --listen=-
+2026-11-10T05:22:15.0004447Z 
+2026-11-10T05:22:15.0908601Z ##[group]Run zig fmt --check . --exclude tests/fixtures
+2026-11-10T05:22:15.0908908Z [36;1mzig fmt --check . --exclude tests/fixtures[0m
+2026-11-10T05:22:15.0958871Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-11-10T05:22:15.0959098Z env:
+2026-11-10T05:22:15.0959266Z   ZIG_GLOBAL_CACHE_DIR: D:\a\ZigMCP\ZigMCP\.zig-cache
+2026-11-10T05:22:15.0959484Z   ZIG_LOCAL_CACHE_DIR: D:\a\ZigMCP\ZigMCP\.zig-cache
+2026-11-10T05:22:15.0959662Z ##[endgroup]
+2026-11-10T05:22:15.4123456Z ##[group]Run zig build check
+2026-11-10T05:22:15.4123686Z [36;1mzig build check[0m
+2026-11-10T05:22:15.4171239Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-11-10T05:22:15.4171458Z env:
+2026-11-10T05:22:15.4171628Z   ZIG_GLOBAL_CACHE_DIR: D:\a\ZigMCP\ZigMCP\.zig-cache
+2026-11-10T05:22:15.4171834Z   ZIG_LOCAL_CACHE_DIR: D:\a\ZigMCP\ZigMCP\.zig-cache
+2026-11-10T05:22:15.4172013Z ##[endgroup]
+2026-11-10T05:22:15.6907817Z advice_check: ok — 12 patterns, 12 rules, 6 guarantees, 7 limits, 24 sources
+2026-11-10T05:22:15.7861517Z ##[group]Run zig build test-regressions
+2026-11-10T05:22:15.7861775Z [36;1mzig build test-regressions[0m
+2026-11-10T05:22:15.7909919Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-11-10T05:22:15.7910138Z env:
+2026-11-10T05:22:15.7910300Z   ZIG_GLOBAL_CACHE_DIR: D:\a\ZigMCP\ZigMCP\.zig-cache
+2026-11-10T05:22:15.7910521Z   ZIG_LOCAL_CACHE_DIR: D:\a\ZigMCP\ZigMCP\.zig-cache
+2026-11-10T05:22:15.7910702Z ##[endgroup]
+2026-11-10T05:22:20.3748075Z ##[group]Run zig build workflows
+2026-11-10T05:22:20.3748386Z [36;1mzig build workflows[0m
+2026-11-10T05:22:20.3794357Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-11-10T05:22:20.3794567Z env:
+2026-11-10T05:22:20.3794728Z   ZIG_GLOBAL_CACHE_DIR: D:\a\ZigMCP\ZigMCP\.zig-cache
+2026-11-10T05:22:20.3794938Z   ZIG_LOCAL_CACHE_DIR: D:\a\ZigMCP\ZigMCP\.zig-cache
+2026-11-10T05:22:20.3795113Z ##[endgroup]
+2026-11-10T05:22:22.9794155Z ##[group]Run go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 .github/workflows/*.yml
+2026-11-10T05:22:22.9794795Z [36;1mgo run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 .github/workflows/*.yml[0m
+2026-11-10T05:22:22.9842536Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-11-10T05:22:22.9842747Z env:
+2026-11-10T05:22:22.9842909Z   ZIG_GLOBAL_CACHE_DIR: D:\a\ZigMCP\ZigMCP\.zig-cache
+2026-11-10T05:22:22.9843114Z   ZIG_LOCAL_CACHE_DIR: D:\a\ZigMCP\ZigMCP\.zig-cache
+2026-11-10T05:22:22.9843290Z ##[endgroup]
+2026-11-10T05:22:24.2618315Z go: downloading github.com/rhysd/actionlint v1.7.7
+2026-11-10T05:22:25.4261699Z go: downloading github.com/bmatcuk/doublestar/v4 v4.8.0
+2026-11-10T05:22:25.4483929Z go: downloading github.com/fatih/color v1.18.0
+2026-11-10T05:22:25.4654242Z go: downloading github.com/mattn/go-colorable v0.1.14
+2026-11-10T05:22:25.5486096Z go: downloading github.com/mattn/go-runewidth v0.0.16
+2026-11-10T05:22:25.5598456Z go: downloading github.com/mattn/go-shellwords v1.0.12
+2026-11-10T05:22:25.5679564Z go: downloading github.com/robfig/cron/v3 v3.0.1
+2026-11-10T05:22:25.5747246Z go: downloading golang.org/x/sync v0.10.0
+2026-11-10T05:22:25.6403721Z go: downloading golang.org/x/sys v0.29.0
+2026-11-10T05:22:25.6545543Z go: downloading gopkg.in/yaml.v3 v3.0.1
+2026-11-10T05:22:26.7848025Z go: downloading github.com/mattn/go-isatty v0.0.20
+2026-11-10T05:22:26.9331183Z go: downloading github.com/rivo/uniseg v0.4.7
+2026-11-10T05:22:38.1842591Z could not read ".github/workflows/*.yml": open .github/workflows/*.yml: The filename, directory name, or volume label syntax is incorrect.
+2026-11-10T05:22:38.1852788Z exit status 3
+2026-11-10T05:22:38.3242495Z ##[error]Process completed with exit code 1.
+2026-11-10T05:22:38.3391201Z Post job cleanup.
+2026-11-10T05:22:38.5571899Z Checking size of cache directory at D:\a\ZigMCP\ZigMCP\.zig-cache
+2026-11-10T05:22:38.5949673Z Cache directory is 219771919 bytes, below limit of 2147483648 bytes; keeping intact
+2026-11-10T05:22:38.5953877Z Saving Zig cache with key 'setup-zig-cache-v2-release-zig-x86_64-windows-0.17.1--42761500012-1'
+2026-11-10T05:22:38.6413026Z [command]"C:\Program Files\Git\usr\bin\tar.exe" --posix -cf cache.tzst --exclude cache.tzst -P -C D:/a/ZigMCP/ZigMCP --files-from manifest.txt --force-local --use-compress-program "zstd -T0"
+2026-11-10T05:22:40.4688914Z Sent 3276800 of 63908320 (5.1%), 3.1 MBs/sec
+2026-11-10T05:22:41.4685392Z Sent 63908320 of 63908320 (100.0%), 30.3 MBs/sec
+2026-11-10T05:22:42.1653396Z Post job cleanup.
+2026-11-10T05:22:42.2787357Z [command]"C:\Program Files\Git\bin\git.exe" version
+2026-11-10T05:22:42.3050679Z git version 2.56.0.windows.4
+2026-11-10T05:22:42.3103458Z Temporarily overriding HOME='D:\a\_temp\94d06810-98f8-4a96-93a2-08f418eab1fe' before making global git config changes
+2026-11-10T05:22:42.3103892Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-10T05:22:42.3111169Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\ZigMCP\ZigMCP
+2026-11-10T05:22:42.3409731Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+2026-11-10T05:22:42.3686437Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+2026-11-10T05:22:42.8177171Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-10T05:22:42.8419896Z http.https://github.com/.extraheader
+2026-11-10T05:22:42.8461561Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset-all http.https://github.com/.extraheader
+2026-11-10T05:22:42.8742461Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+2026-11-10T05:22:43.3102997Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-10T05:22:43.3426276Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "git config --local --show-origin --name-only --get-regexp remote.origin.url"
+2026-11-10T05:22:43.8329529Z Cleaning up orphan processes
+2026-11-10T05:22:43.8588937Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, mlugg/setup-zig@v2. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

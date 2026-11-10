@@ -1,0 +1,22 @@
+﻿2026-11-10T05:22:22.9794128Z ##[group]Run go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 .github/workflows/*.yml
+2026-11-10T05:22:22.9794793Z [36;1mgo run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 .github/workflows/*.yml[0m
+2026-11-10T05:22:22.9842527Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-11-10T05:22:22.9842745Z env:
+2026-11-10T05:22:22.9842907Z   ZIG_GLOBAL_CACHE_DIR: D:\a\ZigMCP\ZigMCP\.zig-cache
+2026-11-10T05:22:22.9843112Z   ZIG_LOCAL_CACHE_DIR: D:\a\ZigMCP\ZigMCP\.zig-cache
+2026-11-10T05:22:22.9843288Z ##[endgroup]
+2026-11-10T05:22:24.2618262Z go: downloading github.com/rhysd/actionlint v1.7.7
+2026-11-10T05:22:25.4261633Z go: downloading github.com/bmatcuk/doublestar/v4 v4.8.0
+2026-11-10T05:22:25.4483879Z go: downloading github.com/fatih/color v1.18.0
+2026-11-10T05:22:25.4654194Z go: downloading github.com/mattn/go-colorable v0.1.14
+2026-11-10T05:22:25.5486039Z go: downloading github.com/mattn/go-runewidth v0.0.16
+2026-11-10T05:22:25.5598311Z go: downloading github.com/mattn/go-shellwords v1.0.12
+2026-11-10T05:22:25.5679520Z go: downloading github.com/robfig/cron/v3 v3.0.1
+2026-11-10T05:22:25.5747207Z go: downloading golang.org/x/sync v0.10.0
+2026-11-10T05:22:25.6403675Z go: downloading golang.org/x/sys v0.29.0
+2026-11-10T05:22:25.6545492Z go: downloading gopkg.in/yaml.v3 v3.0.1
+2026-11-10T05:22:26.7847971Z go: downloading github.com/mattn/go-isatty v0.0.20
+2026-11-10T05:22:26.9331122Z go: downloading github.com/rivo/uniseg v0.4.7
+2026-11-10T05:22:38.1842542Z could not read ".github/workflows/*.yml": open .github/workflows/*.yml: The filename, directory name, or volume label syntax is incorrect.
+2026-11-10T05:22:38.1852780Z exit status 3
+2026-11-10T05:22:38.3242469Z ##[error]Process completed with exit code 1.

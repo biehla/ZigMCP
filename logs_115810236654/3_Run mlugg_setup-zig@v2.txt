@@ -1,0 +1,23 @@
+﻿2026-11-10T05:20:26.0088818Z ##[group]Run mlugg/setup-zig@v2
+2026-11-10T05:20:26.0089106Z with:
+2026-11-10T05:20:26.0089310Z   version: master
+2026-11-10T05:20:26.0089522Z   use-cache: true
+2026-11-10T05:20:26.0089735Z   cache-size-limit: 2048
+2026-11-10T05:20:26.0089961Z ##[endgroup]
+2026-11-10T05:20:26.1962904Z Using tool-cache: false
+2026-11-10T05:20:27.0332141Z Fetching zig-x86_64-linux-0.18.0-dev.954+60635c2bd.tar.xz
+2026-11-10T05:20:27.2304808Z Cache miss. Fetching Zig 0.18.0-dev.954+60635c2bd
+2026-11-10T05:20:27.3940587Z Available mirrors: https://pkg.hexops.org/zig, https://zigmirror.hryx.net/zig, https://zig.linus.dev/zig, https://zig.squirl.dev, https://zig.mirror.mschae23.de/zig, https://ziglang.freetls.fastly.net, https://zig.tilok.dev, https://zig-mirror.tsimnet.eu/zig, https://zig.karearl.com/zig, https://pkg.earth/zig, https://fs.liujiacai.net/zigbuilds, https://zigmirror.com, https://zig.chainsafe.dev, https://zig.savalione.com, https://zig.bcr.ist, https://zig.vortan.dev/zig, https://pkg.alexrp.com/zig
+2026-11-10T05:20:27.3943280Z Attempting mirror: https://pkg.alexrp.com/zig
+2026-11-10T05:20:45.1519779Z [command]/usr/bin/tar --posix -cf cache.tzst --exclude cache.tzst -P -C /home/runner/work/ZigMCP/ZigMCP --files-from manifest.txt --use-compress-program zstdmt
+2026-11-10T05:20:46.4012307Z Sent 38928384 of 59249718 (65.7%), 37.1 MBs/sec
+2026-11-10T05:20:46.7816658Z Sent 59249718 of 59249718 (100.0%), 40.9 MBs/sec
+2026-11-10T05:20:46.9917835Z Fetch took 19958 ms
+2026-11-10T05:20:46.9918371Z Extracting tarball zig-x86_64-linux-0.18.0-dev.954+60635c2bd.tar.xz
+2026-11-10T05:20:46.9996575Z [command]/usr/bin/tar xJ --warning=no-unknown-keyword --overwrite -C /home/runner/work/_temp/bd4832bf-510f-48ce-a588-fe65fc220b09 -f /home/runner/work/_temp/zig-x86_64-linux-0.18.0-dev.954+60635c2bd.tar.xz
+2026-11-10T05:20:50.1932267Z Extract took 3202 ms
+2026-11-10T05:20:50.1946127Z [command]/home/runner/work/_temp/bd4832bf-510f-48ce-a588-fe65fc220b09/zig-x86_64-linux-0.18.0-dev.954+60635c2bd/zig version
+2026-11-10T05:20:50.2017414Z 0.18.0-dev.954+60635c2bd
+2026-11-10T05:20:50.2029897Z Resolved Zig version 0.18.0-dev.954+60635c2bd
+2026-11-10T05:20:50.2035673Z Attempting restore of Zig cache with prefix 'setup-zig-cache-v2-canary-zig-x86_64-linux-0.18.0-dev.954+60635c2bd--'
+2026-11-10T05:20:50.3938907Z Cache miss: leaving Zig cache directory at /home/runner/work/ZigMCP/ZigMCP/.zig-cache unpopulated

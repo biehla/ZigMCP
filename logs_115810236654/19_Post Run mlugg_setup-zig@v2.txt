@@ -1,0 +1,6 @@
+﻿2026-11-10T05:22:00.0606711Z Post job cleanup.
+2026-11-10T05:22:00.2397379Z Checking size of cache directory at /home/runner/work/ZigMCP/ZigMCP/.zig-cache
+2026-11-10T05:22:00.2802400Z Cache directory is 58552637 bytes, below limit of 2147483648 bytes; keeping intact
+2026-11-10T05:22:01.0025871Z Saving Zig cache with key 'setup-zig-cache-v2-canary-zig-x86_64-linux-0.18.0-dev.954+60635c2bd--42761500012-1'
+2026-11-10T05:22:01.0168300Z [command]/usr/bin/tar --posix -cf cache.tzst --exclude cache.tzst -P -C /home/runner/work/ZigMCP/ZigMCP --files-from manifest.txt --use-compress-program zstdmt
+2026-11-10T05:22:02.3271916Z Sent 23394922 of 23394922 (100.0%), 24.1 MBs/sec

@@ -1,0 +1,8 @@
+﻿2026-11-10T05:22:15.4123435Z ##[group]Run zig build check
+2026-11-10T05:22:15.4123684Z [36;1mzig build check[0m
+2026-11-10T05:22:15.4171232Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-11-10T05:22:15.4171457Z env:
+2026-11-10T05:22:15.4171626Z   ZIG_GLOBAL_CACHE_DIR: D:\a\ZigMCP\ZigMCP\.zig-cache
+2026-11-10T05:22:15.4171830Z   ZIG_LOCAL_CACHE_DIR: D:\a\ZigMCP\ZigMCP\.zig-cache
+2026-11-10T05:22:15.4172011Z ##[endgroup]
+2026-11-10T05:22:15.6907768Z advice_check: ok — 12 patterns, 12 rules, 6 guarantees, 7 limits, 24 sources

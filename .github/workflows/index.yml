@@ -63,7 +63,7 @@ jobs:
 
       - name: Fetch the pinned upstream trees
         run: |
-          while IFS=$'\t' read -r name repo commit include; do
+          while IFS=$'\t' read -r name repo commit _include; do
             echo "fetching $name @ $commit"
             git clone --filter=blob:none --no-checkout "$repo" "upstream/$name"
             git -C "upstream/$name" checkout --detach "$commit"
@@ -90,7 +90,7 @@ jobs:
         run: |
           : > generated/index.jsonl
           : > generated/index.status.json
-          while IFS=$'\t' read -r name repo commit include; do
+          while IFS=$'\t' read -r name _repo commit include; do
             # The indexer never fails the run because one upstream file is
             # broken: its usable records are still emitted and the file is
             # reported as degraded in the status sidecar.

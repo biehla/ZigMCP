@@ -1,0 +1,73 @@
+﻿2026-11-10T05:20:25.0461521Z ##[group]Run actions/checkout@v4
+2026-11-10T05:20:25.0462086Z with:
+2026-11-10T05:20:25.0462315Z   repository: biehla/ZigMCP
+2026-11-10T05:20:25.0464202Z   token: ***
+2026-11-10T05:20:25.0464432Z   ssh-strict: true
+2026-11-10T05:20:25.0464658Z   ssh-user: git
+2026-11-10T05:20:25.0464882Z   persist-credentials: true
+2026-11-10T05:20:25.0465118Z   clean: true
+2026-11-10T05:20:25.0465341Z   sparse-checkout-cone-mode: true
+2026-11-10T05:20:25.0465593Z   fetch-depth: 1
+2026-11-10T05:20:25.0465803Z   fetch-tags: false
+2026-11-10T05:20:25.0466015Z   show-progress: true
+2026-11-10T05:20:25.0466227Z   lfs: false
+2026-11-10T05:20:25.0466431Z   submodules: false
+2026-11-10T05:20:25.0466674Z   set-safe-directory: true
+2026-11-10T05:20:25.0466929Z   allow-unsafe-pr-checkout: false
+2026-11-10T05:20:25.0467313Z ##[endgroup]
+2026-11-10T05:20:25.2988398Z Syncing repository: biehla/ZigMCP
+2026-11-10T05:20:25.2990149Z ##[group]Getting Git version info
+2026-11-10T05:20:25.2990553Z Working directory is '/home/runner/work/ZigMCP/ZigMCP'
+2026-11-10T05:20:25.2991200Z [command]/usr/bin/git version
+2026-11-10T05:20:25.3065021Z git version 2.56.0
+2026-11-10T05:20:25.3082955Z ##[endgroup]
+2026-11-10T05:20:25.3095104Z Temporarily overriding HOME='/home/runner/work/_temp/a59569a9-7552-4a6e-b320-251e4337eb9a' before making global git config changes
+2026-11-10T05:20:25.3096027Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-10T05:20:25.3099880Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/ZigMCP/ZigMCP
+2026-11-10T05:20:25.3144739Z Deleting the contents of '/home/runner/work/ZigMCP/ZigMCP'
+2026-11-10T05:20:25.3152443Z ##[group]Initializing the repository
+2026-11-10T05:20:25.3159953Z [command]/usr/bin/git init /home/runner/work/ZigMCP/ZigMCP
+2026-11-10T05:20:25.3274681Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-11-10T05:20:25.3275711Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-11-10T05:20:25.3276807Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-11-10T05:20:25.3277657Z hint: call:
+2026-11-10T05:20:25.3277954Z hint:
+2026-11-10T05:20:25.3278342Z hint: 	git config --global init.defaultBranch <name>
+2026-11-10T05:20:25.3278984Z hint:
+2026-11-10T05:20:25.3279414Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-11-10T05:20:25.3280069Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-11-10T05:20:25.3280407Z hint:
+2026-11-10T05:20:25.3280650Z hint: 	git branch -m <name>
+2026-11-10T05:20:25.3280887Z hint:
+2026-11-10T05:20:25.3281185Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-11-10T05:20:25.3287085Z Initialized empty Git repository in /home/runner/work/ZigMCP/ZigMCP/.git/
+2026-11-10T05:20:25.3297202Z [command]/usr/bin/git remote add origin https://github.com/biehla/ZigMCP
+2026-11-10T05:20:25.3340188Z ##[endgroup]
+2026-11-10T05:20:25.3340846Z ##[group]Disabling automatic garbage collection
+2026-11-10T05:20:25.3343882Z [command]/usr/bin/git config --local gc.auto 0
+2026-11-10T05:20:25.3372819Z ##[endgroup]
+2026-11-10T05:20:25.3373540Z ##[group]Setting up auth
+2026-11-10T05:20:25.3379212Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-10T05:20:25.3418758Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-10T05:20:25.3767632Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-10T05:20:25.3804905Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-10T05:20:25.4010750Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-10T05:20:25.4047964Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-10T05:20:25.4246794Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-11-10T05:20:25.4287443Z ##[endgroup]
+2026-11-10T05:20:25.4288123Z ##[group]Fetching the repository
+2026-11-10T05:20:25.4298895Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +7a07039761262cc6f957fdf49263737352cdbd6a:refs/remotes/origin/autoresearch/data-driven-programming-best-practices-for-build-20261109
+2026-11-10T05:20:25.9559204Z From https://github.com/biehla/ZigMCP
+2026-11-10T05:20:25.9560028Z  * [new ref]         7a07039761262cc6f957fdf49263737352cdbd6a -> origin/autoresearch/data-driven-programming-best-practices-for-build-20261109
+2026-11-10T05:20:25.9569308Z ##[endgroup]
+2026-11-10T05:20:25.9569881Z ##[group]Determining the checkout info
+2026-11-10T05:20:25.9570471Z ##[endgroup]
+2026-11-10T05:20:25.9570725Z [command]/usr/bin/git sparse-checkout disable
+2026-11-10T05:20:25.9656918Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-11-10T05:20:25.9689221Z ##[group]Checking out the ref
+2026-11-10T05:20:25.9692251Z [command]/usr/bin/git checkout --progress --force -B autoresearch/data-driven-programming-best-practices-for-build-20261109 refs/remotes/origin/autoresearch/data-driven-programming-best-practices-for-build-20261109
+2026-11-10T05:20:25.9796438Z Switched to a new branch 'autoresearch/data-driven-programming-best-practices-for-build-20261109'
+2026-11-10T05:20:25.9802193Z branch 'autoresearch/data-driven-programming-best-practices-for-build-20261109' set up to track 'origin/autoresearch/data-driven-programming-best-practices-for-build-20261109'.
+2026-11-10T05:20:25.9805924Z ##[endgroup]
+2026-11-10T05:20:25.9848737Z [command]/usr/bin/git log -1 --format=%H
+2026-11-10T05:20:25.9877100Z 7a07039761262cc6f957fdf49263737352cdbd6a

@@ -60,7 +60,7 @@ jobs:
 
       - name: Fetch the currently pinned trees (baseline side)
         run: |
-          while IFS=$'\t' read -r name repo branch commit include; do
+          while IFS=$'\t' read -r name repo _branch commit _include; do
             git clone --filter=blob:none --no-checkout "$repo" "upstream/$name"
             git -C "upstream/$name" checkout --detach "$commit"
           done < upstream/plan.tsv
@@ -68,7 +68,7 @@ jobs:
       - name: Build the baseline index from the current pins
         run: |
           : > baseline.jsonl
-          while IFS=$'\t' read -r name repo branch commit include; do
+          while IFS=$'\t' read -r name _repo _branch commit include; do
             zig run tools/indexer.zig -- \
               --out "bump-results/$name.jsonl" \
               --source "$name=$commit=upstream/$name" \
@@ -126,7 +126,7 @@ jobs:
       - name: Fetch the newly pinned trees and index them
         run: |
           rm -rf upstream && mkdir -p upstream
-          while IFS=$'\t' read -r name repo branch old_commit new_commit include; do
+          while IFS=$'\t' read -r name repo _branch _old_commit new_commit include; do
             git clone --filter=blob:none --no-checkout "$repo" "upstream/$name" || continue
             git -C "upstream/$name" checkout --detach "$new_commit" || continue
             zig run tools/indexer.zig -- \

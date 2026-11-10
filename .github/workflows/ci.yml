@@ -41,10 +41,13 @@ jobs:
         # CI-1: actionlint accepts an event payload reference the declared
         # triggers cannot produce; this does not.
         run: zig build workflows
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
       - name: Lint the workflows
         # Pinned to the version AGENTS.md §10 documents, so the local gate and
         # this step run the same linter.
-        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 .github/workflows/*.yml
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
 
   canary:
     name: Canary (Zig master)
@@ -55,8 +58,6 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: master
-      - name: Fetch dependencies
-        run: zig build --fetch=all
       - name: Build and test
         run: zig build test
       - name: Format check
@@ -73,7 +74,10 @@ jobs:
         # CI-1: actionlint accepts an event payload reference the declared
         # triggers cannot produce; this does not.
         run: zig build workflows
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
       - name: Lint the workflows
         # Pinned to the version AGENTS.md §10 documents, so the local gate and
         # this step run the same linter.
-        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 .github/workflows/*.yml
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7

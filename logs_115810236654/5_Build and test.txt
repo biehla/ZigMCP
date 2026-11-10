@@ -1,0 +1,14 @@
+﻿2026-11-10T05:21:52.2652466Z ##[group]Run zig build test
+2026-11-10T05:21:52.2652727Z [36;1mzig build test[0m
+2026-11-10T05:21:52.2702994Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-11-10T05:21:52.2703233Z env:
+2026-11-10T05:21:52.2703391Z   ZIG_GLOBAL_CACHE_DIR: D:\a\ZigMCP\ZigMCP\.zig-cache
+2026-11-10T05:21:52.2703608Z   ZIG_LOCAL_CACHE_DIR: D:\a\ZigMCP\ZigMCP\.zig-cache
+2026-11-10T05:21:52.2703932Z ##[endgroup]
+2026-11-10T05:22:15.0001916Z test
+2026-11-10T05:22:15.0002353Z +- run test stderr
+2026-11-10T05:22:15.0002581Z zigmcp: index watcher stopped
+2026-11-10T05:22:15.0003075Z zigmcp: cannot load the doc index 'tests/no-such-index.jsonl' (FileNotFound); serving without an index
+2026-11-10T05:22:15.0003570Z zigmcp: index watcher stopped
+2026-11-10T05:22:15.0004063Z failed command: ".\\.zig-cache\\o\\f9946631a85c7173a657e72e97ad790c\\test.exe" "--cache-dir=.\\.zig-cache" --seed=0x76b30d5c --listen=-
+2026-11-10T05:22:15.0004444Z 

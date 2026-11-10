@@ -1,0 +1,7 @@
+﻿2026-11-10T05:22:15.0908577Z ##[group]Run zig fmt --check . --exclude tests/fixtures
+2026-11-10T05:22:15.0908907Z [36;1mzig fmt --check . --exclude tests/fixtures[0m
+2026-11-10T05:22:15.0958858Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-11-10T05:22:15.0959096Z env:
+2026-11-10T05:22:15.0959264Z   ZIG_GLOBAL_CACHE_DIR: D:\a\ZigMCP\ZigMCP\.zig-cache
+2026-11-10T05:22:15.0959482Z   ZIG_LOCAL_CACHE_DIR: D:\a\ZigMCP\ZigMCP\.zig-cache
+2026-11-10T05:22:15.0959660Z ##[endgroup]
