@@ -519,3 +519,63 @@ test "invalid UTF-8 in a doc comment is replaced, not emitted as a byte array" {
     const hex = std.fmt.bytesToHex(digest, .lower);
     try std.testing.expect(std.mem.indexOf(u8, produced, &hex) != null);
 }
+
+test "a nested declaration in an error set degrades the file instead of inventing a member" {
+    // IDX-7: error sets are flat by grammar, so a nested declaration is
+    // invalid Zig. The parser recovers it (here, as a root declaration) and
+    // the file is degraded; the error-set scan never sees the nested token, so
+    // no `error` record is invented for it.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const gpa = std.testing.allocator;
+
+    try writeFixture(tmp.dir, "bad.zig", "/// Errors.\n" ++
+        "pub const E = error{\n" ++
+        "    /// A real member.\n" ++
+        "    A,\n" ++
+        "    /// A nested function the grammar does not allow.\n" ++
+        "    fn nested() void {},\n" ++
+        "};\n");
+
+    const root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}", .{&tmp.sub_path});
+    defer gpa.free(root);
+    const output = try std.fmt.allocPrint(gpa, "{s}/index.jsonl", .{root});
+    defer gpa.free(output);
+    const source = try std.fmt.allocPrint(gpa, "p=c={s}", .{root});
+    defer gpa.free(source);
+
+    var child = try std.process.spawn(io, .{
+        .argv = &.{ options.indexer_exe, "--out", output, "--source", source },
+        .stdin = .ignore,
+        .stdout = .ignore,
+        .stderr = .ignore,
+    });
+    switch (try child.wait(io)) {
+        .exited => |code| try std.testing.expectEqual(@as(u8, 0), code),
+        else => return error.UnexpectedExit,
+    }
+
+    const produced = try std.Io.Dir.cwd().readFileAllocOptions(
+        io,
+        output,
+        gpa,
+        .limited(16 * 1024 * 1024),
+        .of(u8),
+        null,
+    );
+    defer gpa.free(produced);
+    try std.testing.expect(std.mem.indexOf(u8, produced, "\"kind\":\"error\"") == null);
+
+    const status_path = try std.fmt.allocPrint(gpa, "{s}/index.status.json", .{root});
+    defer gpa.free(status_path);
+    const status = try std.Io.Dir.cwd().readFileAllocOptions(
+        io,
+        status_path,
+        gpa,
+        .limited(16 * 1024 * 1024),
+        .of(u8),
+        null,
+    );
+    defer gpa.free(status);
+    try std.testing.expect(std.mem.indexOf(u8, status, "\"path\":\"bad.zig\"") != null);
+}
