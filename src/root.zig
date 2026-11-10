@@ -22,4 +22,7 @@ test {
     // The workflow trigger/expression check (CI-1); its CLI is
     // `tools/workflow_check.zig`.
     _ = @import("util/workflow.zig");
+    // Cross-cutting handler tests: they need the real corpus and a loaded doc
+    // index, so they keep their own harness. Part of the main suite.
+    _ = @import("regressions_test.zig");
 }

@@ -144,19 +144,35 @@ pub fn build(b: *std.Build) void {
     const run_indexer_tests = b.addRunArtifact(indexer_tests);
     run_indexer_tests.step.dependOn(&indexer.step);
 
+    // The corpus validator is a CI gate, so its failure behaviour is tested too
+    // (CI-3).
+    const advice_options = b.addOptions();
+    advice_options.addOptionPath("advice_check_exe", advice_check.getEmittedBin());
+
+    const advice_check_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/advice_check_test.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "advice_options", .module = advice_options.createModule() }},
+        }),
+    });
+    const run_advice_check_tests = b.addRunArtifact(advice_check_tests);
+    run_advice_check_tests.step.dependOn(&advice_check.step);
+
     const test_step = b.step("test", "Run all tests");
     test_step.dependOn(&run_unit_tests.step);
     test_step.dependOn(&run_protocol_tests.step);
     test_step.dependOn(&run_indexer_tests.step);
+    test_step.dependOn(&run_advice_check_tests.step);
 
     // A protocol-only step: the protocol layer drives the built binary as a
     // subprocess, so it is useful on its own when debugging the wire format.
     const protocol_step = b.step("test-protocol", "Run the protocol tests only");
     protocol_step.dependOn(&run_protocol_tests.step);
 
-    // The PLAN.md regression tests: each one asserts the behaviour the backlog
-    // wants, so it fails until its item is fixed. Kept out of `test` on purpose
-    // (src/root.zig does not import the file) so the main suite stays green.
+    // The cross-cutting handler tests (real corpus + a doc index). They also run
+    // as part of `zig build test`, since src/root.zig imports the file.
     const regression_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/regressions_test.zig"),
@@ -165,6 +181,6 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const run_regression_tests = b.addRunArtifact(regression_tests);
-    const regression_step = b.step("test-regressions", "Run the PLAN.md regression tests (red until each item is fixed)");
+    const regression_step = b.step("test-regressions", "Run the cross-cutting handler tests");
     regression_step.dependOn(&run_regression_tests.step);
 }

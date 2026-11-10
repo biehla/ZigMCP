@@ -1,15 +1,13 @@
-//! Regression tests for the open defects in `PLAN.md`.
+//! Cross-cutting handler tests: the real advice corpus plus a loaded doc index.
 //!
-//! Each test names the backlog id and asserts the behaviour the plan wants, not
-//! the behaviour the code has today — so a red test is a known, tracked bug and
-//! fixing the bug turns it green. This file is deliberately **not** imported by
-//! `src/root.zig`: the main suite (`zig build test`) must stay green while the
-//! backlog is open. Run it with `zig build test-regressions`.
+//! These need a `Corpus`, a `Matcher` and a `Store` at once, which module-local
+//! test blocks cannot share, so they use the `Harness` below. The file used to
+//! be `PLAN.md`'s red-by-design suite: every item it covered is fixed, the
+//! pure-function tests moved into `registry.zig` and `text.zig`, and what
+//! remains are permanent regressions for behaviour that must not come back.
 //!
-//! Only defects reachable from a pure function or a handler are here. Items that
-//! need the built server process (SRV-1, SRV-2, SRV-3), the indexer executable
-//! (IDX-*), the watcher thread (REL-*) or a CI runner (CI-*) are listed in
-//! `PLAN.md` §10 with the reason and the layer that should own them.
+//! Run with `zig build test-regressions`, or as part of `zig build test`
+//! (`src/root.zig` imports this file).
 
 const std = @import("std");
 const registry = @import("server/registry.zig");
