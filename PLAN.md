@@ -1,8 +1,8 @@
 # PLAN.md — defects, edge cases, limitations, and guideline deviations
 
-Status: open backlog. Twenty-two items were fixed on 2026-11-09, thirty-five on
+Status: open backlog. Twenty-two items were fixed on 2026-11-09, thirty-six on
 2026-11-10, and five more were closed that day because they were already done — the
-option chosen for each, its commit and its verification are in §13–§28. Two sources: a read-through
+option chosen for each, its commit and its verification are in §13–§29. Two sources: a read-through
 of the tree on 2026-11-09, and a breakage campaign the same day that fuzzed the
 stdio surface and the indexer, profiled the hot paths, and inspected a `ReleaseSafe`
 PE with REA — method, measurements and negative results in §12.
@@ -107,11 +107,6 @@ No open items.
 
 ## 5. Index loading and hot reload
 
-- **REL-2 — remote fetch has no timeout.** The watcher can park in a read, and
-  shutdown then abandons the thread and leaks the store. Options: (a) set a client
-  timeout/deadline; (b) fail the fetch after N seconds via a watchdog thread; (c)
-  accept (process is exiting). Verify: point at a black-hole address and quit.
-
 - **REL-6 — remote indexes have no status sidecar,** so degraded-file data is
   invisible. Options: (a) fetch `<url>.status.json`; (b) embed status as an index
   header record; (c) accept. Verify: `doc_import_status` on a URL index.
@@ -169,7 +164,6 @@ must own its test, because no such layer exists yet.
 |Id|Regression test|If not: what must own it|
 |---|---|---|
 |CI-7|—|timing only|
-|REL-2|—|black-hole address plus quit; timing-based|
 |REL-6|—|integration: URL index with no sidecar|
 |DOC-4|—|`inspect_pe_resources` on a `ReleaseSafe` artifact (packaging smoke test)|
 
@@ -480,6 +474,18 @@ instead of a constant, so its bandwidth is the operator's call.
 |Id|Option|Commit|Verification|
 |---|---|---|---|
 |REL-1|(a)|`4ea4509`|`REL-1: the poll interval is configurable and clamped` (unit test): defaults 1000/60000, an explicit 250 wins for both source kinds, 0 clamps to 100; `zig build test`, `check`, `workflows` and `zig fmt --check` pass|
+
+## 29. Resolved on 2026-11-10, fifteenth chunk
+
+One limitation, one commit (`9b19761`): a remote index is no longer fetched before
+the server starts. The stdlib HTTP client exposes no request timeout, so a black-holed
+origin blocked `main` and stdin EOF could not stop it. The watcher now owns the fetch
+and polls immediately. The residue — a fetch still in flight keeps the process alive
+until it is killed — is option (c), documented in AGENTS.md §8.
+
+|Id|Option|Commit|Verification|
+|---|---|---|---|
+|REL-2|(c), plus removing the startup block|`9b19761`|protocol test `REL-2: a black-holed index URL does not block startup`: with `--index http://10.255.255.1/...` the server answers `server/discover`; before the fix the same probe hung (reproduced: still running 3 s after EOF). `zig build test`, `check`, `workflows` and `zig fmt --check` pass|
 
 
 
