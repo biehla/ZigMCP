@@ -23,7 +23,7 @@ jobs:
     name: Re-pin and diff index
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.17.1
@@ -163,7 +163,7 @@ jobs:
 
       - name: Upload the JSONL diff artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: index-diff
           path: bump-results/

@@ -19,7 +19,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.17.1
@@ -41,7 +41,7 @@ jobs:
         # CI-1: actionlint accepts an event payload reference the declared
         # triggers cannot produce; this does not.
         run: zig build workflows
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: '1.23'
       - name: Lint the workflows
@@ -54,7 +54,7 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true  # non-blocking canary; failure never blocks a merge
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: mlugg/setup-zig@v2
         with:
           version: master
@@ -74,7 +74,7 @@ jobs:
         # CI-1: actionlint accepts an event payload reference the declared
         # triggers cannot produce; this does not.
         run: zig build workflows
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: '1.23'
       - name: Lint the workflows

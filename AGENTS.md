@@ -524,10 +524,11 @@ zig fmt --check . --exclude tests/fixtures   # the fixture tree is deliberately 
 - **Workflow gates:** `zig build workflows` (trigger/expression consistency, CI-1)
   and `go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7` (no file
   arguments; actionlint discovers `.github/workflows` itself, which is portable
-  across PowerShell and bash) — the same pinned command `ci.yml` runs. Newer
-  actionlint releases additionally
-  report that `actions/checkout@v4` and friends run on a deprecated node20 runtime;
-  that is the separate, pre-existing `CI-9` item, not a gate failure.
+  across PowerShell and bash) — the same pinned command `ci.yml` runs. The actions
+  are on their node24 majors (`checkout@v5`, `upload-artifact@v6`, `setup-go@v6`,
+  `action-gh-release@v3`); `mlugg/setup-zig@v2` is the one remaining node20 action,
+  because upstream has no node24 release yet (CI-9). actionlint 1.7.7 does not
+  inspect action metadata, so it stays silent about it.
 - **Toolchain:** Zig 0.17.1 at `C:\Users\Sethticles\scoop\apps\zig\0.17.1`;
   `.minimum_zig_version = "0.17.1"`; global cache `C:\Users\Sethticles\AppData\Local\zig`.
   The CI canary leg builds with the `master` entry of
