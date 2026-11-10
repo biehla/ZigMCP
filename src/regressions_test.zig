@@ -313,9 +313,58 @@ test "IDX-4: doc_get returns every record sharing a symbol" {
     try std.testing.expectEqualStrings("", matches[1].object.get("container").?.string);
 }
 
-test "doc_get: a miss names the stored path-qualified symbols" {
-    // PROTO-15: the index stores path-qualified symbols, so the readme's own
-    // unqualified example found nothing and gave the caller no next step.
+test "PROTO-16: a unique dotted tail reaches the stored symbol" {
+    // `mem.copyForwards` is the same declaration the index stores as
+    // `lib.std.mem.copyForwards`. The tail resolves only when exactly one stored
+    // symbol ends with it and the boundary is a `.` — otherwise the caller would
+    // get an answer for a spelling nobody stored.
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const harness = try startHarnessWithIndex(gpa,
+        \\{"project":"zig_std","commit":"c","path":"lib/std/mem.zig","line":238,"kind":"fn","symbol":"lib.std.mem.copyForwards","container":"lib.std.mem","doc":"Copies source into dest.","doc_hash":"5b9b51d9a8c4c3a5174688eb4c984931a3874fe30db40b99c862e57c26ef97fa"}
+        \\{"project":"zig_std","commit":"c","path":"lib/std/std.zig","line":48,"kind":"container","symbol":"lib.std.std.ArrayList","container":"","doc":"Copies source into dest.","doc_hash":"5b9b51d9a8c4c3a5174688eb4c984931a3874fe30db40b99c862e57c26ef97fa"}
+        \\{"project":"zig_std","commit":"c","path":"mod/a.zig","line":3,"kind":"fn","symbol":"mod.a.dup","container":"mod.a","doc":"Copies source into dest.","doc_hash":"5b9b51d9a8c4c3a5174688eb4c984931a3874fe30db40b99c862e57c26ef97fa"}
+        \\{"project":"zig_std","commit":"c","path":"mod/b.zig","line":4,"kind":"fn","symbol":"mod.b.dup","container":"mod.b","doc":"Copies source into dest.","doc_hash":"5b9b51d9a8c4c3a5174688eb4c984931a3874fe30db40b99c862e57c26ef97fa"}
+    );
+
+    var args: std.json.ObjectMap = .{};
+    try args.put(gpa, "project", .{ .string = "zig_std" });
+    try args.put(gpa, "symbol", .{ .string = "mem.copyForwards" });
+
+    const resolved = try tools.docGet(&harness.ctx, .{ .object = args });
+    try std.testing.expect(!resolved.is_error);
+    const structured = resolved.structured.?.object;
+    try std.testing.expect(structured.get("found").?.bool);
+    // The caller's spelling is echoed, and the resolution is stated rather than
+    // passed off as a stored name.
+    try std.testing.expectEqualStrings("mem.copyForwards", structured.get("symbol").?.string);
+    try std.testing.expectEqualStrings("mem.copyForwards", structured.get("resolved_from").?.string);
+    const matches = structured.get("matches").?.array.items;
+    try std.testing.expectEqual(@as(usize, 1), matches.len);
+    try std.testing.expectEqualStrings("lib.std.mem.copyForwards", matches[0].object.get("symbol").?.string);
+    try std.testing.expect(std.mem.indexOf(u8, resolved.text, "Resolved 'mem.copyForwards' to lib.std.mem.copyForwards") != null);
+
+    // The boundary is a component, not a substring: `em.copyForwards` is inside
+    // the stored name but is not a tail of it.
+    try args.put(gpa, "symbol", .{ .string = "em.copyForwards" });
+    const boundary = try tools.docGet(&harness.ctx, .{ .object = args });
+    try std.testing.expect(boundary.is_error);
+    try std.testing.expect(!boundary.structured.?.object.get("found").?.bool);
+
+    // Two stored symbols share the tail, so resolving it would be a guess.
+    try args.put(gpa, "symbol", .{ .string = "dup" });
+    const ambiguous = try tools.docGet(&harness.ctx, .{ .object = args });
+    try std.testing.expect(ambiguous.is_error);
+    const ambiguous_structured = ambiguous.structured.?.object;
+    try std.testing.expect(!ambiguous_structured.get("found").?.bool);
+    try std.testing.expect(ambiguous_structured.get("candidates").?.array.items.len >= 2);
+}
+
+test "PROTO-15: a miss names the stored path-qualified symbols" {
+    // No record in this index carries a member of the type, so the tail names
+    // nothing and the miss has to say what the index does hold.
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const gpa = arena.allocator();
@@ -327,24 +376,27 @@ test "doc_get: a miss names the stored path-qualified symbols" {
 
     var args: std.json.ObjectMap = .{};
     try args.put(gpa, "project", .{ .string = "zig_std" });
-    try args.put(gpa, "symbol", .{ .string = "mem.copyForwards" });
-
-    const unqualified = try tools.docGet(&harness.ctx, .{ .object = args });
-    try std.testing.expect(unqualified.is_error);
-    const unqualified_structured = unqualified.structured.?.object;
-    try std.testing.expect(!unqualified_structured.get("found").?.bool);
-    const candidates = unqualified_structured.get("candidates").?.array.items;
-    try std.testing.expect(candidates.len >= 1);
-    try std.testing.expectEqualStrings("lib.std.mem.copyForwards", candidates[0].string);
-    try std.testing.expect(std.mem.indexOf(u8, unqualified.text, "lib.std.mem.copyForwards") != null);
-    try std.testing.expect(std.mem.indexOf(u8, unqualified.text, "doc_search") != null);
-
-    // A container-only name still reaches the type through its tokens.
     try args.put(gpa, "symbol", .{ .string = "ArrayList.append" });
-    const container_miss = try tools.docGet(&harness.ctx, .{ .object = args });
-    try std.testing.expect(container_miss.is_error);
-    const container_candidates = container_miss.structured.?.object.get("candidates").?.array.items;
-    try std.testing.expectEqualStrings("lib.std.std.ArrayList", container_candidates[0].string);
+
+    const miss = try tools.docGet(&harness.ctx, .{ .object = args });
+    try std.testing.expect(miss.is_error);
+    const structured = miss.structured.?.object;
+    try std.testing.expect(!structured.get("found").?.bool);
+    const candidates = structured.get("candidates").?.array.items;
+    try std.testing.expect(candidates.len >= 1);
+    try std.testing.expectEqualStrings("lib.std.std.ArrayList", candidates[0].string);
+    try std.testing.expect(std.mem.indexOf(u8, miss.text, "lib.std.std.ArrayList") != null);
+    try std.testing.expect(std.mem.indexOf(u8, miss.text, "doc_search") != null);
+
+    // Nothing resembles a nonsense spelling: an empty list is how a caller sees
+    // "not documented" rather than "misspelled".
+    try args.put(gpa, "symbol", .{ .string = "zzznotpresent" });
+    const nothing = try tools.docGet(&harness.ctx, .{ .object = args });
+    try std.testing.expect(nothing.is_error);
+    try std.testing.expectEqual(
+        @as(usize, 0),
+        nothing.structured.?.object.get("candidates").?.array.items.len,
+    );
 }
 
 test "PROTO-14: a separator spelling reaches the records" {

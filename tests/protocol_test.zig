@@ -646,20 +646,39 @@ test "a tool with no match still answers with structuredContent" {
     // but the member is there — every `found: false` result carries it.
     try std.testing.expectEqual(@as(usize, 0), get_structured.get("candidates").?.array.items.len);
 
-    // The stored spelling is path-qualified, so the unqualified one is a miss
-    // that names the symbol the index actually holds.
+    // PROTO-16: the stored spelling is path-qualified, so a shorter dotted tail
+    // resolves to it — and the echo says which symbol answered.
     try harness.send(
         "{\"jsonrpc\":\"2.0\",\"id\":16,\"method\":\"tools/call\",\"params\":{\"name\":\"doc_get\",\"arguments\":{\"project\":\"fixture\",\"symbol\":\"comments.plain\"}}}",
     );
-    const unqualified = try harness.receive();
-    defer unqualified.deinit();
-    const unqualified_result = unqualified.value.object.get("result").?.object;
-    try std.testing.expect(unqualified_result.get("isError").?.bool);
-    const unqualified_structured = unqualified_result.get("structuredContent").?.object;
-    try std.testing.expect(!unqualified_structured.get("found").?.bool);
-    const wire_candidates = unqualified_structured.get("candidates").?.array.items;
-    try std.testing.expect(wire_candidates.len >= 1);
-    try std.testing.expectEqualStrings("lib.std.comments.plain", wire_candidates[0].string);
+    const resolved = try harness.receive();
+    defer resolved.deinit();
+    const resolved_result = resolved.value.object.get("result").?.object;
+    try std.testing.expect(!resolved_result.get("isError").?.bool);
+    const resolved_structured = resolved_result.get("structuredContent").?.object;
+    try std.testing.expect(resolved_structured.get("found").?.bool);
+    try std.testing.expectEqualStrings("comments.plain", resolved_structured.get("resolved_from").?.string);
+    try std.testing.expectEqualStrings(
+        "lib.std.comments.plain",
+        resolved_structured.get("matches").?.array.items[0].object.get("symbol").?.string,
+    );
+
+    // A tail that names nothing stays a miss, and still lists what resembles it.
+    try harness.send(
+        "{\"jsonrpc\":\"2.0\",\"id\":17,\"method\":\"tools/call\",\"params\":{\"name\":\"doc_get\",\"arguments\":{\"project\":\"fixture\",\"symbol\":\"comments.plain.line\"}}}",
+    );
+    const near = try harness.receive();
+    defer near.deinit();
+    const near_result = near.value.object.get("result").?.object;
+    try std.testing.expect(near_result.get("isError").?.bool);
+    const near_structured = near_result.get("structuredContent").?.object;
+    try std.testing.expect(!near_structured.get("found").?.bool);
+    const wire_candidates = near_structured.get("candidates").?.array.items;
+    var named = false;
+    for (wire_candidates) |candidate| {
+        if (std.mem.eql(u8, candidate.string, "lib.std.comments.plain")) named = true;
+    }
+    try std.testing.expect(named);
 
     try harness.send(
         "{\"jsonrpc\":\"2.0\",\"id\":14,\"method\":\"tools/call\",\"params\":{\"name\":\"advice_lookup\",\"arguments\":{\"question\":\"zzzznotpresent\"}}}",

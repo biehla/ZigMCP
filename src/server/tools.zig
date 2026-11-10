@@ -67,7 +67,7 @@ pub const doc_search_output = registry.Schema{ .fields = &.{
 
 pub const doc_get_input = registry.Schema{ .fields = &.{
     .{ .name = "project", .kind = .string, .description = "Project key, e.g. zig_std. Case and - vs _ are forgiven when the spelling names exactly one indexed project." },
-    .{ .name = "symbol", .kind = .string, .description = "Path-qualified symbol as the index stores it, e.g. lib.std.mem.copyForwards. Case is ignored; a miss lists the closest stored symbols." },
+    .{ .name = "symbol", .kind = .string, .description = "Path-qualified symbol as the index stores it, e.g. lib.std.mem.copyForwards. Case is ignored, and a shorter dotted tail (mem.copyForwards) resolves when exactly one stored symbol ends with it; otherwise a miss lists the closest stored symbols." },
 } };
 
 pub const doc_get_output = registry.Schema{
@@ -81,6 +81,9 @@ pub const doc_get_output = registry.Schema{
         // PROTO-15: a miss used to be a dead end, so an unqualified spelling
         // (the readme's own example) looked like an absent symbol.
         .{ .name = "candidates", .kind = .string_array, .required = false, .description = "Path-qualified symbols the index holds that resemble `symbol`; present, possibly empty, only when `found` is false." },
+        // PROTO-16: a shorter spelling that names exactly one stored symbol
+        // resolves; the echo says so rather than pretending it was stored.
+        .{ .name = "resolved_from", .kind = .string, .required = false, .description = "The argument as sent, present only when the stored symbol was reached by a unique dotted suffix; `matches[].symbol` holds the stored spelling." },
     },
 };
 
@@ -534,6 +537,52 @@ fn closestSymbols(
     return symbols.toOwnedSlice(gpa);
 }
 
+/// A shorter spelling that names exactly one stored symbol, with every record of
+/// that symbol.
+const SuffixMatch = struct {
+    records: []const usize,
+    symbol: []const u8,
+};
+
+/// Resolves `symbol` as the dotted tail of a stored symbol, or null.
+///
+/// `ArrayList.append` is `lib.std.std.ArrayList.append`, so an exact compare
+/// misses it while the declaration is present (PROTO-16). Two guards keep this
+/// from becoming a guess: the character before the tail must be `.` (so `lain`
+/// never matches `comments.plain`), and exactly one *stored symbol* may end with
+/// the tail — two candidates stay a miss, reported with their suggestions.
+fn suffixMatch(
+    gpa: std.mem.Allocator,
+    index: *const docs_columnar.Columnar,
+    project: []const u8,
+    symbol: []const u8,
+) !?SuffixMatch {
+    if (symbol.len == 0) return null;
+
+    var records: std.ArrayList(usize) = .empty;
+    var resolved: ?[]const u8 = null;
+    for (0..index.count()) |record| {
+        if (!std.mem.eql(u8, index.projectAt(record), project)) continue;
+        const stored = index.symbolAt(record);
+        // `stored.len > symbol.len + 1` keeps both the `.` boundary and a
+        // non-empty prefix real, so the tail is a component, not a whole name.
+        if (stored.len <= symbol.len + 1) continue;
+        if (stored[stored.len - symbol.len - 1] != '.') continue;
+        if (!text_util.eqlIgnoreCase(stored[stored.len - symbol.len ..], symbol)) continue;
+        if (resolved) |seen| {
+            // Several records may share one symbol (IDX-4); two *symbols* are
+            // the ambiguity this refuses to resolve.
+            if (!text_util.eqlIgnoreCase(seen, stored)) return null;
+        } else {
+            resolved = stored;
+        }
+        try records.append(gpa, record);
+    }
+
+    const stored_symbol = resolved orelse return null;
+    return .{ .records = try records.toOwnedSlice(gpa), .symbol = stored_symbol };
+}
+
 /// The message for a symbol that matched nothing: the two rules a caller cannot
 /// see from outside (path-qualified spelling, documented declarations only),
 /// the closest stored symbols, and the tool that finds the spelling.
@@ -601,17 +650,30 @@ pub fn docGet(ctx: *Context, args: std.json.Value) ToolError!ToolOutcome {
         try records.append(gpa, record);
     }
 
+    // A miss for the exact spelling is not a miss for the declaration: the same
+    // symbol may be stored path-qualified (PROTO-16).
+    var resolved_from: ?[]const u8 = null;
     if (records.items.len == 0) {
-        const candidates = try closestSymbols(gpa, columnar, resolved_project, symbol);
-        return toolFailure(
-            gpa,
-            try symbolMissMessage(gpa, symbol, project, candidates),
-            try emptyGetResult(gpa, project, symbol, candidates),
-        );
+        if (try suffixMatch(gpa, columnar, resolved_project, symbol)) |hit| {
+            try records.appendSlice(gpa, hit.records);
+            resolved_from = symbol;
+        } else {
+            const candidates = try closestSymbols(gpa, columnar, resolved_project, symbol);
+            return toolFailure(
+                gpa,
+                try symbolMissMessage(gpa, symbol, project, candidates),
+                try emptyGetResult(gpa, project, symbol, candidates),
+            );
+        }
     }
 
     var matches: std.json.Array = json_array.init(gpa);
     var text: std.ArrayList(u8) = .empty;
+    // The caller asked for a shorter name, so say which symbol answered: the
+    // result must never look like a record stored under the spelling sent.
+    if (resolved_from) |from| {
+        try text.print(gpa, "Resolved '{s}' to {s}\n\n", .{ from, columnar.symbolAt(records.items[0]) });
+    }
     for (records.items, 0..) |record, index| {
         var item: std.json.ObjectMap = .{};
         try item.put(gpa, "commit", .{ .string = columnar.commitAt(record) });
@@ -638,6 +700,7 @@ pub fn docGet(ctx: *Context, args: std.json.Value) ToolError!ToolOutcome {
     try structured.put(gpa, "project", .{ .string = project });
     try structured.put(gpa, "symbol", .{ .string = symbol });
     try structured.put(gpa, "matches", .{ .array = matches });
+    if (resolved_from) |from| try structured.put(gpa, "resolved_from", .{ .string = from });
 
     return .{ .text = try text.toOwnedSlice(gpa), .structured = .{ .object = structured } };
 }

@@ -96,12 +96,16 @@ declared output schema. A tool that runs but finds nothing is a normal result wi
 `isError: true`, an explanation and a schema-shaped empty value — an answer, not a
 failure.
 
+Every answer is retrieval: corpus text with its evidence label, or upstream comment text
+with `path:line` and `commit`. The server does not generate code and does not claim that
+anything was compiled or checked.
+
 | Tool | Arguments | Returns |
 |---|---|---|
 | `advice_lookup` | `concept` (e.g. `"P03"`) **or** `question` (free text) | The full paradigm record: what it controls, facts with labels and sources, candidate uses, boundaries, checks. A question returns up to 5 best matches |
 | `recommend_approach` | `signals` (non-empty list of observations), optional `constraints` | The decision rules your signals match, best first: paradigms to consider, the "only if" constraint, its `GUIDANCE` label and a score |
 | `doc_search` | `query`, optional `project`, optional `limit` (default 20, max 100) | Matching records with `path:line`, symbol, kind and text: exact symbol first, then partial symbol, then path, then prose |
-| `doc_get` | `project`, `symbol` | Every record with that path-qualified symbol — usually one — with its location and commit. `symbol` must be the spelling the index stores (`lib.std.mem.copyForwards`); a miss lists the closest stored symbols in `candidates`. `found` is always present, so a miss is still schema-shaped |
+| `doc_get` | `project`, `symbol` | Every record with that symbol — usually one — with its location and commit. `symbol` is the spelling the index stores (`lib.std.mem.copyForwards`); a shorter dotted tail (`mem.copyForwards`) resolves when exactly one stored symbol ends with it and the result then carries `resolved_from`. Otherwise a miss lists the closest stored symbols in `candidates`. `found` is always present, so a miss is still schema-shaped |
 | `doc_import_status` | none | `index_state` (`ok` / `unloaded` / `reload_failed`), `index_error` when a load failed, and per project the commit, record count and degraded-file counts for a local index |
 
 `project` is matched exactly first, so `Fixture` and `fixture` stay distinct. Failing
@@ -203,9 +207,10 @@ files are listed as degraded in the status file.
 
 Symbols are **path-qualified**: module path, then the nesting of declarations.
 `mem.copyForwards` is stored as `lib.std.mem.copyForwards`; a `lib/std/std.zig`
-container record is `lib.std.std.ArrayList`. An unqualified name therefore finds
-nothing, and `doc_get` answers with the closest stored symbols in `candidates`;
-`doc_search` is the tool that discovers a spelling, and a shorter query finds more.
+container record is `lib.std.std.ArrayList`. `doc_get` resolves a shorter spelling only
+when it is a **dotted tail** of exactly one stored symbol, so `mem.copyForwards` reaches
+`lib.std.mem.copyForwards` and comes back with `resolved_from` set; two symbols ending
+the same way stay a miss, and `doc_search` is the tool that discovers a spelling.
 
 Only documented declarations are indexed, so an undocumented `pub fn` is absent rather
 than misspelled, and a type-level doc can survive while its methods do not. That
