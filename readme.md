@@ -110,9 +110,15 @@ schema — that is an answer, not a failure.
 |---|---|---|
 |`advice_lookup`|`concept` (e.g. `"P03"`) **or** `question` (free text)|The full paradigm record: what it controls, facts with labels and sources, candidate uses, boundaries, checks. A question returns up to 5 best matches|
 |`recommend_approach`|`signals` (non-empty list of observations); `constraints` (optional object, currently unused)|The decision rules your signals match, best first: paradigms to consider, the "only if" constraint, its `GUIDANCE` label and a match score|
-|`doc_search`|`query`; `project` (optional); `limit` (default 20, max 100)|Matching doc records with `path:line`, symbol, kind and text. Exact symbol first, then partial symbol, then path, then text matches|
-|`doc_get`|`project`, `symbol` (project exact, symbol case-insensitive)|Every record with that symbol — usually one — with its source location and upstream commit. `found` is always present, so a miss is still schema-shaped|
+|`doc_search`|`query`; `project` (optional — case and `-`/`_` forgiven when the spelling names one project); `limit` (default 20, max 100)|Matching doc records with `path:line`, symbol, kind and text. Exact symbol first, then partial symbol, then path, then text matches|
+|`doc_get`|`project`, `symbol` (project resolved as above, symbol case-insensitive)|Every record with that symbol — usually one — with its source location and upstream commit. `found` is always present, so a miss is still schema-shaped|
 |`doc_import_status`|none|`index_state` (`ok`, `unloaded`, `reload_failed`), `index_error` when a load failed, and per project the commit, record count and degraded-file counts for a local index|
+
+A `project` argument is matched exactly first, so two projects whose keys differ only in
+case stay distinct. When no exact key matches, the spelling is compared again ignoring
+case and `_` vs `-`: if that names exactly one project it is used, and if it names two
+the answer says so instead of guessing. A spelling that names nothing returns
+`isError: true` and lists the project keys the index does hold.
 
 Questions map to tools like this:
 
@@ -194,6 +200,10 @@ compiling it, so a project that does not build on Zig 0.17.1 — or a file with 
 error — still contributes every doc comment that could be parsed. Such files are
 listed as degraded in the status file.
 
+A record holds comment text only: a signature, a body or a type is never stored, so
+`doc_get` returns the comment and not the declaration. `path:line` plus the record's
+`commit` is how you get from a record to the declaration itself.
+
 ### Building one yourself
 
 `zig build` installs the indexer as `zig-out/bin/indexer`. Given a checkout of an
@@ -227,6 +237,12 @@ degraded file with its parser diagnostics. Keep it next to the index: the
 up without flags. The upstream projects, their pinned commits and their
 include/exclude scope live in `data/sources.zon`; `zig build plan-sources` prints the
 plan both CI workflows use.
+
+The project key is the field name in `data/sources.zon` (`zig_std`, `mcp_zig`), and
+the tool arguments accept it as written. To index several projects, run the indexer
+once per project and concatenate the files with the project keys in ascending order —
+each per-project file is already sorted, so the concatenation is sorted too. The
+server loads one file, so a project missing from it is a project the tools cannot see.
 
 ### How updates land
 
@@ -333,6 +349,15 @@ conventions — are in [`AGENTS.md`](AGENTS.md). Read it before changing behavio
 Releases are always built with the pinned Zig release, never with master, so a release
 can be rebuilt exactly from its tag.
 
+## License
+
+MIT — see [`LICENSE`](LICENSE).
+
+The advice corpus is derived from `systems_programming_context_v1.md`. The doc index
+holds documentation comments copied from their upstream projects (Zig's `lib/std`,
+`mcp.zig`, …), each under that project's own license; `doc_import_status` and every
+record's `project` and `commit` name where it came from.
+
 ## Troubleshooting
 
 |Symptom|Cause and fix|
@@ -358,6 +383,7 @@ tables for what has been closed. This page deliberately keeps no second copy.
 ```
 build.zig, build.zig.zon     build graph and package manifest
 client-config.json           a ready-to-edit client entry
+LICENSE                      MIT license of this repository
 src/                         the server
   main.zig                   startup, request loop, dispatch
   protocol/                  JSON-RPC parsing, protocol versions, error codes

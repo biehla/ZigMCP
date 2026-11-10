@@ -39,6 +39,8 @@ jobs:
           # unpacking it into an empty directory is a working install.
           cp "$bin" "dist/pkg/$base"
           cp -r data/advice "dist/pkg/data/"
+          # MIT: the tarball is a distribution, so it carries the license.
+          cp LICENSE "dist/pkg/LICENSE"
           tar -C dist/pkg -czf "dist/zigmcp-${{ matrix.os }}.tar.gz" .
           # The raw binary stays for callers that point at their own corpus.
           cp "$bin" "dist/zigmcp-${{ matrix.os }}${ext}"

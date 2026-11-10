@@ -11,6 +11,8 @@ const corpus_module = @import("../advice/corpus.zig");
 const render = @import("../advice/render.zig");
 const rules_module = @import("../advice/rules.zig");
 const docs_search = @import("../docs/search.zig");
+const docs_columnar = @import("../docs/columnar.zig");
+const docs_projects = @import("../docs/projects.zig");
 const text_util = @import("../util/text.zig");
 const json_array = @import("../util/json_array.zig");
 
@@ -49,7 +51,7 @@ pub const recommend_approach_output = registry.Schema{ .fields = &.{
 
 pub const doc_search_input = registry.Schema{ .fields = &.{
     .{ .name = "query", .kind = .string, .description = "Symbol, path or documentation text to look for." },
-    .{ .name = "project", .kind = .string, .required = false, .description = "Restrict the search to one project." },
+    .{ .name = "project", .kind = .string, .required = false, .description = "Restrict the search to one project. Case and - vs _ are forgiven when the spelling names exactly one indexed project." },
     .{ .name = "limit", .kind = .integer, .required = false, .description = "Maximum number of results (default 20, max 100)." },
 } };
 
@@ -60,7 +62,7 @@ pub const doc_search_output = registry.Schema{ .fields = &.{
 } };
 
 pub const doc_get_input = registry.Schema{ .fields = &.{
-    .{ .name = "project", .kind = .string, .description = "Project key, e.g. zig-std." },
+    .{ .name = "project", .kind = .string, .description = "Project key, e.g. zig_std. Case and - vs _ are forgiven when the spelling names exactly one indexed project." },
     .{ .name = "symbol", .kind = .string, .description = "Fully qualified symbol path, e.g. mem.copyForwards." },
 } };
 
@@ -94,6 +96,65 @@ pub const doc_import_status_output = registry.Schema{ .fields = &.{
 fn toolFailure(gpa: std.mem.Allocator, message: []const u8, structured: std.json.Value) ToolError!ToolOutcome {
     const text = try gpa.dupe(u8, message);
     return .{ .text = text, .structured = structured, .is_error = true };
+}
+
+/// `doc_search`'s shape with no results (PROTO-12).
+fn emptySearchResult(gpa: std.mem.Allocator, query: []const u8) !std.json.Value {
+    var object: std.json.ObjectMap = .{};
+    try object.put(gpa, "query", .{ .string = query });
+    try object.put(gpa, "count", .{ .integer = 0 });
+    try object.put(gpa, "results", .{ .array = json_array.init(gpa) });
+    return .{ .object = object };
+}
+
+/// `doc_get`'s shape with no result (PROTO-12).
+fn emptyGetResult(gpa: std.mem.Allocator, project: []const u8, symbol: []const u8) !std.json.Value {
+    var object: std.json.ObjectMap = .{};
+    try object.put(gpa, "found", .{ .bool = false });
+    try object.put(gpa, "project", .{ .string = project });
+    try object.put(gpa, "symbol", .{ .string = symbol });
+    return .{ .object = object };
+}
+
+/// Joins project keys with ", ", stopping after `limit` of them with an
+/// ellipsis so one message never grows without bound.
+fn joinProjectKeys(gpa: std.mem.Allocator, keys: []const []const u8, limit: usize) ![]const u8 {
+    var joined: std.ArrayList(u8) = .empty;
+    for (keys, 0..) |key, position| {
+        if (position == limit) {
+            try joined.appendSlice(gpa, ", …");
+            break;
+        }
+        if (position != 0) try joined.appendSlice(gpa, ", ");
+        try joined.appendSlice(gpa, key);
+    }
+    return joined.toOwnedSlice(gpa);
+}
+
+/// The message for a project argument that names no project (PROTO-14).
+fn projectMissMessage(
+    gpa: std.mem.Allocator,
+    index: *const docs_columnar.Columnar,
+    wanted: []const u8,
+) ![]const u8 {
+    if (index.count() == 0) {
+        return std.fmt.allocPrint(gpa, "No project '{s}': the doc index is empty.", .{wanted});
+    }
+    // One key past the cap tells us the list is longer than it prints.
+    const keys = try docs_projects.known(gpa, index, docs_projects.max_listed + 1);
+    const listed = try joinProjectKeys(gpa, keys, docs_projects.max_listed);
+    return std.fmt.allocPrint(gpa, "No project '{s}' in the doc index. Known projects: {s}.", .{ wanted, listed });
+}
+
+/// The message for a project argument that two stored keys both answer
+/// (PROTO-14): the keys are never merged.
+fn ambiguousProjectMessage(
+    gpa: std.mem.Allocator,
+    wanted: []const u8,
+    candidates: []const []const u8,
+) ![]const u8 {
+    const listed = try joinProjectKeys(gpa, candidates, candidates.len);
+    return std.fmt.allocPrint(gpa, "Project '{s}' is ambiguous: {s}. Pass the exact key.", .{ wanted, listed });
 }
 
 /// `advice_lookup`'s shape with no matches.
@@ -336,6 +397,26 @@ pub fn docSearch(ctx: *Context, args: std.json.Value) ToolError!ToolOutcome {
     const snapshot = ctx.docs.snapshot();
     defer snapshot.deinit();
 
+    // A tool argument is typed by a caller, so a loose spelling resolves when
+    // it names exactly one project; two distinct keys are never merged
+    // (PROTO-14).
+    var resolved_project = project;
+    if (project) |wanted| {
+        switch (try docs_projects.resolve(gpa, &snapshot.index.columnar, wanted)) {
+            .found => |key| resolved_project = key,
+            .missing => return toolFailure(
+                gpa,
+                try projectMissMessage(gpa, &snapshot.index.columnar, wanted),
+                try emptySearchResult(gpa, query),
+            ),
+            .ambiguous => |candidates| return toolFailure(
+                gpa,
+                try ambiguousProjectMessage(gpa, wanted, candidates),
+                try emptySearchResult(gpa, query),
+            ),
+        }
+    }
+
     const effective_limit: usize = if (limit) |value|
         (if (value <= 0) docs_search.default_limit else @min(@as(usize, @intCast(value)), docs_search.max_limit))
     else
@@ -346,18 +427,14 @@ pub fn docSearch(ctx: *Context, args: std.json.Value) ToolError!ToolOutcome {
         &snapshot.index.columnar,
         query,
         query_tokens,
-        project,
+        resolved_project,
         effective_limit,
     );
     if (matches.len == 0) {
-        var structured: std.json.ObjectMap = .{};
-        try structured.put(gpa, "query", .{ .string = query });
-        try structured.put(gpa, "count", .{ .integer = 0 });
-        try structured.put(gpa, "results", .{ .array = json_array.init(gpa) });
         return toolFailure(
             gpa,
             try std.fmt.allocPrint(gpa, "No indexed documentation matched '{s}'.", .{query}),
-            .{ .object = structured },
+            try emptySearchResult(gpa, query),
         );
     }
 
@@ -410,24 +487,37 @@ pub fn docGet(ctx: *Context, args: std.json.Value) ToolError!ToolOutcome {
     defer snapshot.deinit();
     const columnar = &snapshot.index.columnar;
 
+    // Same forgiving resolution as `doc_search`, but the caller's spelling is
+    // what the result echoes back (PROTO-14).
+    var resolved_project = project;
+    switch (try docs_projects.resolve(gpa, columnar, project)) {
+        .found => |key| resolved_project = key,
+        .missing => return toolFailure(
+            gpa,
+            try projectMissMessage(gpa, columnar, project),
+            try emptyGetResult(gpa, project, symbol),
+        ),
+        .ambiguous => |candidates| return toolFailure(
+            gpa,
+            try ambiguousProjectMessage(gpa, project, candidates),
+            try emptyGetResult(gpa, project, symbol),
+        ),
+    }
+
     var records: std.ArrayList(usize) = .empty;
     for (0..columnar.count()) |record| {
-        // Project keys are exact identifiers; only symbols are matched
+        // The project key resolved above; only symbols are matched
         // case-insensitively (PROTO-13).
-        if (!std.mem.eql(u8, columnar.projectAt(record), project)) continue;
+        if (!std.mem.eql(u8, columnar.projectAt(record), resolved_project)) continue;
         if (!text_util.eqlIgnoreCase(columnar.symbolAt(record), symbol)) continue;
         try records.append(gpa, record);
     }
 
     if (records.items.len == 0) {
-        var structured: std.json.ObjectMap = .{};
-        try structured.put(gpa, "found", .{ .bool = false });
-        try structured.put(gpa, "project", .{ .string = project });
-        try structured.put(gpa, "symbol", .{ .string = symbol });
         return toolFailure(
             gpa,
             try std.fmt.allocPrint(gpa, "No indexed symbol '{s}' in project '{s}'.", .{ symbol, project }),
-            .{ .object = structured },
+            try emptyGetResult(gpa, project, symbol),
         );
     }
 

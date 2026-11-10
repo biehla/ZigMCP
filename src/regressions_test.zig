@@ -312,3 +312,71 @@ test "IDX-4: doc_get returns every record sharing a symbol" {
     try std.testing.expectEqualStrings("container", matches[1].object.get("kind").?.string);
     try std.testing.expectEqualStrings("", matches[1].object.get("container").?.string);
 }
+
+test "PROTO-14: a separator spelling reaches the records" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const harness = try startHarnessWithIndex(gpa,
+        \\{"project":"zig_std","commit":"c","path":"mem.zig","line":1,"kind":"fn","symbol":"mem.copyForwards","container":"mem","doc":"alpha docs","doc_hash":"36a69add5014cf58a2cee74b1c30ef5fe3b80cd48ab14cd5e5efa3b22dc8dc2d"}
+    );
+
+    // `zig-std` is what a caller types; the stored key is `zig_std`.
+    var search_args: std.json.ObjectMap = .{};
+    try search_args.put(gpa, "query", .{ .string = "alpha" });
+    try search_args.put(gpa, "project", .{ .string = "zig-std" });
+    const search = try tools.docSearch(&harness.ctx, .{ .object = search_args });
+    try std.testing.expect(!search.is_error);
+    try std.testing.expectEqual(@as(i64, 1), search.structured.?.object.get("count").?.integer);
+
+    // Case is forgiven too, and the caller's spelling is what comes back.
+    var get_args: std.json.ObjectMap = .{};
+    try get_args.put(gpa, "project", .{ .string = "ZIG_STD" });
+    try get_args.put(gpa, "symbol", .{ .string = "mem.copyforwards" });
+    const get = try tools.docGet(&harness.ctx, .{ .object = get_args });
+    try std.testing.expect(!get.is_error);
+    const structured = get.structured.?.object;
+    try std.testing.expect(structured.get("found").?.bool);
+    try std.testing.expectEqualStrings("ZIG_STD", structured.get("project").?.string);
+}
+
+test "PROTO-14: a wrong project names the ones that exist" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const harness = try startHarnessWithIndex(gpa,
+        \\{"project":"mcp_zig","commit":"c","path":"b.zig","line":1,"kind":"fn","symbol":"b","container":"","doc":"alpha docs","doc_hash":"36a69add5014cf58a2cee74b1c30ef5fe3b80cd48ab14cd5e5efa3b22dc8dc2d"}
+        \\{"project":"zig_std","commit":"c","path":"a.zig","line":1,"kind":"fn","symbol":"a","container":"","doc":"alpha docs","doc_hash":"36a69add5014cf58a2cee74b1c30ef5fe3b80cd48ab14cd5e5efa3b22dc8dc2d"}
+    );
+
+    var args: std.json.ObjectMap = .{};
+    try args.put(gpa, "query", .{ .string = "alpha" });
+    try args.put(gpa, "project", .{ .string = "nope" });
+    const outcome = try tools.docSearch(&harness.ctx, .{ .object = args });
+    try std.testing.expect(outcome.is_error);
+    try std.testing.expectEqual(@as(i64, 0), outcome.structured.?.object.get("count").?.integer);
+    try std.testing.expect(std.mem.indexOf(u8, outcome.text, "Known projects: mcp_zig, zig_std") != null);
+}
+
+test "PROTO-14: one spelling matching two keys is ambiguous" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const harness = try startHarnessWithIndex(gpa,
+        \\{"project":"Fixture","commit":"c1","path":"A.zig","line":1,"kind":"fn","symbol":"a","container":"","doc":"alpha docs","doc_hash":"36a69add5014cf58a2cee74b1c30ef5fe3b80cd48ab14cd5e5efa3b22dc8dc2d"}
+        \\{"project":"fixture","commit":"c2","path":"b.zig","line":2,"kind":"fn","symbol":"b","container":"","doc":"alpha docs","doc_hash":"36a69add5014cf58a2cee74b1c30ef5fe3b80cd48ab14cd5e5efa3b22dc8dc2d"}
+    );
+
+    var args: std.json.ObjectMap = .{};
+    try args.put(gpa, "query", .{ .string = "alpha" });
+    try args.put(gpa, "project", .{ .string = "FIXTURE" });
+    const outcome = try tools.docSearch(&harness.ctx, .{ .object = args });
+    try std.testing.expect(outcome.is_error);
+    try std.testing.expectEqual(@as(i64, 0), outcome.structured.?.object.get("count").?.integer);
+    try std.testing.expect(std.mem.indexOf(u8, outcome.text, "ambiguous") != null);
+    try std.testing.expect(std.mem.indexOf(u8, outcome.text, "Fixture") != null);
+    try std.testing.expect(std.mem.indexOf(u8, outcome.text, "fixture") != null);
+}

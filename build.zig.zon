@@ -16,6 +16,7 @@
         "tests",
         "AGENTS.md",
         "readme.md",
+        "LICENSE",
         "PLAN.md",
         "lsp.json",
         "client-config.json",

@@ -228,6 +228,7 @@ server would put upstream-parse failure modes on the request path.
 |`.github/workflows/`|`ci.yml`, `bump-master.yml`, `index.yml`, `release.yml` (§8)|
 |`systems_programming_context_v1.md`|Upstream source of the advice corpus. Reference only — never edit it to change behaviour|
 |`readme.md`|User guide|
+|`LICENSE`|MIT license of this repository (packaged through `build.zig.zon` `paths`)|
 |`res/zigmcp.rc`, `res/zigmcp.manifest`|Windows manifest (asInvoker, supported OS) and version resource (DOC-4)|
 |`lsp.json`|ZLS wiring (§10)|
 
@@ -251,8 +252,8 @@ item), `structuredContent` matching the output schema, and `isError`.
 |---|---|---|---|
 |`advice_lookup`|`concept` (e.g. `P03`) **or** `question` (free text); at least one|`{query, matches[]}` — full pattern records|Question mode: token overlap over name, controls, facts, candidate uses; top 5|
 |`recommend_approach`|`signals: string[]` (non-empty), optional `constraints: object` (opaque)|`{signals, matches[{rule_id, condition, consider[], and_only_if?, evidence, score}]}`|A rule matches on ≥2 shared tokens, or 1 token covering ≥50% of its condition|
-|`doc_search`|`query`, optional `project`, optional `limit` (default 20, max 100; ≤0 → 20)|`{query, count, results[{project, commit, path, line, kind, symbol, container, doc}]}`|Score: exact symbol 100 / symbol substring 60 / token-in-symbol 40, +25 path, +10 doc substring or +5 token-in-doc; ties by symbol, path, line|
-|`doc_get`|`project`, `symbol` (case-insensitive)|`{found, project?, symbol?, matches[{commit, path, line, kind, symbol, container, doc, doc_hash}]}`|Every record sharing the symbol path — a `//!` container record and a declaration from the sibling `<dir>.zig` can collide — in `(path, line)` order; `found` is always present so a miss is still schema-shaped|
+|`doc_search`|`query`, optional `project`, optional `limit` (default 20, max 100; ≤0 → 20)|`{query, count, results[{project, commit, path, line, kind, symbol, container, doc}]}`|Score: exact symbol 100 / symbol substring 60 / token-in-symbol 40, +25 path, +10 doc substring or +5 token-in-doc; ties by symbol, path, line. `project` resolves exactly first, then ignoring case and `_` vs `-` when the spelling names exactly one project (PROTO-14). The index holds doc comments only — no signature or body is stored|
+|`doc_get`|`project`, `symbol` (case-insensitive)|`{found, project?, symbol?, matches[{commit, path, line, kind, symbol, container, doc, doc_hash}]}`|Every record sharing the symbol path — a `//!` container record and a declaration from the sibling `<dir>.zig` can collide — in `(path, line)` order; `found` is always present so a miss is still schema-shaped. `project` resolves as in `doc_search` (PROTO-14); a record holds comment text only, never a signature or body|
 |`doc_import_status`|`{}`|`{index_path?, index_state, index_error?, index_records, projects[{project, commit, records, files_total?, files_degraded?, degraded?}]}`|`index_state` is `ok`/`unloaded`/`reload_failed`, so a client can see that the index being served is not the artifact on disk (REL-4); degraded counts come from the `.status.json` sidecar next to a **local** index, and a sidecar member whose type or sign contradicts this schema is omitted rather than echoed|
 
 "Nothing matched" is a **normal result with `isError: true`**, an explanation, and
@@ -280,6 +281,11 @@ wrong type) are `-32602`.
 on the loaded index. Every listed resource is readable (PROTO-1). Project keys in
 `docs://` URIs are exact identifiers — `Fixture` and `fixture` are two projects — while
 symbol paths are matched case-insensitively (PROTO-13).
+
+Tool arguments are the exception: `doc_search` and `doc_get` resolve `project`
+exactly first, then ignoring case and `_` vs `-`, and use a loose match only when it
+names exactly one project. Two distinct keys are never merged, and a miss lists the
+keys the index holds (PROTO-14).
 
 ### Prompts (sorted by name; one required argument each)
 
@@ -387,7 +393,7 @@ them, so a schema change is one edit and all three targets recompile.
 |`kind`|`fn` / `var` / `field` / `container` / `error` / `param`|
 |`symbol`|Syntactic container path; module path is the file path with `/` → `.` and `.zig` stripped, and a `..` component is rejected (IDX-6)|
 |`container`|Enclosing symbol (`""` for a module's `//!` record)|
-|`doc`|`///` or `//!` stripped (the space after it is kept), lines joined with `\n`; an invalid UTF-8 byte becomes U+FFFD before hashing (IDX-5)|
+|`doc`|`///` or `//!` stripped (the space after it is kept), lines joined with `\n`; an invalid UTF-8 byte becomes U+FFFD before hashing (IDX-5). Comment text only: no signature, body or type is stored|
 |`doc_hash`|Lowercase hex SHA-256 of `doc`; recomputed and compared at load, so a mismatch rejects the artifact (REL-9)|
 
 Key order is fixed. Records are sorted by `(project, symbol)`, ties by `(path, line)`.
@@ -897,7 +903,7 @@ to prevent than to debug, and each already has a guard here.
 |8|A negative sidecar count aborts the process|SRV-6|validate every count before formatting it|
 |9|An unvalidated sidecar member is echoed to clients|PROTO-11|type and sign checked; omitted on mismatch|
 |10|"Nothing matched" arrives as a protocol error|PROTO-12|normal result, `isError: true`, schema-shaped|
-|11|`Fixture` and `fixture` collide|PROTO-13|project keys exact, symbol paths case-insensitive|
+|11|`Fixture` and `fixture` collide|PROTO-13|project keys exact in URIs, symbol paths case-insensitive; tool arguments resolve exactly first (PROTO-14)|
 |12|CRLF changes a `doc_hash` and breaks the golden test|01064d7|`.gitattributes` LF; strip `\r` before hashing|
 |13|A `lib/**` include matches nothing|IDX-2|test the pattern against a real tree, not by reading the regex|
 |14|A zero poll interval spins a core|REL-1|clamp to the 100 ms floor|
@@ -908,6 +914,7 @@ to prevent than to debug, and each already has a guard here.
 |19|`zig fetch --save` edits the wrong manifest|CI-11|run it in a subshell inside the checkout it must edit|
 |20|The lint gate is green locally and red in CI|CI-12|run actionlint with `shellcheck` visible on `PATH`|
 |21|The release tarball cannot start|CI-8|unpack into an empty directory and run it|
+|22|A project spelling differing by `-`/`_` or case silently matched nothing|PROTO-14|exact-first resolution, ambiguity reported, a miss names the known keys|
 
 Add a row when a defect is fixed and no existing row would have caught it. A row that
 has never fired is still worth keeping: it is the checklist, not the history.

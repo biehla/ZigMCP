@@ -295,7 +295,7 @@ pub const tool_specs = [_]ToolSpec{
     },
     .{
         .name = "doc_get",
-        .description = "Fetch the full documentation of one symbol from the imported doc index.",
+        .description = "Fetch the documentation comments (/// and //!) of one indexed symbol. The index holds comment text only: no signature, body or type information is stored or returned.",
         .input = tools_module.doc_get_input,
         .output = tools_module.doc_get_output,
         .handler = tools_module.docGet,
@@ -309,7 +309,7 @@ pub const tool_specs = [_]ToolSpec{
     },
     .{
         .name = "doc_search",
-        .description = "Search the imported doc index by symbol, path or documentation text.",
+        .description = "Search imported documentation comments (/// and //!) by symbol, path or comment text. The index holds comment text only, not signatures or bodies.",
         .input = tools_module.doc_search_input,
         .output = tools_module.doc_search_output,
         .handler = tools_module.docSearch,

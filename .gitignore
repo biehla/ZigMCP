@@ -19,6 +19,9 @@
 # CI-produced data artifacts (published by CI, never hand-edited)
 /generated/
 
+# Upstream checkouts fetched for local indexing — never committed
+/upstream/
+
 # Native build byproducts (e.g. `zig build-lib` leaves a .lib next to the source)
 *.lib
 *.a

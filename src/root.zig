@@ -8,6 +8,7 @@ test {
     _ = @import("advice/rules.zig");
     _ = @import("docs/columnar.zig");
     _ = @import("docs/index.zig");
+    _ = @import("docs/projects.zig");
     _ = @import("docs/reload.zig");
     _ = @import("docs/search.zig");
     _ = @import("protocol/errors.zig");
