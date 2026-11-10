@@ -334,7 +334,6 @@ must own its test, because no such layer exists yet.
 |REL-1|—|local HTTP server counting requests|
 |REL-2|—|black-hole address plus quit; timing-based|
 |REL-3|—|unit test: `Source.fromString("file:///x")`|
-|REL-5|—|integration: sparse 257 MiB index file|
 |REL-6|—|integration: URL index with no sidecar|
 |REL-7|—|reload integration test: equal size, restored mtime|
 |GUIDE-4|—|handler test: 60 KiB query expects `-32602`|
@@ -357,7 +356,7 @@ The first three steps of the original order — the pipeline, the cheap client-v
 fixes and the data-plane trust items — are done (§13, §14, §15). What remains, in
 order:
 
-1. Remaining limitations by demand: PROTO-10, REL-1, REL-5.
+1. Remaining limitations by demand: PROTO-10, REL-1.
 2. Measured hot spots: IDX-9 (quadratic indexer) and SRV-7 (client-chosen stall).
 3. Contract and packaging gaps: DOC-4, CI-9.
 4. Everything else in §1–§6 by demand.
@@ -489,6 +488,7 @@ would have meant staging halves of one file.
 |GUIDE-3|(a) one shared `src/advice/schema.zig` imported as the `advice_schema` module|`20784b3`|`zig build check` + `zig build bench` compile both tools against it; `grep -n "const Pattern = struct" src tools` prints one line; `corpus.zig` pins type identity at comptime|
 |GUIDE-2|(a) a `handler` in `PromptSpec`/`ResourceSpec` (and `cache` in resources)|`20784b3`|regression tests: every prompt spec dispatches through its handler, both resource families read through the table|
 |GUIDE-1|(a) add the `//!` headers|`20784b3`|`src/root.zig` lint test names every headerless `src/**`/`tools/**` file (both tools before the fix) and passes after|
+|REL-5|(a) a `--max-index-bytes` flag|`e9624fb`|unit test: `an artifact larger than the ceiling is rejected` (the golden index, 10-byte limit); CLI accepts the flag|
 
 ## 15. Resolved on 2026-11-10, second chunk
 
