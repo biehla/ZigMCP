@@ -11,8 +11,9 @@ written in Zig. It answers two kinds of question:
   rules, cross-cutting guarantees and limits. Every claim carries an evidence label —
   `FACT`, `RESULT`, `SYNTHESIS` or `GUIDANCE` — plus its sources, so your agent can
   tell a documented mechanism from a recommendation.
-- **"What does this Zig symbol do?"** Doc comments extracted from other Zig projects
-  (the standard library and `mcp.zig` by default), searchable by symbol, path or text.
+- **"What does this Zig symbol do?"** Comment documentation extracted from other Zig
+  projects (the standard library and `mcp.zig` by default), searchable by symbol, path
+  or text.
 
 The binary is small and rarely changes. Both knowledge sources are **data files**
 loaded at runtime, and the documentation index is reloaded while the server runs, so
@@ -151,7 +152,7 @@ parameters (`-32602`).
 |`advice://guarantees`|Cross-cutting guarantees|
 |`advice://limits`|The limits of the source material, and the evidence-label legend|
 |`advice://sources`|The S01–S24 registry with author, title and URL|
-|`docs://{project}/index`|Every documented symbol of one project, as `path:line symbol`|
+|`docs://{project}/index`|Every indexed symbol of one project, as `path:line symbol`|
 |`docs://{project}/symbols/{symbol}`|One symbol's documentation, as a URI template|
 
 Advice resources are cacheable for an hour; anything derived from the doc index is
@@ -362,9 +363,9 @@ can be rebuilt exactly from its tag.
 MIT — see [`LICENSE`](LICENSE).
 
 The advice corpus is derived from `systems_programming_context_v1.md`. The doc index
-holds documentation comments copied from their upstream projects (Zig's `lib/std`,
-`mcp.zig`, …), each under that project's own license; `doc_import_status` and every
-record's `project` and `commit` name where it came from.
+holds comment text copied from its upstream projects (Zig's `lib/std`, `mcp.zig`, …),
+each under that project's own license; `doc_import_status` and every record's `project`
+and `commit` name where it came from.
 
 ## Troubleshooting
 

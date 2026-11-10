@@ -40,7 +40,7 @@ loaded at runtime. Never embed the index in the binary (D3).
 |#|Goal|Acceptance signal|
 |---|---|---|
 |G1|Serve the advice with evidence labels and source ids intact|Every advice record exposes `evidence` (`FACT`/`RESULT`/`SYNTHESIS`/`GUIDANCE`) and `sources` (`S01`…`S24`)|
-|G2|Import docs from other Zig projects using Zig's doc syntax|The indexer extracts `///`/`//!` from arbitrary upstream trees with symbol paths and `path:line`|
+|G2|Import docs from other Zig projects using Zig's doc syntax|The indexer extracts `///`/`//!` — and, for a declaration with no doc comment, its `//` run — from arbitrary upstream trees with symbol paths and `path:line`|
 |G3|Stay current without hand-edits|A scheduled CI job re-pins upstream branches and republishes the index; no source change|
 |G4|Protocol correctness against MCP `2026-07-28`|`server/discover`; `_meta` validated; `resultType` + `serverInfo` on every current-revision result; cache hints on the six cacheable methods|
 |G5|Correct under failure and load|The §9 verification layers run and the §9 report is produced|
@@ -252,7 +252,7 @@ item), `structuredContent` matching the output schema, and `isError`.
 |---|---|---|---|
 |`advice_lookup`|`concept` (e.g. `P03`) **or** `question` (free text); at least one|`{query, matches[]}` — full pattern records|Question mode: token overlap over name, controls, facts, candidate uses; top 5|
 |`recommend_approach`|`signals: string[]` (non-empty), optional `constraints: object` (opaque)|`{signals, matches[{rule_id, condition, consider[], and_only_if?, evidence, score}]}`|A rule matches on ≥2 shared tokens, or 1 token covering ≥50% of its condition|
-|`doc_search`|`query`, optional `project`, optional `limit` (default 20, max 100; ≤0 → 20)|`{query, count, results[{project, commit, path, line, kind, symbol, container, doc}]}`|Score: exact symbol 100 / symbol substring 60 / token-in-symbol 40, +25 path, +10 doc substring or +5 token-in-doc; ties by symbol, path, line. `project` resolves exactly first, then ignoring case and `_` vs `-` when the spelling names exactly one project (PROTO-14). The index holds doc comments only — no signature or body is stored|
+|`doc_search`|`query`, optional `project`, optional `limit` (default 20, max 100; ≤0 → 20)|`{query, count, results[{project, commit, path, line, kind, symbol, container, doc}]}`|Score: exact symbol 100 / symbol substring 60 / token-in-symbol 40, +25 path, +10 doc substring or +5 token-in-doc; ties by symbol, path, line. `project` resolves exactly first, then ignoring case and `_` vs `-` when the spelling names exactly one project (PROTO-14). The index holds comment text only — no signature or body is stored|
 |`doc_get`|`project`, `symbol` (case-insensitive)|`{found, project?, symbol?, matches[{commit, path, line, kind, symbol, container, doc, doc_hash}]}`|Every record sharing the symbol path — a `//!` container record and a declaration from the sibling `<dir>.zig` can collide — in `(path, line)` order; `found` is always present so a miss is still schema-shaped. `project` resolves as in `doc_search` (PROTO-14); a record holds comment text only, never a signature or body|
 |`doc_import_status`|`{}`|`{index_path?, index_state, index_error?, index_records, projects[{project, commit, records, files_total?, files_degraded?, degraded?}]}`|`index_state` is `ok`/`unloaded`/`reload_failed`, so a client can see that the index being served is not the artifact on disk (REL-4); degraded counts come from the `.status.json` sidecar next to a **local** index, and a sidecar member whose type or sign contradicts this schema is omitted rather than echoed|
 
@@ -456,7 +456,7 @@ Per `.zig` file under `root` (kept by an `--include` directory prefix, dropped b
      starting with `//` but not `///` or `//!`, with the declaration beginning its own
      line and no blank line between run and declaration. A run that is only `//` lines
      yields nothing. Doc comments always win; the module `//!` record never falls back.
-6. Undocumented declarations are skipped.
+6. A declaration with neither an attached `///` run nor a `//` fallback is skipped.
 7. Output sorted (§7); status sidecar defaults to `<out minus .jsonl>.status.json`:
    `{"projects":{"<p>":{"commit","records","files_total","files_degraded",
    ["skipped","previous_records"],"degraded":[{"path","reason?","diagnostics":[{"tag","line"}]}]}}}`.
