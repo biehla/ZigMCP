@@ -469,7 +469,7 @@ runs the cross-cutting handler tests on their own (below).
 
 **Backlog rule:** a commit that fixes an item must add the test its layer owns, delete
 the item from `PLAN.md`, and record the chosen option in `PLAN.md`'s resolved table
-(§13 for 2026-11-09, §14 for 2026-11-10). Never weaken an expectation to match the
+(§13 for 2026-11-09, §14–§16 for 2026-11-10). Never weaken an expectation to match the
 code — pick the option in `PLAN.md` first, then make the test match the chosen
 behaviour.
 

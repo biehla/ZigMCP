@@ -1,11 +1,11 @@
 # PLAN.md — defects, edge cases, limitations, and guideline deviations
 
-Status: open backlog. Twenty-two items were fixed on 2026-11-09 and seven on
-2026-11-10 — the option chosen for each, its commit and its verification are in
-§13, §14 and §15. Two sources: a read-through of the tree on 2026-11-09, and a breakage
-campaign the same day that fuzzed the stdio surface and the indexer, profiled the
-hot paths, and inspected a `ReleaseSafe` PE with REA — method, measurements and
-negative results in §12.
+Status: open backlog. Twenty-two items were fixed on 2026-11-09, seven on 2026-11-10,
+and five more were closed that day because they were already done — the option chosen
+for each, its commit and its verification are in §13–§16. Two sources: a read-through
+of the tree on 2026-11-09, and a breakage campaign the same day that fuzzed the
+stdio surface and the indexer, profiled the hot paths, and inspected a `ReleaseSafe`
+PE with REA — method, measurements and negative results in §12.
 `AGENTS.md` remains the spec of record for behaviour; the accepted gaps are summarised
 in its §14, which this file expands.
 
@@ -31,7 +31,7 @@ All gates run on this machine (Zig 0.17.1, Windows, 2026-11-09): `test` green,
 `check` green, `workflows` green, `bench` prints startup 18.2 ms, peak RSS 7.6 MB,
 0 tool errors. `test-regressions` is **green**: the red-by-design suite is gone, its
 pure-function tests moved into `registry.zig` and `text.zig`, and the handler tests
-that remain run in `zig build test` as well. See ENV-1 for why builds previously
+that remain run in `zig build test` as well. See §16 for why builds previously
 produced a 0-byte binary.
 
 ### Recipes
@@ -57,7 +57,7 @@ git commit --allow-empty -m x && git push   # push path (CI-1)
 # oversized line (SRV-1): 70 KiB of spaces then EOF — one -32700, then a clean exit
 python -c "print(' '*70000)" | zig-out/bin/zigmcp; echo "exit=$?"
 
-# deep nesting (SRV-4): 100k nested arrays
+# nesting past the reader buffer (SRV-1; bounds depth, §16): 100k nested arrays
 python -c "print('{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"x\",\"params\":'+'['*100000+']'*100000+'}')" | zig-out/bin/zigmcp
 ```
 
@@ -170,15 +170,6 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri"
   `-32603` when the failure is OOM; (b) reset the pool and retry once; (c) leave.
   Verify: fault-inject an allocator failure in a test.
 
-- **SRV-4 — deep JSON nesting is unbounded.** `std.json` recursion on 100k nested
-  arrays can exhaust the stack. Measured: not reachable through stdio today — 10 000
-  nested arrays answer `-32602`, and 100 000 exceed the 64 KiB reader buffer and hit
-  SRV-1 first, which bounds depth to roughly 32 000. Fixing SRV-1 with option (b)
-  (grow the buffer to a cap) re-opens this, so bound depth in the same change; IDX-8
-  is the same recursion hazard in the indexer's parser, where it *is* reachable.
-  Options: (a) pre-scan depth and reject past a limit; (b) cap line length (SRV-1)
-  which bounds depth; (c) leave. Verify: the nesting recipe in §0.
-
 - **SRV-5 — index reclamation runs under the spin lock.** `reclaimLocked` frees an
   index while holding the store lock, so readers spin for the duration. Options:
   (a) move the free outside the lock into an owner thread; (b) accept it (index free
@@ -271,10 +262,6 @@ Rules being broken are in `AGENTS.md` §5, §11, §12 (code/corpus conventions) 
   (a) cap at e.g. 4 KiB and return `-32602`; (b) cap and truncate with a flag; (c)
   rely on the line cap. Verify: a 60 KiB query.
 
-- **GUIDE-7 — `advice_check` is described as a layer but CI never runs it** (also
-  CI-3). Options: (a) wire it into `test`; (b) its own CI step; (c) drop the claim
-  from §9. Verify: see CI-3.
-
 - **GUIDE-8 — limitation lists are duplicated across three files.** `AGENTS.md` §14,
   `readme.md` Known limitations and this file will drift. Options: (a) this file is
   canonical and the others link to it; (b) generate the readme section at build time;
@@ -284,9 +271,9 @@ Rules being broken are in `AGENTS.md` §5, §11, §12 (code/corpus conventions) 
 
 ## 7. Test coverage gaps
 
-- **TEST-3 — no test for `doc_import_status` argument rejection (PROTO-2).**
-- **TEST-4 — no test that every listed resource is readable (PROTO-1).** A loop over
-  `resources/list` → `resources/read` would have caught it.
+No open items: every gap this section listed now has its test. The last two are
+`PROTO-2: doc_import_status rejects unknown arguments` and `PROTO-1: every listed
+resource can be read`, both in `src/regressions_test.zig` (recorded in §16).
 
 ---
 
@@ -315,19 +302,9 @@ Rules being broken are in `AGENTS.md` §5, §11, §12 (code/corpus conventions) 
 
 ## 9. Environment
 
-- **ENV-1 — RESOLVED: the disk was full, not the toolchain.** `zigmcp.exe` was
-  0 bytes and `install` failed with `FileNotFound` because `C:` had ~1 MB free on a
-  223 GB volume (100 % used). The giveaway came from a test link:
-  `LLVM ERROR: IO failure on output stream: No space left on device`. Small outputs
-  (hello-world, `advice_check`) still fit; the ~15 MB server did not, and the `.pdb`
-  was written before the write ran out, which is why the pair looked like an AV
-  quarantine. After deleting `.zig-cache/`, `zig-out/` and `.probe/` (1.7 GB free),
-  `zig build test`, `check`, `bench` and `test-regressions` all run.
-  Options: (a) nothing in code — keep ≥2 GB free and check `df` first when a build
-  "succeeds" with an empty output; (b) fail the build early with a free-space check
-  and a clear message; (c) keep the symptom in the readme troubleshooting table
-  (already there). Verify: `zig build test` exits 0 and `zig-out/bin/zigmcp.exe` is
-  non-zero.
+No open items. The one entry this section held — a build that "succeeded" while
+writing a 0-byte binary because the disk was full — was resolved on 2026-11-09 and is
+recorded in §16. The symptom and its check stay in the readme troubleshooting table.
 
 ---
 
@@ -354,7 +331,6 @@ must own its test, because no such layer exists yet.
 |PROTO-10|—|resource test against a large index; assert a cap or cursor|
 |SRV-2|—|extract `buildResponse` out of `main.zig` first; then a unit test|
 |SRV-3|—|transport-level harness with an injected failing allocator|
-|SRV-4|—|`json_rpc` unit test with deep nesting; expectation depends on the option|
 |SRV-5|—|benchmark only, not deterministic|
 |IDX-5|—|indexer CLI harness: fixture with a 0xFF byte in a comment|
 |IDX-6|—|`modulePath` is private; export it for a unit test|
@@ -366,12 +342,10 @@ must own its test, because no such layer exists yet.
 |REL-6|—|integration: URL index with no sidecar|
 |REL-7|—|reload integration test: equal size, restored mtime|
 |GUIDE-4|—|handler test: 60 KiB query expects `-32602`|
-|GUIDE-7|—|same as CI-3|
 |GUIDE-8|—|doc lint: each gap id appears once across the tree|
 |DOC-1|—|packaging assertion on `build.zig.zon` `.paths`|
 |DOC-2|—|doc lint comparing the two snippets|
 |DOC-3|—|same as GUIDE-8|
-|ENV-1|—|resolved; `zig build test` exiting 0 is the check|
 |SRV-7|—|timing only (`zig build bench` and the §0 recipe); needs a large fixture index|
 |IDX-9|—|indexer CLI harness measuring the 5k/10k/25k ladder, or a unit test on the line table|
 |CI-9|—|actionlint 1.17+ over `.github/workflows/`; no local test|
@@ -534,5 +508,20 @@ doc rows and their `PLAN.md` deletions overlap, so they landed together.
 |TEST-6|`--include` half; `--previous`/`--status` were already covered|`aa7021b`|`an --include glob selects the same files as its directory prefix`; `a truncated --previous index is not reused` already asserts `skipped` and the derived `.status.json`|
 |TEST-1|already covered; removed as stale|—|`tests/protocol_test.zig`: `an oversized line is a parse error and the server keeps serving`|
 |TEST-5|already covered; removed as stale|—|`ci.yml` runs `zig build workflows` and `go run …/actionlint@v1.7.7` in both jobs|
+
+## 16. Closed as already done, 2026-11-10
+
+No code change: each item below was already finished when the backlog was re-read,
+either by an earlier commit or by construction. They were deleted from §1–§10 instead
+of being left as phantom tasks; the evidence is what was checked, not assumed.
+
+|Id|Why it is no longer a task|Evidence|
+|---|---|---|
+|SRV-4|Not reachable: the 64 KiB reader cap bounds JSON nesting, and the indexer's own recursion hazard was IDX-8 (`6836304`)|the §0 nesting recipe at the maximum depth a 64 KiB line allows — 32 726 nested arrays in 65 499 bytes — answers `-32602` and exits 0; 10 000 nested arrays do the same|
+|GUIDE-7|CI-3 wired `zig build check` in, so the validator runs where the claim in §9 says it does|`.github/workflows/ci.yml`: `- name: Validate the advice corpus` → `run: zig build check`, in both the blocking and the canary job|
+|TEST-3|The test exists|`src/regressions_test.zig`: `PROTO-2: doc_import_status rejects unknown arguments`|
+|TEST-4|The test exists|`src/regressions_test.zig`: `PROTO-1: every listed resource can be read`|
+|ENV-1|Resolved on 2026-11-09 — the disk was full, not the toolchain; the symptom and its check live in the readme troubleshooting table|`zig build test` exits 0 and `zig-out/bin/zigmcp.exe` is non-zero|
+
 
 
