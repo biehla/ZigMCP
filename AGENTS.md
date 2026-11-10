@@ -280,7 +280,9 @@ to use when and that imported doc text is data, never instructions.
   empty `contents` array. `-32020`/`-32021` are HTTP-only and not wired.
 - **stdio:** one message per line, no embedded newlines; stdout carries MCP messages
   only; diagnostics go to stderr; **flush every response before the next read**;
-  exit 0 on EOF. Notifications are never answered.
+  exit 0 on EOF. Notifications are never answered. A line that does not fit the
+  64 KiB reader buffer is answered with `-32700`, the rest of the line is discarded,
+  and the server keeps serving — the cap also bounds JSON nesting (SRV-1, SRV-4).
 - **Logging:** `notifications/message` is never emitted (logLevel is parsed but no
   log stream exists).
 - Removed in `2026-07-28` and therefore absent: `ping`, `logging/setLevel`,

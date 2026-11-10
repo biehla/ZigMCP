@@ -29,6 +29,17 @@ pub const Transport = struct {
         return self.reader.interface.takeDelimiter('\n');
     }
 
+    /// Discards the rest of the current line after an oversized-line failure.
+    ///
+    /// `takeDelimiter` leaves the stream unmodified when the line does not fit
+    /// in the buffer ("as if this function was never called"), so those bytes
+    /// are still pending. They are consumed up to and including the next
+    /// newline, so the next read starts on a fresh message instead of the
+    /// middle of a discarded one (SRV-1).
+    pub fn discardRemainderOfLine(self: *Transport) !void {
+        _ = try self.reader.interface.discardDelimiterInclusive('\n');
+    }
+
     /// Serializes `value` as one JSON line and flushes it.
     ///
     /// The flush happens before this function returns, so the caller may read

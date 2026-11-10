@@ -132,11 +132,31 @@ pub fn main(init: std.process.Init) !void {
     var writer_buffer: [64 * 1024]u8 = undefined;
     var transport = transport_module.Transport.init(init.io, &reader_buffer, &writer_buffer);
 
-    while (true) {
-        const line = transport.nextLine() catch |err| {
-            logStderr(init.io, "zigmcp: stdin read failed ({s})\n", .{@errorName(err)});
-            break;
-        } orelse break;
+    serve: while (true) {
+        const maybe_line = transport.nextLine() catch |err| {
+            if (err != error.StreamTooLong) {
+                logStderr(init.io, "zigmcp: stdin read failed ({s})\n", .{@errorName(err)});
+                break :serve;
+            }
+            // The line is larger than any message this server accepts. Answer
+            // with a parse error, drop the rest of the line, and keep serving:
+            // exiting without a reply left the client with nothing at all
+            // (SRV-1). The 64 KiB cap also bounds JSON nesting (SRV-4).
+            transport.discardRemainderOfLine() catch |discard_err| {
+                logStderr(init.io, "zigmcp: stdin read failed ({s})\n", .{@errorName(discard_err)});
+                break :serve;
+            };
+            pool.reset();
+            sendError(&transport, pool.allocator(), null, .{
+                .code = .parse_error,
+                .message = "Parse error: the line exceeds the 64 KiB reader buffer.",
+            }) catch |send_err| {
+                logStderr(init.io, "zigmcp: cannot report the oversized line ({s})\n", .{@errorName(send_err)});
+                break :serve;
+            };
+            continue :serve;
+        };
+        const line = maybe_line orelse break :serve;
 
         pool.reset();
         handleLine(&ctx, &transport, line) catch |err| {

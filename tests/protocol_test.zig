@@ -253,6 +253,34 @@ test "an unparseable line is a parse error" {
     try std.testing.expectEqual(@as(i64, -32700), response.value.object.get("error").?.object.get("code").?.integer);
 }
 
+test "an oversized line is a parse error and the server keeps serving" {
+    // SRV-1: a line longer than the 64 KiB reader buffer used to end the
+    // server with no reply at all, so the client saw a closed pipe.
+    const harness = try Harness.start();
+    defer {
+        harness.release();
+        std.testing.allocator.destroy(harness);
+    }
+
+    const oversized = try std.testing.allocator.alloc(u8, 70_000);
+    defer std.testing.allocator.free(oversized);
+    @memset(oversized, ' ');
+    try harness.send(oversized);
+
+    const refusal = try harness.receive();
+    defer refusal.deinit();
+    const error_object = refusal.value.object.get("error").?.object;
+    try std.testing.expectEqual(@as(i64, -32700), error_object.get("code").?.integer);
+
+    // The next message is answered, and EOF still exits cleanly.
+    try harness.send("{\"jsonrpc\":\"2.0\",\"id\":16,\"method\":\"tools/list\"}");
+    const response = try harness.receive();
+    defer response.deinit();
+    try std.testing.expect(response.value.object.get("result") != null);
+
+    try harness.stop();
+}
+
 test "a malformed envelope is an invalid request" {
     const harness = try Harness.start();
     defer {
