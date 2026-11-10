@@ -182,7 +182,7 @@ an author, title and URL.
 The index is [JSON Lines](https://jsonlines.org): one indexed declaration per line.
 
 ```json
-{"project":"zig_std","commit":"738d2be9…","path":"lib/std/mem.zig","line":238,"kind":"fn","symbol":"lib.std.mem.copyForwards","container":"lib.std.mem","doc":" Copies …","doc_hash":"…"}
+{"project":"zig_std","commit":"738d2be9…","path":"lib/std/mem.zig","line":238,"kind":"fn","symbol":"lib.std.mem.copyForwards","container":"lib.std.mem","doc":" Copy all of source into dest …","doc_hash":"…"}
 ```
 
 |Field|Meaning|

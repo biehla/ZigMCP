@@ -382,7 +382,7 @@ them, so a schema change is one edit and all three targets recompile.
 ### Doc index record (JSONL, one minified object per line)
 
 ```json
-{"project":"zig_std","commit":"738d2be…","path":"lib/std/mem.zig","line":238,"kind":"fn","symbol":"lib.std.mem.copyForwards","container":"lib.std.mem","doc":" Copies …","doc_hash":"<sha256 hex>"}
+{"project":"zig_std","commit":"738d2be…","path":"lib/std/mem.zig","line":238,"kind":"fn","symbol":"lib.std.mem.copyForwards","container":"lib.std.mem","doc":" Copy all of source into dest …","doc_hash":"<sha256 hex>"}
 ```
 
 |Field|Meaning|
