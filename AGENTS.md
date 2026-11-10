@@ -370,7 +370,9 @@ indexer --out <index.jsonl> --source <project>=<commit>=<root> [--source …]
 
 Per `.zig` file under `root` (filtered by `--include` prefixes):
 
-1. Read and NUL-terminate; `std.zig.Ast.parse(gpa, source, .{ .mode = .zig })`.
+1. Read and NUL-terminate; `std.zig.Ast.parse(gpa, source, .{ .mode = .zig })`. A file
+   that cannot be read, or exceeds the 64 MiB per-file ceiling, is recorded as
+   degraded with a `reason` and skipped — it never aborts the run (IDX-1).
 2. **Degrade, never skip:** extract from every file regardless of `tree.errors`;
    record each diagnostic (tag + line) and mark the file **degraded** in the status
    sidecar. No curated fatal-tag list — the stdlib has no severity field.
@@ -388,7 +390,9 @@ Per `.zig` file under `root` (filtered by `--include` prefixes):
 6. Undocumented declarations are skipped.
 7. Output sorted (§7); status sidecar defaults to `<out minus .jsonl>.status.json`:
    `{"projects":{"<p>":{"commit","records","files_total","files_degraded",
-   ["skipped","previous_records"],"degraded":[{"path","diagnostics":[{"tag","line"}]}]}}}`.
+   ["skipped","previous_records"],"degraded":[{"path","reason?","diagnostics":[{"tag","line"}]}]}}}`.
+   `reason` is set when the file was not parsed at all (unreadable, oversized, or
+   too deeply nested), in which case `diagnostics` is empty.
 
 **Incremental:** with `--previous`, a project whose `(project, commit)` already has
 records there is skipped and those records are carried over verbatim.

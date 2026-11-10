@@ -81,3 +81,83 @@ test "the golden index contains the records of the degraded files" {
     // ... and the trailing unattached doc comment is not indexed.
     try std.testing.expect(std.mem.indexOf(u8, golden, "unattached") == null);
 }
+
+fn writeFixture(dir: std.Io.Dir, sub_path: []const u8, data: []const u8) !void {
+    const file = try dir.createFile(io, sub_path, .{});
+    defer file.close(io);
+    var buffer: [4096]u8 = undefined;
+    var writer = file.writer(io, &buffer);
+    try writer.interface.writeAll(data);
+    try writer.interface.flush();
+}
+
+test "an oversized file is recorded as degraded instead of aborting the run" {
+    // IDX-1: `readFileAlloc` was `try`-ed, so one 64 MiB+ file killed the whole
+    // run — no records, no status sidecar, every project lost.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const root = try std.fmt.allocPrint(std.testing.allocator, ".zig-cache/tmp/{s}", .{&tmp.sub_path});
+    defer std.testing.allocator.free(root);
+
+    try writeFixture(tmp.dir, "small.zig", "/// the docs\npub fn ok() void {}\n");
+    {
+        // One byte over the 64 MiB per-file ceiling.
+        const file = try tmp.dir.createFile(io, "big.zig", .{});
+        defer file.close(io);
+        var buffer: [64 * 1024]u8 = undefined;
+        var chunk: [64 * 1024]u8 = undefined;
+        @memset(&chunk, 'x');
+        var writer = file.writer(io, &buffer);
+        var written: usize = 0;
+        while (written < 65 * 1024 * 1024) : (written += chunk.len) {
+            try writer.interface.writeAll(&chunk);
+        }
+        try writer.interface.flush();
+    }
+
+    const output = try std.fmt.allocPrint(std.testing.allocator, "{s}/index.jsonl", .{root});
+    defer std.testing.allocator.free(output);
+
+    const source = try std.fmt.allocPrint(std.testing.allocator, "p=c={s}", .{root});
+    defer std.testing.allocator.free(source);
+
+    var child = try std.process.spawn(io, .{
+        .argv = &.{ options.indexer_exe, "--out", output, "--source", source },
+        .stdin = .ignore,
+        .stdout = .ignore,
+        .stderr = .ignore,
+    });
+    switch (try child.wait(io)) {
+        .exited => |code| try std.testing.expectEqual(@as(u8, 0), code),
+        else => return error.UnexpectedExit,
+    }
+
+    // The run produced the readable file's record ...
+    const produced = try std.Io.Dir.cwd().readFileAllocOptions(
+        io,
+        output,
+        std.testing.allocator,
+        .limited(16 * 1024 * 1024),
+        .of(u8),
+        null,
+    );
+    defer std.testing.allocator.free(produced);
+    try std.testing.expect(std.mem.indexOf(u8, produced, "\"symbol\":\"small.ok\"") != null);
+
+    // ... and reported the oversized one instead of dying.
+    const status_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/index.status.json", .{root});
+    defer std.testing.allocator.free(status_path);
+    const status = try std.Io.Dir.cwd().readFileAllocOptions(
+        io,
+        status_path,
+        std.testing.allocator,
+        .limited(16 * 1024 * 1024),
+        .of(u8),
+        null,
+    );
+    defer std.testing.allocator.free(status);
+    try std.testing.expect(std.mem.indexOf(u8, status, "\"big.zig\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, status, "\"reason\":\"file exceeds the per-file size limit\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, status, "\"files_degraded\":1") != null);
+}

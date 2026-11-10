@@ -28,8 +28,15 @@ const Diag = struct {
 
 const DegradedFile = struct {
     path: []const u8,
-    diagnostics: []Diag,
+    /// Set when the file could not be parsed at all, so there are no
+    /// diagnostics to report (IDX-1, IDX-8). Static text.
+    reason: ?[]const u8 = null,
+    diagnostics: []const Diag,
 };
+
+/// Per-file read ceiling. A larger file is recorded as degraded instead of
+/// aborting the run (IDX-1).
+const max_file_bytes = 64 * 1024 * 1024;
 
 const ProjectStatus = struct {
     project: []const u8,
@@ -215,6 +222,10 @@ fn buildStatus(gpa: std.mem.Allocator, statuses: []ProjectStatus, report_skip: b
             first_f = false;
             try w.writeAll("{\"path\":");
             try writeJsonString(gpa, w, df.path);
+            if (df.reason) |reason| {
+                try w.writeAll(",\"reason\":");
+                try writeJsonString(gpa, w, reason);
+            }
             try w.writeAll(",\"diagnostics\":[");
             var first_d = true;
             for (df.diagnostics) |d| {
@@ -302,7 +313,19 @@ fn indexSource(io: std.Io, gpa: std.mem.Allocator, src: Source, includes: []cons
             if (!ok) continue;
         }
         st.files_total += 1;
-        const bytes = try entry.dir.readFileAlloc(io, base, gpa, std.Io.Limit.limited(64 * 1024 * 1024));
+        // Degrade, never skip: one unreadable or oversized file must not abort
+        // every project in the run (IDX-1).
+        const bytes = entry.dir.readFileAlloc(io, base, gpa, std.Io.Limit.limited(max_file_bytes)) catch |err| {
+            try st.degraded.append(gpa, .{
+                .path = rel,
+                .reason = if (err == error.StreamTooLong)
+                    "file exceeds the per-file size limit"
+                else
+                    @errorName(err),
+                .diagnostics = &.{},
+            });
+            continue;
+        };
         const src_z = try gpa.dupeSentinel(u8, bytes, 0);
         try indexFile(gpa, src.project, src.commit, rel, src_z, records, st);
     }
