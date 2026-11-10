@@ -440,15 +440,18 @@ trusted as before.
 Baseline rule: the bump diff baseline is the `index.jsonl` asset of the rolling
 **`index` release**, published by `index.yml` (`gh release upload … --clobber`), and
 never a prior workflow artifact (those expire and need run-id/token plumbing). One
-documented tag serves both baselines; `release.yml` does not produce it. Rollback =
-publish the previous index; no rebuild.
+documented tag serves both baselines; `release.yml` does not produce it. A version
+release may still attach a copy when `generated/index.jsonl` happens to exist in the
+tagged checkout — that is a convenience for whoever holds that tag, never a baseline
+source. Rollback = publish the previous index; no rebuild.
 
 ---
 
 ## 9. Verification and test layers
 
-`zig build test` runs unit + protocol + golden; `zig build test-protocol` runs the
-protocol layer alone; `zig build test-regressions` runs the open-bug tests (below).
+`zig build test` runs unit + protocol + golden and imports the handler suite;
+`zig build test-protocol` runs the protocol layer alone; `zig build test-regressions`
+runs the cross-cutting handler tests on their own (below).
 
 |Layer|Where|
 |---|---|
@@ -497,7 +500,7 @@ zig version                  # 0.17.1
 zig build                    # zig-out/bin/{zigmcp, indexer, bench}
 zig build test               # unit + protocol + golden
 zig build test-protocol      # protocol layer only
-zig build test-regressions   # PLAN.md open-bug tests (red until fixed)
+zig build test-regressions   # cross-cutting handler tests (also in `test`)
 zig build check              # advice corpus validation
 zig build workflows          # workflow trigger/expression consistency (CI-1)
 zig build bench              # verification report
