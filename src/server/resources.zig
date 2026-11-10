@@ -30,7 +30,7 @@ pub const resource_specs = [_]ResourceSpec{
         .uri = "advice://patterns",
         .name = "advice-patterns",
         .title = "Advice patterns",
-        .description = "One resource per pattern: advice://patterns/P01 … advice://patterns/P12.",
+        .description = "All 12 patterns in one document, or one per pattern: advice://patterns/P01 … advice://patterns/P12.",
     },
     .{
         .uri = "advice://rules",
@@ -160,6 +160,8 @@ pub fn read(ctx: *registry.Context, uri: []const u8) !registry.Result {
         try limitsText(ctx)
     else if (std.mem.eql(u8, uri, "advice://sources"))
         try sourcesText(ctx)
+    else if (std.mem.eql(u8, uri, "advice://patterns"))
+        try allPatternsText(ctx)
     else if (std.mem.startsWith(u8, uri, "advice://patterns/"))
         try patternText(ctx, uri["advice://patterns/".len..])
     else if (std.mem.startsWith(u8, uri, "docs://"))
@@ -204,6 +206,21 @@ fn patternText(ctx: *registry.Context, id: []const u8) ![]const u8 {
     const gpa = ctx.pool.allocator();
     const pattern = ctx.corpus.findPattern(id) orelse return error.UnknownResource;
     return render.patternText(gpa, pattern);
+}
+
+/// `advice://patterns`: every pattern in one document.
+///
+/// `resources/list` advertises this URI, so it has to be readable: a listed
+/// resource that `resources/read` rejects is a client-visible contract break
+/// (PROTO-1).
+fn allPatternsText(ctx: *registry.Context) ![]const u8 {
+    const gpa = ctx.pool.allocator();
+    var text: std.ArrayList(u8) = .empty;
+    for (ctx.corpus.patterns) |*pattern| {
+        try text.appendSlice(gpa, try render.patternText(gpa, pattern));
+        try text.appendSlice(gpa, "\n");
+    }
+    return text.toOwnedSlice(gpa);
 }
 
 fn rulesText(ctx: *registry.Context) ![]const u8 {
