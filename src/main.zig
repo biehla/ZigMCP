@@ -24,13 +24,13 @@ const prompts_module = @import("server/prompts.zig");
 
 const default_advice_dir = "data/advice";
 const default_index_path = "generated/index.jsonl";
-const watcher_poll_ms: u64 = 1_000;
-/// A remote index is re-fetched on this cadence (≈ the index TTL).
-const remote_poll_ms: u64 = 60_000;
 
 const Options = struct {
     advice_dir: []const u8 = default_advice_dir,
     index_path: ?[]const u8 = null,
+    /// `--index-poll-ms` / `ZIGMCP_INDEX_POLL_MS`: the watcher cadence. A
+    /// remote index is re-fetched on every poll (no conditional GET, REL-1).
+    index_poll_ms: ?u64 = null,
     /// Ceiling for the index artifact: `--max-index-bytes` or
     /// `ZIGMCP_MAX_INDEX_BYTES`, defaulting to the documented 256 MiB (REL-5).
     max_index_bytes: usize = docs_index.max_index_bytes,
@@ -115,7 +115,7 @@ pub fn main(init: std.process.Init) !void {
         // A remote artifact is re-fetched on a slow cadence: the index TTL is
         // ~60 s, so polling the origin every second would hammer it for no
         // benefit.
-        const poll_ms = if (source.isUrl()) remote_poll_ms else watcher_poll_ms;
+        const poll_ms = docs_reload.effectivePollMs(options.index_poll_ms, source.isUrl());
         watcher = docs_reload.startWatcher(gpa, init.io, &store, source, poll_ms, &log_queue, index_digest, options.max_index_bytes) catch |err| blk: {
             logStderr(init.io, "zigmcp: cannot start the index watcher ({s})\n", .{@errorName(err)});
             break :blk null;
@@ -416,6 +416,9 @@ fn parseOptions(init: std.process.Init) !Options {
     if (init.environ_map.get("ZIGMCP_MAX_INDEX_BYTES")) |text| {
         options.max_index_bytes = std.fmt.parseInt(usize, text, 10) catch return error.InvalidArgument;
     }
+    if (init.environ_map.get("ZIGMCP_INDEX_POLL_MS")) |text| {
+        options.index_poll_ms = std.fmt.parseInt(u64, text, 10) catch return error.InvalidArgument;
+    }
 
     // The arguments are copied into the process arena so they outlive this
     // function without a separate allocation to free.
@@ -438,6 +441,10 @@ fn parseOptions(init: std.process.Init) !Options {
             index += 1;
             if (index >= args.len) return error.MissingArgument;
             options.max_index_bytes = std.fmt.parseInt(usize, args[index], 10) catch return error.InvalidArgument;
+        } else if (std.mem.eql(u8, argument, "--index-poll-ms")) {
+            index += 1;
+            if (index >= args.len) return error.MissingArgument;
+            options.index_poll_ms = std.fmt.parseInt(u64, args[index], 10) catch return error.InvalidArgument;
         } else if (index == 0) {
             // argv[0] is the program name.
             continue;
@@ -468,7 +475,7 @@ fn printUsage(io: std.Io) !void {
         \\zigmcp — an MCP server for systems-programming advice and imported Zig docs
         \\
         \\Usage: zigmcp [--index <path-or-url>] [--advice-dir <path>]
-        \\              [--max-index-bytes <n>]
+        \\              [--max-index-bytes <n>] [--index-poll-ms <n>]
         \\
         \\  --index <path>      JSONL doc index to load and watch: a local path or an
         \\                      HTTP(S) URL (default: generated/index.jsonl when it
@@ -478,6 +485,9 @@ fn printUsage(io: std.Io) !void {
         \\  --max-index-bytes <n>  Reject an index larger than <n> bytes, locally and over
         \\                      HTTP (default: 268435456, i.e. 256 MiB; also settable
         \\                      through ZIGMCP_MAX_INDEX_BYTES)
+        \\  --index-poll-ms <n> How often to poll the index, in milliseconds (default:
+        \\                      1000 local, 60000 URL; floor 100; also settable
+        \\                      through ZIGMCP_INDEX_POLL_MS)
         \\  --help              Show this message
         \\
     );

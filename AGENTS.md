@@ -538,7 +538,9 @@ zig fmt --check . --exclude tests/fixtures   # the fixture tree is deliberately 
 - **Server options:** `--index <path-or-url>` / `ZIGMCP_INDEX`; `--advice-dir <path>`
   / `ZIGMCP_ADVICE_DIR` (default `data/advice`, relative to the working directory);
   `--max-index-bytes <n>` / `ZIGMCP_MAX_INDEX_BYTES` (default 268435456, i.e. 256 MiB);
-  `--help`. Flags override the environment. An unknown argument or a missing option
+  `--index-poll-ms <n>` / `ZIGMCP_INDEX_POLL_MS` (default 1000 local, 60000 URL,
+  floor 100; a remote index is re-fetched on every poll, REL-1); `--help`. Flags
+  override the environment. An unknown argument or a missing option
   value prints one line and the usage block to stderr and exits 2 — never a bare Zig
   error name, a stack trace or exit 1 (SRV-8).
 - **Interrupted builds** can orphan `zig.exe` compiler children that hold the cache

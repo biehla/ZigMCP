@@ -54,6 +54,29 @@ pub const Source = union(enum) {
     }
 };
 
+/// Poll cadence for a local artifact (mtime + size), in milliseconds.
+pub const default_file_poll_ms: u64 = 1_000;
+/// Poll cadence for a remote artifact (re-fetch + hash), in milliseconds.
+pub const default_url_poll_ms: u64 = 60_000;
+/// A tighter interval would spin; an explicit override is clamped to this.
+pub const min_poll_ms: u64 = 100;
+
+/// The watcher cadence: `--index-poll-ms` / `ZIGMCP_INDEX_POLL_MS` wins,
+/// otherwise the per-source default. The stdlib client has no conditional GET
+/// (REL-1), so a remote index is re-fetched on every poll; the override is the
+/// knob for its bandwidth.
+pub fn effectivePollMs(override_ms: ?u64, is_url: bool) u64 {
+    return @max(override_ms orelse (if (is_url) default_url_poll_ms else default_file_poll_ms), min_poll_ms);
+}
+
+test "REL-1: the poll interval is configurable and clamped" {
+    try std.testing.expectEqual(default_file_poll_ms, effectivePollMs(null, false));
+    try std.testing.expectEqual(default_url_poll_ms, effectivePollMs(null, true));
+    try std.testing.expectEqual(@as(u64, 250), effectivePollMs(250, false));
+    try std.testing.expectEqual(@as(u64, 250), effectivePollMs(250, true));
+    try std.testing.expectEqual(min_poll_ms, effectivePollMs(0, true));
+}
+
 /// An index loaded from a source, plus the digest of the bytes it came from.
 pub const Loaded = struct {
     index: Index,

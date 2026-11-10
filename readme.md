@@ -112,6 +112,7 @@ attached alongside the tarball has no corpus; point `ZIGMCP_ADVICE_DIR` (or
 |`--index <path-or-url>`|`ZIGMCP_INDEX`|`generated/index.jsonl`, if that file exists|Doc index to load and keep watching. A local path or an `http://` / `https://` URL|
 |`--advice-dir <path>`|`ZIGMCP_ADVICE_DIR`|`data/advice`|Directory holding the five advice files|
 |`--max-index-bytes <n>`|`ZIGMCP_MAX_INDEX_BYTES`|`268435456` (256 MiB)|Largest index artifact accepted, for both a local file and an HTTP download|
+|`--index-poll-ms <n>`|`ZIGMCP_INDEX_POLL_MS`|`1000` local, `60000` URL|How often the watcher checks the index, in milliseconds (floor `100`). A remote index is re-fetched on every poll|
 |`--help`, `-h`|—|—|Print usage to stderr and exit|
 
 - A flag wins over the environment variable.
