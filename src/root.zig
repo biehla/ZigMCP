@@ -31,6 +31,58 @@ test {
     _ = @import("regressions_test.zig");
 }
 
+test "DOC-2: the readme embeds client-config.json verbatim" {
+    // One canonical snippet, read by the readme and by the release workflow.
+    // A hand-edited copy in either place is drift the user would see.
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+
+    const readme = try std.Io.Dir.cwd().readFileAllocOptions(io, "readme.md", gpa, .unlimited, .of(u8), 0);
+    defer gpa.free(readme);
+    const canonical = try std.Io.Dir.cwd().readFileAllocOptions(io, "client-config.json", gpa, .unlimited, .of(u8), 0);
+    defer gpa.free(canonical);
+
+    const fence = "```json\n";
+    const fence_start = std.mem.indexOf(u8, readme, fence) orelse return error.MissingSnippet;
+    const body_start = fence_start + fence.len;
+    const body_end = std.mem.indexOfPos(u8, readme, body_start, "\n```") orelse return error.MissingSnippet;
+    const embedded = readme[body_start..body_end];
+
+    try std.testing.expectEqualStrings(std.mem.trimEnd(u8, canonical, "\n"), embedded);
+}
+
+test "GUIDE-8: the limitation lists live only in PLAN.md" {
+    // Three copies of the same list drift. `PLAN.md` is canonical; the other two
+    // sections must be pointers, not lists, or a stale gap survives a fix.
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+
+    try expectSectionIsPointer(io, gpa, "readme.md", "## Known limitations", "## ");
+    try expectSectionIsPointer(io, gpa, "AGENTS.md", "### Known gaps", "### ");
+}
+
+fn expectSectionIsPointer(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    path: []const u8,
+    heading: []const u8,
+    next_heading: []const u8,
+) !void {
+    const text = try std.Io.Dir.cwd().readFileAllocOptions(io, path, gpa, .unlimited, .of(u8), 0);
+    defer gpa.free(text);
+
+    const start = std.mem.indexOf(u8, text, heading) orelse return error.MissingHeading;
+    const body_start = start + heading.len;
+    const body_end = std.mem.indexOfPos(u8, text, body_start, next_heading) orelse text.len;
+    const body = text[body_start..body_end];
+
+    try std.testing.expect(std.mem.indexOf(u8, body, "PLAN.md") != null);
+    if (std.mem.indexOf(u8, body, "\n- ") != null) {
+        std.debug.print("{s}: the section under '{s}' restates the backlog; link to PLAN.md instead\n", .{ path, heading });
+        return error.DuplicatedBacklog;
+    }
+}
+
 test "GUIDE-1: every src and tools file opens with a //! header" {
     const io = std.testing.io;
     const gpa = std.testing.allocator;

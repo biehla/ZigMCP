@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "zigmcp": {
+      "command": "/path/to/ZigMCP/zig-out/bin/zigmcp",
+      "args": ["--index", "/path/to/index.jsonl"],
+      "env": {
+        "ZIGMCP_ADVICE_DIR": "/path/to/ZigMCP/data/advice"
+      }
+    }
+  }
+}

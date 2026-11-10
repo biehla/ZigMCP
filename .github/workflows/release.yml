@@ -36,28 +36,28 @@ jobs:
           # index.yml (CI-2); attaching it here as well is only a convenience
           # for someone holding a version tag, so it stays conditional.
           if [ -f generated/index.jsonl ]; then cp generated/index.jsonl dist/; fi
+      - name: Write the release notes
+        shell: bash
+        run: |
+          # DOC-2: the client snippet lives in client-config.json, which the
+          # readme embeds verbatim, so the release note cannot drift from it.
+          {
+            echo "## Client configuration"
+            echo
+            echo "### Claude Code / generic MCP client (stdio)"
+            echo
+            echo '```json'
+            cat client-config.json
+            echo '```'
+            echo
+            echo '> The server resolves its index from `--index` / `ZIGMCP_INDEX` (a **local'
+            echo '> path** or an HTTP(S) URL) and hot-reloads it; the index artifact attached'
+            echo '> to this release is the file to point at. Without an index the server'
+            echo '> still serves the advice corpus, and the doc tools report that nothing'
+            echo '> matched.'
+          } > release-notes.md
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
-          body: |
-            ## Client configuration
-
-            ### Claude Code / generic MCP client (stdio)
-
-            ```json
-            {
-              "mcpServers": {
-                "zigmcp": {
-                  "command": "./zigmcp",
-                  "env": { "ZIGMCP_INDEX": "./index.jsonl" }
-                }
-              }
-            }
-            ```
-
-            > The server resolves its index from `ZIGMCP_INDEX` (a **local
-            > path**) and hot-reloads it; the index artifact attached to this
-            > release is the file to point at. Without an index the server
-            > still serves the advice corpus, and the doc tools report that
-            > nothing matched.
+          body_path: release-notes.md

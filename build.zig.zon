@@ -16,6 +16,8 @@
         "AGENTS.md",
         "readme.md",
         "PLAN.md",
+        "lsp.json",
+        "client-config.json",
         "systems_programming_context_v1.md",
     },
 }

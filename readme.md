@@ -383,16 +383,10 @@ release can be rebuilt exactly from its tag.
 
 ## Known limitations
 
-The complete, itemised list — including defects and their proposed fixes — is in
-[`PLAN.md`](PLAN.md). The user-facing summary follows.
-
-- Only the first `include` path of each project in `data/sources.zon` is used by CI,
-  and `exclude` patterns are not applied yet.
-- `docs://{project}/index` returns the whole listing at once (no pagination).
-- `doc_import_status` does not compare the index against the upstream branch's
-  newest commit.
-- The `constraints` argument of `recommend_approach` is accepted but ignored.
-- No HTTP transport: stdio only.
+[`PLAN.md`](PLAN.md) is the canonical, itemised list: every known limitation and
+defect, with the options considered and a verification step for each, plus the
+resolved tables for what has been closed. This page deliberately keeps no second
+copy — a copy drifts.
 
 ---
 

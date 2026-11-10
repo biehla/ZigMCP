@@ -690,16 +690,11 @@ bounded inputs and outputs; version provenance (record `commit`, corpus `version
 
 ### Known gaps (verified in the tree)
 
-The full list, with per-item options and verification steps, is `PLAN.md`. The
-summary below is the part that changes how you work in this tree.
-
-- `data/sources.zon` scope: only the first `include` is used by CI; `exclude` is
-  ignored.
-- `doc_import_status` has no "freshness vs upstream master" field; degraded counts are
-  available only for a local index with a sidecar.
-- No `docs://` pagination, no coverage-guided fuzzing, no optional `-femit-docs`
-  artifact, no bundled fallback index, no `.zst` shipping.
-- `logLevel` is parsed but there is no log stream.
+`PLAN.md` is the canonical, itemised backlog: every known defect, limitation and edge
+case, with the options considered and a verification step for each, plus the resolved
+tables for everything closed. This section deliberately keeps no second copy — a copy
+drifts. Read `PLAN.md` §1–§6 for the current open set before assuming a gap still
+exists, and do not restate it here.
 
 ### Risks
 
