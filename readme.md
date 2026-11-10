@@ -178,7 +178,7 @@ an author, title and URL.
 
 ### What a record looks like
 
-The index is [JSON Lines](https://jsonlines.org): one documented declaration per line.
+The index is [JSON Lines](https://jsonlines.org): one indexed declaration per line.
 
 ```json
 {"project":"zig_std","commit":"738d2be9…","path":"lib/std/mem.zig","line":812,"kind":"fn","symbol":"mem.copyForwards","container":"mem","doc":" Copies …","doc_hash":"…"}
@@ -192,13 +192,18 @@ The index is [JSON Lines](https://jsonlines.org): one documented declaration per
 |`kind`|`fn`, `var`, `field`, `container` (a file's `//!` doc), `error` (error-set member) or `param` (function parameter)|
 |`symbol`|Dotted path built from the file path and the nesting of declarations|
 |`container`|The enclosing symbol|
-|`doc`|Comment text with `///` / `//!` removed, lines joined with newlines|
+|`doc`|Comment text with `///` / `//!` removed (or, for a declaration with no doc comment, its `//` run with `//` removed), lines joined with newlines|
 |`doc_hash`|SHA-256 of `doc`|
 
-Only documented declarations are indexed. The indexer reads the source without
-compiling it, so a project that does not build on Zig 0.17.1 — or a file with a syntax
-error — still contributes every doc comment that could be parsed. Such files are
-listed as degraded in the status file.
+A declaration is indexed when it has a `///` doc comment or, failing that, a plain `//`
+comment run ending on the line directly above it. A doc comment always wins when both
+are present, a blank line breaks a `//` run, and a file's `//!` module record still
+requires `//!` — a leading `//` block is usually a license header.
+
+The indexer reads the source without compiling it, so a project that does not build on
+Zig 0.17.1 — or a file with a syntax error — still contributes every doc comment or
+plain comment run that could be parsed. Such files are listed as degraded in the status
+file.
 
 A record holds comment text only: a signature, a body or a type is never stored, so
 `doc_get` returns the comment and not the declaration. `path:line` plus the record's

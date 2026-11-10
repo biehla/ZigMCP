@@ -82,6 +82,60 @@ test "the golden index contains the records of the degraded files" {
     try std.testing.expect(std.mem.indexOf(u8, golden, "unattached") == null);
 }
 
+test "the golden index carries the plain-comment fallback" {
+    const golden = try std.Io.Dir.cwd().readFileAllocOptions(
+        io,
+        "tests/golden/index.jsonl",
+        std.testing.allocator,
+        .limited(16 * 1024 * 1024),
+        .of(u8),
+        null,
+    );
+    defer std.testing.allocator.free(golden);
+
+    // One record per line, so the record a symbol names is the line holding it.
+    const lineWith = struct {
+        fn get(haystack: []const u8, needle: []const u8) ?[]const u8 {
+            var lines = std.mem.splitScalar(u8, haystack, '\n');
+            while (lines.next()) |line| {
+                if (std.mem.indexOf(u8, line, needle) != null) return line;
+            }
+            return null;
+        }
+    }.get;
+
+    // A declaration with no `///` run is documented by its `//` run ...
+    for ([_][2][]const u8{
+        .{ "\"symbol\":\"lib.std.comments.plain\"", " Plain line comment for plain." },
+        .{ "\"symbol\":\"lib.std.comments.twoLines\"", " First fallback line." },
+        .{ "\"symbol\":\"lib.std.comments.twoLines\"", " Second fallback line." },
+        .{ "\"symbol\":\"lib.std.comments.withParams.name\"", " The fallback parameter doc." },
+        .{ "\"symbol\":\"lib.std.comments.Holder.inner\"", " The fallback field doc." },
+        .{ "\"symbol\":\"lib.std.comments.PlainErrors.Fallback\"", " The fallback error doc." },
+        // ... and a `///` run still wins where both are present.
+        .{ "\"symbol\":\"lib.std.comments.documented\"", " Doc comment for documented." },
+        .{ "\"symbol\":\"lib.std.comments.withParams.size\"", " The doc parameter doc." },
+        .{ "\"symbol\":\"lib.std.comments.PlainErrors.Documented\"", " The doc error doc." },
+    }) |want| {
+        const line = lineWith(golden, want[0]) orelse return error.MissingRecord;
+        try std.testing.expect(std.mem.indexOf(u8, line, want[1]) != null);
+    }
+
+    // Absent: the shadowed comment, a run separated by a blank line, a trailing
+    // comment after code, a bare `//` run, and a declaration with no comment.
+    for ([_][]const u8{
+        "Shadowed plain comment",
+        "Separated from its declaration",
+        "not documentation for afterTrailing",
+        "\"symbol\":\"lib.std.comments.bare\"",
+        "\"symbol\":\"lib.std.comments.separated\"",
+        "\"symbol\":\"lib.std.comments.afterTrailing\"",
+        "\"symbol\":\"lib.std.comments.noDocsAtAll\"",
+    }) |absent| {
+        try std.testing.expect(std.mem.indexOf(u8, golden, absent) == null);
+    }
+}
+
 fn writeFixture(dir: std.Io.Dir, sub_path: []const u8, data: []const u8) !void {
     if (std.fs.path.dirname(sub_path)) |parent| {
         dir.createDirPath(io, parent) catch |err| switch (err) {

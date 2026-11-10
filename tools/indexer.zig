@@ -639,7 +639,12 @@ fn tokenLine(tree: *Ast, line_table: *const LineTable, tok: TokenIndex) u32 {
     return line_table.lineOf(tree.tokenStart(tok));
 }
 
-fn collectDoc(gpa: std.mem.Allocator, tree: *Ast, first_tok: TokenIndex, unattached: *const std.AutoHashMap(TokenIndex, void)) !?[]const u8 {
+/// The `///` run attached to `first_tok`, or null when there is none.
+///
+/// Reports only an attached doc-comment run: a run the parser flagged
+/// `unattached_doc_comment` is dropped, and what a declaration without one
+/// means is the caller's decision (`collectDoc`).
+fn collectDocRun(gpa: std.mem.Allocator, tree: *Ast, first_tok: TokenIndex, unattached: *const std.AutoHashMap(TokenIndex, void)) !?[]const u8 {
     if (first_tok == 0) return null;
     if (tree.tokenTag(first_tok - 1) != .doc_comment) return null;
     var start = first_tok - 1;
@@ -651,6 +656,65 @@ fn collectDoc(gpa: std.mem.Allocator, tree: *Ast, first_tok: TokenIndex, unattac
         try lines.append(gpa, try stripPrefix3(gpa, tree.tokenSlice(i), "///"));
     }
     const joined: []const u8 = try std.mem.join(gpa, "\n", lines.items);
+    return joined;
+}
+
+/// The documentation for a declaration: an attached `///` run when there is
+/// one, otherwise the plain `//` run above it. Doc comments always win.
+fn collectDoc(gpa: std.mem.Allocator, tree: *Ast, first_tok: TokenIndex, unattached: *const std.AutoHashMap(TokenIndex, void)) !?[]const u8 {
+    if (try collectDocRun(gpa, tree, first_tok, unattached)) |doc| return doc;
+    return collectLineComments(gpa, tree.source, tree.tokenStart(first_tok));
+}
+
+/// The byte offset of the start of the line containing `offset`.
+fn lineStartOf(source: []const u8, offset: usize) usize {
+    var i = offset;
+    while (i > 0 and source[i - 1] != '\n') i -= 1;
+    return i;
+}
+
+/// The text of one line when it is a plain `//` comment, else null.
+///
+/// `///` and `//!` lines are excluded so a doc run the attachment rule rejected
+/// is never resurrected as a plain comment; `////` is excluded with them
+/// (it starts with `///`) — a decorative separator documents nothing.
+fn plainCommentText(line: []const u8) ?[]const u8 {
+    const trimmed = std.mem.trimStart(u8, line, " \t\r");
+    if (!std.mem.startsWith(u8, trimmed, "//")) return null;
+    if (std.mem.startsWith(u8, trimmed, "///")) return null;
+    if (std.mem.startsWith(u8, trimmed, "//!")) return null;
+    return trimmed;
+}
+
+/// The plain `//` run that ends on the line directly above `decl_start`, joined
+/// in source order with `\n`, or null when there is none.
+///
+/// Stricter than the `///` rule on purpose: no blank line may separate the run
+/// from the declaration, because plain comments are routinely floating (license
+/// headers, section dividers, TODOs) and a blank-line-tolerant rule would attach
+/// them to whatever declaration came next. A trailing `// note` after code is
+/// excluded by requiring the declaration to begin its own line.
+fn collectLineComments(gpa: std.mem.Allocator, source: []const u8, decl_start: usize) !?[]const u8 {
+    const start = lineStartOf(source, decl_start);
+    for (source[start..decl_start]) |c| {
+        if (c != ' ' and c != '\t' and c != '\r') return null;
+    }
+    if (start == 0) return null;
+
+    var lines = std.ArrayList([]const u8).empty;
+    var end = start - 1; // the '\n' that ends the previous line
+    while (true) {
+        const begin = lineStartOf(source, end);
+        const text = plainCommentText(source[begin..end]) orelse break;
+        try lines.append(gpa, try stripPrefix3(gpa, text, "//"));
+        if (begin == 0) break;
+        end = begin - 1;
+    }
+    if (lines.items.len == 0) return null;
+    std.mem.reverse([]const u8, lines.items);
+    const joined = try std.mem.join(gpa, "\n", lines.items);
+    // A run of bare `//` lines is a separator, not documentation.
+    if (std.mem.trim(u8, joined, " \t\r\n").len == 0) return null;
     return joined;
 }
 
@@ -694,6 +758,21 @@ fn walkDecls(gpa: std.mem.Allocator, tree: *Ast, line_table: *const LineTable, d
     }
 }
 
+/// The `///` run the parser attached to a parameter, or null when there is none
+/// or the run is unattached.
+fn paramDocRun(gpa: std.mem.Allocator, tree: *Ast, p: Ast.full.FnProto.Param, unattached: *const std.AutoHashMap(TokenIndex, void)) !?[]const u8 {
+    const first_doc = p.first_doc_comment orelse return null;
+    if (unattached.contains(first_doc)) return null;
+    var lines = std.ArrayList([]const u8).empty;
+    var i = first_doc;
+    const toks = tree.tokens.items(.tag);
+    while (i < toks.len and toks[i] == .doc_comment) : (i += 1) {
+        try lines.append(gpa, try stripPrefix3(gpa, tree.tokenSlice(i), "///"));
+    }
+    const joined: []const u8 = try std.mem.join(gpa, "\n", lines.items);
+    return joined;
+}
+
 fn handleFn(gpa: std.mem.Allocator, tree: *Ast, line_table: *const LineTable, decl: Node.Index, prefix: []const u8, project: []const u8, commit: []const u8, rel: []const u8, records: *std.ArrayList(Record), unattached: std.AutoHashMap(TokenIndex, void)) anyerror!void {
     var buf1: [1]Node.Index = undefined;
     const proto = tree.fullFnProto(&buf1, decl) orelse return;
@@ -722,17 +801,12 @@ fn handleFn(gpa: std.mem.Allocator, tree: *Ast, line_table: *const LineTable, de
     if (fn_symbol) |fsym| {
         var it = proto.iterate(tree);
         while (it.next()) |p| {
-            const first_doc = p.first_doc_comment orelse continue;
             const nt = p.name_token orelse continue;
-            if (unattached.contains(first_doc)) continue;
-            // Collect forward run.
-            var lines = std.ArrayList([]const u8).empty;
-            var i = first_doc;
-            const toks = tree.tokens.items(.tag);
-            while (i < toks.len and toks[i] == .doc_comment) : (i += 1) {
-                try lines.append(gpa, try stripPrefix3(gpa, tree.tokenSlice(i), "///"));
-            }
-            const doc = try std.mem.join(gpa, "\n", lines.items);
+            // A parameter's first token is `comptime`/`noalias` when present,
+            // so `noalias x: T` is scanned from `noalias`.
+            const doc: []const u8 = (try paramDocRun(gpa, tree, p, &unattached)) orelse
+                (try collectLineComments(gpa, tree.source, tree.tokenStart(p.comptime_noalias orelse nt))) orelse
+                continue;
             const sym = try prefixJoin(gpa, fsym, tree.tokenSlice(nt));
             try records.append(gpa, .{
                 .project = project,
@@ -796,17 +870,9 @@ fn handleErrorSet(gpa: std.mem.Allocator, tree: *Ast, line_table: *const LineTab
     var i: TokenIndex = lbrace + 1;
     while (i < rbrace) : (i += 1) {
         if (toks[i] != .identifier) continue;
-        if (i == 0) continue;
-        if (toks[i - 1] != .doc_comment) continue;
-        var start = i - 1;
-        while (start > 0 and toks[start - 1] == .doc_comment) start -= 1;
-        if (unattached.contains(start)) continue;
-        var lines = std.ArrayList([]const u8).empty;
-        var j = start;
-        while (j < i) : (j += 1) {
-            try lines.append(gpa, try stripPrefix3(gpa, tree.tokenSlice(j), "///"));
-        }
-        const doc = try std.mem.join(gpa, "\n", lines.items);
+        const doc: []const u8 = (try collectDocRun(gpa, tree, i, &unattached)) orelse
+            (try collectLineComments(gpa, tree.source, tree.tokenStart(i))) orelse
+            continue;
         const name = tree.tokenSlice(i);
         const sym = try prefixJoin(gpa, outer_sym, name);
         try records.append(gpa, .{
@@ -851,6 +917,45 @@ fn handleField(gpa: std.mem.Allocator, tree: *Ast, line_table: *const LineTable,
         @memcpy(np[0..sym.len], sym);
         np[sym.len] = '.';
         try walkDecls(gpa, tree, line_table, cd.ast.members, np, project, commit, rel, records, unattached);
+    }
+}
+
+test "a plain comment run attaches only when adjacent and not a doc comment" {
+    // The tokenizer emits no token for `//` (only `///` and `//!`), so the
+    // fallback scans source lines. Each case pins one rule of the attachment.
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const Case = struct {
+        source: []const u8,
+        expected: ?[]const u8,
+    };
+    const cases = [_]Case{
+        // Adjacent lines are one run, joined in source order.
+        .{ .source = "// one\n// two\npub const x = 1;\n", .expected = " one\n two" },
+        // A blank line breaks the run: plain comments are routinely floating.
+        .{ .source = "// one\n\npub const x = 1;\n", .expected = null },
+        // A `///` run belongs to the doc path, never to prose.
+        .{ .source = "/// doc\npub const x = 1;\n", .expected = null },
+        // A trailing comment after code documents nothing.
+        .{ .source = "const a = 1; // note\npub const x = 1;\n", .expected = null },
+        // A CRLF checkout must not change the extracted text.
+        .{ .source = "// one\r\npub const x = 1;\r\n", .expected = " one" },
+        // A run of bare `//` lines is a separator.
+        .{ .source = "//\n//\npub const x = 1;\n", .expected = null },
+        // Nothing above the declaration.
+        .{ .source = "pub const x = 1;\n", .expected = null },
+    };
+    for (cases) |case| {
+        const decl_start = std.mem.indexOf(u8, case.source, "pub").?;
+        const got = try collectLineComments(gpa, case.source, decl_start);
+        if (case.expected) |want| {
+            try std.testing.expect(got != null);
+            try std.testing.expectEqualStrings(want, got.?);
+        } else {
+            try std.testing.expect(got == null);
+        }
     }
 }
 

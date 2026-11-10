@@ -393,7 +393,7 @@ them, so a schema change is one edit and all three targets recompile.
 |`kind`|`fn` / `var` / `field` / `container` / `error` / `param`|
 |`symbol`|Syntactic container path; module path is the file path with `/` → `.` and `.zig` stripped, and a `..` component is rejected (IDX-6)|
 |`container`|Enclosing symbol (`""` for a module's `//!` record)|
-|`doc`|`///` or `//!` stripped (the space after it is kept), lines joined with `\n`; an invalid UTF-8 byte becomes U+FFFD before hashing (IDX-5). Comment text only: no signature, body or type is stored|
+|`doc`|`///` or `//!` stripped (the space after it is kept), lines joined with `\n`; an invalid UTF-8 byte becomes U+FFFD before hashing (IDX-5). A declaration with no `///` run falls back to its `//` run (§8). Comment text only: no signature, body or type is stored|
 |`doc_hash`|Lowercase hex SHA-256 of `doc`; recomputed and compared at load, so a mismatch rejects the artifact (REL-9)|
 
 Key order is fixed. Records are sorted by `(project, symbol)`, ties by `(path, line)`.
@@ -450,6 +450,12 @@ Per `.zig` file under `root` (kept by an `--include` directory prefix, dropped b
    `firstToken(decl) - 1` to the start of the contiguous `.doc_comment` run, then
    collect forwards in source order. A blank line does not break attachment (it is
    not a token). A run the parser flagged `.unattached_doc_comment` is dropped.
+   - **Plain-comment fallback:** the tokenizer emits no token for `//`, so when a
+     declaration has no `///` run the indexer scans source lines: the contiguous `//`
+     lines ending on the line directly above the declaration's first token, each
+     starting with `//` but not `///` or `//!`, with the declaration beginning its own
+     line and no blank line between run and declaration. A run that is only `//` lines
+     yields nothing. Doc comments always win; the module `//!` record never falls back.
 6. Undocumented declarations are skipped.
 7. Output sorted (§7); status sidecar defaults to `<out minus .jsonl>.status.json`:
    `{"projects":{"<p>":{"commit","records","files_total","files_degraded",
