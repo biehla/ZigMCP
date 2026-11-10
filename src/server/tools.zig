@@ -521,14 +521,18 @@ fn statusSidecarPath(gpa: std.mem.Allocator, index_path: []const u8) ![]const u8
     return std.fmt.allocPrint(gpa, "{s}.status.json", .{index_path});
 }
 
+/// A remote artifact has no local sidecar: the indexer wrote it next to the
+/// file it produced, not next to the URL the server downloads from. Degraded
+/// counts are therefore omitted for a URL index (REL-6, accepted).
+fn isRemoteIndexPath(index_path: []const u8) bool {
+    return std.mem.startsWith(u8, index_path, "http://") or
+        std.mem.startsWith(u8, index_path, "https://");
+}
+
 /// Loads the status sidecar, if the indexer wrote one.
 fn loadStatusSidecar(ctx: *Context, gpa: std.mem.Allocator) !?std.json.Value {
     const index_path = ctx.index_path orelse return null;
-    // A remote artifact has no local sidecar: the indexer wrote it next to the
-    // file it produced, not next to the URL the server downloads from.
-    if (std.mem.startsWith(u8, index_path, "http://") or std.mem.startsWith(u8, index_path, "https://")) {
-        return null;
-    }
+    if (isRemoteIndexPath(index_path)) return null;
     const sidecar_path = try statusSidecarPath(gpa, index_path);
     const bytes = std.Io.Dir.cwd().readFileAllocOptions(
         ctx.io,
@@ -669,6 +673,15 @@ pub fn docImportStatus(ctx: *Context, args: std.json.Value) ToolError!ToolOutcom
     try structured.put(gpa, "projects", .{ .array = project_values });
 
     return .{ .text = try text.toOwnedSlice(gpa), .structured = .{ .object = structured } };
+}
+
+test "REL-6: a URL index has no local status sidecar" {
+    // Accepted limitation: the sidecar lives next to the file the indexer
+    // wrote, so a remote index has none and the degraded counts are omitted.
+    try std.testing.expect(isRemoteIndexPath("http://example.org/index.jsonl"));
+    try std.testing.expect(isRemoteIndexPath("https://example.org/index.jsonl"));
+    try std.testing.expect(!isRemoteIndexPath("generated/index.jsonl"));
+    try std.testing.expect(!isRemoteIndexPath("file:///tmp/index.jsonl"));
 }
 
 test "a negative sidecar count is dropped instead of cast" {
