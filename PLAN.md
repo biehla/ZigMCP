@@ -1,8 +1,8 @@
 # PLAN.md — defects, edge cases, limitations, and guideline deviations
 
-Status: open backlog. Twenty-two items were fixed on 2026-11-09, thirty-four on
+Status: open backlog. Twenty-two items were fixed on 2026-11-09, thirty-five on
 2026-11-10, and five more were closed that day because they were already done — the
-option chosen for each, its commit and its verification are in §13–§27. Two sources: a read-through
+option chosen for each, its commit and its verification are in §13–§28. Two sources: a read-through
 of the tree on 2026-11-09, and a breakage campaign the same day that fuzzed the
 stdio surface and the indexer, profiled the hot paths, and inspected a `ReleaseSafe`
 PE with REA — method, measurements and negative results in §12.
@@ -107,12 +107,6 @@ No open items.
 
 ## 5. Index loading and hot reload
 
-- **REL-1 — remote refresh has no conditional GET.** The whole artifact is
-  re-downloaded every 60 s (`FetchResult` exposes only `status`). Options: (a) keep
-  and make the interval configurable; (b) HEAD + compare `Content-Length`/`ETag`
-  when the stdlib gains it; (c) accept the bandwidth. Verify: watch requests on a
-  test server.
-
 - **REL-2 — remote fetch has no timeout.** The watcher can park in a read, and
   shutdown then abandons the thread and leaks the store. Options: (a) set a client
   timeout/deadline; (b) fail the fetch after N seconds via a watchdog thread; (c)
@@ -175,7 +169,6 @@ must own its test, because no such layer exists yet.
 |Id|Regression test|If not: what must own it|
 |---|---|---|
 |CI-7|—|timing only|
-|REL-1|—|local HTTP server counting requests|
 |REL-2|—|black-hole address plus quit; timing-based|
 |REL-6|—|integration: URL index with no sidecar|
 |DOC-4|—|`inspect_pe_resources` on a `ReleaseSafe` artifact (packaging smoke test)|
@@ -477,6 +470,16 @@ before the branch, so a no-op rerun still creates nothing.
 |Id|Option|Commit|Verification|
 |---|---|---|---|
 |CI-6|(a)|`a02c46b`|branch is `bump/upstream-<date>-${GITHUB_RUN_ID}`, unique per run; `zig build workflows` and the pinned actionlint pass. The live twice-a-day rerun is a CI-only check (the layer §10 named)|
+
+## 28. Resolved on 2026-11-10, fourteenth chunk
+
+One limitation, one commit (`4ea4509`): a remote index is still re-fetched on every
+poll (the stdlib client has no conditional GET), but the cadence is now a server option
+instead of a constant, so its bandwidth is the operator's call.
+
+|Id|Option|Commit|Verification|
+|---|---|---|---|
+|REL-1|(a)|`4ea4509`|`REL-1: the poll interval is configurable and clamped` (unit test): defaults 1000/60000, an explicit 250 wins for both source kinds, 0 clamps to 100; `zig build test`, `check`, `workflows` and `zig fmt --check` pass|
 
 
 
