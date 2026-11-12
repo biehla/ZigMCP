@@ -516,8 +516,9 @@ Both the registry and the root are re-listed every tick.
   directories are skipped). A directory is *scoped* when its sanitized name
   (`[^A-Za-z0-9_]` → `_`, case kept) equals an entry name, or the entry's url basename
   (`.git` suffix and `?…` cut away): it then takes the entry's key (`zig_std`, not the
-  directory `zig`) and that entry's include/exclude scope verbatim, so the live index and
-  the CI index agree per project. An unscoped directory is auto-discovered: no includes,
+  directory `zig`) and that entry's include/exclude scope, so the live index and the CI
+  index agree per project apart from the noise directories. An unscoped directory is
+  auto-discovered: no includes,
   the default excludes (`**/.git/**`, `**/.zig-cache/**`, `**/zig-out/**`,
   `**/testdata/**`); the three noise-directory patterns are also unioned onto a matched
   entry's excludes — detection prunes at any depth, so indexing must refuse at any depth
