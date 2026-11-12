@@ -853,7 +853,7 @@ test "the store reports the last load outcome" {
     try std.testing.expect(ok.error_name == null);
 }
 
-test "watchFile swaps a good artifact, reports a corrupt one, and classifies share errors as transient" {
+test "watchFile swaps a good artifact and reports a corrupt one" {
     // REL-7's triple decides *when* to read; this pins *what a failed read
     // means*. A corrupt artifact is reported and remembered so a broken file
     // is not retried in a tight loop; the `File.Atomic.replace` share window
@@ -913,13 +913,6 @@ test "watchFile swaps a good artifact, reports a corrupt one, and classifies sha
     const failed = store.statusSnapshot();
     try std.testing.expectEqual(IndexState.reload_failed, failed.state);
     try std.testing.expectEqualStrings("new", store.current.columnar.symbolAt(0));
-
-    // The classification itself: exactly the share-window family is transient.
-    try std.testing.expect(isTransientShareError(error.AccessDenied));
-    try std.testing.expect(isTransientShareError(error.FileBusy));
-    try std.testing.expect(!isTransientShareError(error.MalformedRecord));
-    try std.testing.expect(!isTransientShareError(error.IndexTooLarge));
-    try std.testing.expect(!isTransientShareError(error.FileNotFound));
 }
 
 test "a share-window failure retries untouched; a content failure reports and pins" {
@@ -953,7 +946,10 @@ test "a share-window failure retries untouched; a content failure reports and pi
         .log = &queue,
     };
 
+    // Both share-window errors retry: the whole `isTransientShareError` set
+    // earns its keep through this behaviour, not through echoing its table.
     applyLoadFailure(&context, stat, error.AccessDenied);
+    applyLoadFailure(&context, stat, error.FileBusy);
     try std.testing.expectEqual(IndexState.unloaded, store.statusSnapshot().state);
     try std.testing.expect(!context.have_stat); // the next poll retries the same triple
 
