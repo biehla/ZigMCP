@@ -530,6 +530,44 @@ fn sleepUntilStopped(context: *Context) void {
     }
 }
 
+/// A publisher replacing the artifact atomically opens a brief window on
+/// Windows where the destination exists and stats fine but opening it fails
+/// (`File.Atomic.replace`'s documented `AccessDenied` period; `FileBusy` is
+/// the same family). The bytes are complete before and after — nothing about
+/// the artifact is wrong — so a transient open failure retries on the next
+/// poll: it must not flip `doc_import_status` to `reload_failed` (REL-4) nor
+/// record the stat triple, which together would report the previous,
+/// perfectly served index as failed until the next content change.
+fn isTransientShareError(err: anyerror) bool {
+    return switch (err) {
+        error.AccessDenied, error.FileBusy => true,
+        else => false,
+    };
+}
+
+/// Apply the outcome of a failed local load. A content failure (`MalformedRecord`,
+/// `IndexTooLarge`, a vanished file) is reported through `doc_import_status` and its
+/// stat triple pinned, so a broken artifact is not re-read every poll (REL-8's
+/// distinct causes, REL-4's visibility). A share-window failure is neither: it
+/// retries on the next poll and reports nothing, because `doc_import_status`
+/// describes the index being served — and the previous, perfectly valid one is
+/// still serving.
+fn applyLoadFailure(context: *Context, stat: std.Io.File.Stat, err: anyerror) void {
+    if (isTransientShareError(err)) {
+        logStderr(context.io, "zigmcp: index open failed ({s}); retrying next poll\n", .{@errorName(err)});
+        return;
+    }
+    context.store.setStatus(.reload_failed, @errorName(err));
+    context.log.push(.warning, "index reload failed");
+    logStderr(context.io, "zigmcp: index reload failed ({s}); keeping the previous index\n", .{@errorName(err)});
+    // Remember the failed artifact so a broken file is not retried in a
+    // tight loop; the next change triggers another attempt.
+    context.last_size = stat.size;
+    context.last_mtime = stat.mtime.nanoseconds;
+    context.last_ctime = stat.ctime.nanoseconds;
+    context.have_stat = true;
+}
+
 /// A local artifact is polled by mtime + size: cheap, and no network stack.
 fn watchFile(context: *Context, path: []const u8) void {
     const io = context.io;
@@ -554,15 +592,7 @@ fn watchFile(context: *Context, path: []const u8) void {
     };
     replacement.* = index_module.loadFile(io, context.store.gpa, path, context.max_bytes) catch |err| {
         context.store.gpa.destroy(replacement);
-        context.store.setStatus(.reload_failed, @errorName(err));
-        context.log.push(.warning, "index reload failed");
-        logStderr(io, "zigmcp: index reload failed ({s}); keeping the previous index\n", .{@errorName(err)});
-        // Remember the failed artifact so a broken file is not retried in a
-        // tight loop; the next change triggers another attempt.
-        context.last_size = stat.size;
-        context.last_mtime = stat.mtime.nanoseconds;
-        context.last_ctime = stat.ctime.nanoseconds;
-        context.have_stat = true;
+        applyLoadFailure(context, stat, err);
         return;
     };
 
@@ -821,4 +851,121 @@ test "the store reports the last load outcome" {
     const ok = store.statusSnapshot();
     try std.testing.expectEqual(IndexState.ok, ok.state);
     try std.testing.expect(ok.error_name == null);
+}
+
+test "watchFile swaps a good artifact, reports a corrupt one, and classifies share errors as transient" {
+    // REL-7's triple decides *when* to read; this pins *what a failed read
+    // means*. A corrupt artifact is reported and remembered so a broken file
+    // is not retried in a tight loop; the `File.Atomic.replace` share window
+    // (which CI's publish and `indexer --watch` both create on Windows) must
+    // not flip `doc_import_status` (REL-4) or pin the triple — the previous,
+    // perfectly served index would be reported failed until the next change.
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const first = try gpa.create(Index);
+    first.* = try index_module.load(gpa,
+        \\{"project":"p","commit":"a","path":"x.zig","line":1,"kind":"fn","symbol":"old","doc":"d","doc_hash":"18ac3e7343f016890c510e93f935261169d9e3f565436429830faf0934f4f8e4"}
+    );
+    var store = Store.init(gpa, first);
+    defer store.deinit();
+    var queue = log_module.Queue{};
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const path = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/index.jsonl", .{&tmp.sub_path});
+
+    var context = Context{
+        .store = &store,
+        .io = std.testing.io,
+        .source = .{ .file = path },
+        .poll_interval_ms = 1_000,
+        .log = &queue,
+    };
+
+    // A good artifact: swapped in, stat remembered, state ok.
+    {
+        const f = try tmp.dir.createFile(std.testing.io, "index.jsonl", .{});
+        defer f.close(std.testing.io);
+        var buffer: [4096]u8 = undefined;
+        var w = f.writer(std.testing.io, &buffer);
+        try w.interface.writeAll(
+            \\{"project":"p","commit":"b","path":"x.zig","line":1,"kind":"fn","symbol":"new","doc":"d","doc_hash":"18ac3e7343f016890c510e93f935261169d9e3f565436429830faf0934f4f8e4"}
+        );
+        try w.interface.writeByte('\n');
+        try w.flush();
+    }
+    watchFile(&context, path);
+    try std.testing.expect(context.have_stat);
+    try std.testing.expectEqualStrings("new", store.current.columnar.symbolAt(0));
+
+    // A corrupt artifact: reported, remembered (no tight retry), old index keeps serving.
+    {
+        const f = try tmp.dir.createFile(std.testing.io, "index.jsonl", .{});
+        defer f.close(std.testing.io);
+        var buffer: [64]u8 = undefined;
+        var w = f.writer(std.testing.io, &buffer);
+        try w.interface.writeAll("this is not JSONL\n");
+        try w.flush();
+    }
+    watchFile(&context, path);
+    const failed = store.statusSnapshot();
+    try std.testing.expectEqual(IndexState.reload_failed, failed.state);
+    try std.testing.expectEqualStrings("new", store.current.columnar.symbolAt(0));
+
+    // The classification itself: exactly the share-window family is transient.
+    try std.testing.expect(isTransientShareError(error.AccessDenied));
+    try std.testing.expect(isTransientShareError(error.FileBusy));
+    try std.testing.expect(!isTransientShareError(error.MalformedRecord));
+    try std.testing.expect(!isTransientShareError(error.IndexTooLarge));
+    try std.testing.expect(!isTransientShareError(error.FileNotFound));
+}
+
+test "a share-window failure retries untouched; a content failure reports and pins" {
+    // The branch a portable test cannot force on the filesystem (`AccessDenied`
+    // is Windows' atomic-replace window), so the outcome handling is one small
+    // function driven with synthetic errors instead.
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const first = try gpa.create(Index);
+    first.* = try index_module.load(gpa,
+        \\{"project":"p","commit":"a","path":"x.zig","line":1,"kind":"fn","symbol":"old","doc":"d","doc_hash":"18ac3e7343f016890c510e93f935261169d9e3f565436429830faf0934f4f8e4"}
+    );
+    var store = Store.init(gpa, first);
+    defer store.deinit();
+    var queue = log_module.Queue{};
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const f = try tmp.dir.createFile(std.testing.io, "index.jsonl", .{});
+    f.close(std.testing.io);
+    const path = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/index.jsonl", .{&tmp.sub_path});
+    const stat = statFile(std.testing.io, path) orelse return error.MissingStat;
+
+    var context = Context{
+        .store = &store,
+        .io = std.testing.io,
+        .source = .{ .file = path },
+        .poll_interval_ms = 1_000,
+        .log = &queue,
+    };
+
+    applyLoadFailure(&context, stat, error.AccessDenied);
+    try std.testing.expectEqual(IndexState.unloaded, store.statusSnapshot().state);
+    try std.testing.expect(!context.have_stat); // the next poll retries the same triple
+
+    applyLoadFailure(&context, stat, error.MalformedRecord);
+    const failed = store.statusSnapshot();
+    try std.testing.expectEqual(IndexState.reload_failed, failed.state);
+    try std.testing.expectEqualStrings("MalformedRecord", failed.error_name.?);
+    try std.testing.expect(context.have_stat);
+    try std.testing.expectEqual(stat.size, context.last_size);
+    try std.testing.expectEqual(stat.mtime.nanoseconds, context.last_mtime);
+    try std.testing.expectEqual(stat.ctime.nanoseconds, context.last_ctime);
+
+    // The served index never moved: the first one is still current.
+    try std.testing.expectEqualStrings("old", store.current.columnar.symbolAt(0));
 }

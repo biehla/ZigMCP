@@ -32,6 +32,24 @@ pub fn build(b: *std.Build) void {
     }
     b.installArtifact(exe);
 
+    // `data/sources.zon` plan parsing (CI-4/CI-5): one parser shared by both
+    // workflows, so their regex copies cannot drift. Watch mode of the
+    // indexer reads the same registry through this same module.
+    const sources_module = b.createModule(.{
+        .root_source_file = b.path("src/util/sources.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // The sleep helper watch mode cadences on (Windows takes the native
+    // timer; see `src/util/sleep.zig`). Declared before the indexer because
+    // the executable and its unit layer both import it.
+    const sleep_module = b.createModule(.{
+        .root_source_file = b.path("src/util/sleep.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     // The doc indexer: upstream tree -> generated/index.jsonl (AGENTS.md §8).
     const indexer = b.addExecutable(.{
         .name = "indexer",
@@ -39,6 +57,10 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("tools/indexer.zig"),
             .target = target,
             .optimize = optimize,
+            .imports = &.{
+                .{ .name = "sources", .module = sources_module },
+                .{ .name = "sleep_util", .module = sleep_module },
+            },
         }),
     });
     b.installArtifact(indexer);
@@ -87,13 +109,6 @@ pub fn build(b: *std.Build) void {
     // `zig build run -- <args>` forwards the arguments to the server.
     run_cmd.addPassthruArgs();
 
-    // `data/sources.zon` plan parsing (CI-4/CI-5): one parser shared by both
-    // workflows, so their regex copies cannot drift.
-    const sources_module = b.createModule(.{
-        .root_source_file = b.path("src/util/sources.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
     const sources_plan = b.addExecutable(.{
         .name = "sources_plan",
         .root_module = b.createModule(.{
@@ -150,12 +165,6 @@ pub fn build(b: *std.Build) void {
     const server_options = b.addOptions();
     server_options.addOptionPath("server_exe", exe.getEmittedBin());
 
-    const sleep_module = b.createModule(.{
-        .root_source_file = b.path("src/util/sleep.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
     const protocol_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("tests/protocol_test.zig"),
@@ -174,12 +183,25 @@ pub fn build(b: *std.Build) void {
     const indexer_options = b.addOptions();
     indexer_options.addOptionPath("indexer_exe", indexer.getEmittedBin());
 
+    // The watch-mode behavior tests assert the published artifact against the
+    // server's own loader, not byte text.
+    const docs_index_module = b.createModule(.{
+        .root_source_file = b.path("src/docs/index.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     const indexer_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("tests/indexer_test.zig"),
             .target = target,
             .optimize = optimize,
-            .imports = &.{.{ .name = "indexer_options", .module = indexer_options.createModule() }},
+            .imports = &.{
+                .{ .name = "indexer_options", .module = indexer_options.createModule() },
+                .{ .name = "docs_index", .module = docs_index_module },
+                // The watch-mode behavior tests wait between artifact polls.
+                .{ .name = "sleep_util", .module = sleep_module },
+            },
         }),
     });
     const run_indexer_tests = b.addRunArtifact(indexer_tests);
@@ -213,12 +235,17 @@ pub fn build(b: *std.Build) void {
     const run_line_table_tests = b.addRunArtifact(line_table_tests);
 
     // The indexer's own unit layer (IDX-6: modulePath), compiled from the same
-    // root the executable uses.
+    // root the executable uses — so it needs the same `sources` import watch
+    // mode uses.
     const indexer_unit_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("tools/indexer.zig"),
             .target = target,
             .optimize = optimize,
+            .imports = &.{
+                .{ .name = "sources", .module = sources_module },
+                .{ .name = "sleep_util", .module = sleep_module },
+            },
         }),
     });
     const run_indexer_unit_tests = b.addRunArtifact(indexer_unit_tests);

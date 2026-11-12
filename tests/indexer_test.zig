@@ -8,6 +8,8 @@
 
 const std = @import("std");
 const options = @import("indexer_options");
+const docs_index = @import("docs_index");
+const sleep_util = @import("sleep_util");
 
 const io = std.testing.io;
 
@@ -816,4 +818,237 @@ fn countMember(status: []const u8, key: []const u8) !usize {
     while (end < status.len and std.ascii.isDigit(status[end])) end += 1;
     if (end == start) return error.MissingMember;
     return std.fmt.parseInt(usize, status[start..end], 10);
+}
+
+// ---------------------------------------------------------------------------
+// Watch mode (`indexer --watch`, AGENTS.md §8). Each test spawns the built
+// indexer as a live watcher over a temporary tree and bounds every wait with
+// a deadline plus kill-on-teardown — AGENTS.md §9's bounded-waits rule: a watcher that
+// fails to publish must fail the test, not park the suite.
+// ---------------------------------------------------------------------------
+
+const watch_deadline_ms: i128 = 20_000;
+
+fn spawnWatch(root: []const u8, out: []const u8, sources: []const u8, extra: []const []const u8) !std.process.Child {
+    const gpa = std.testing.allocator;
+    var argv = std.ArrayList([]const u8).empty;
+    defer argv.deinit(gpa);
+    try argv.append(gpa, options.indexer_exe);
+    try argv.appendSlice(gpa, &.{ "--watch", "--root", root, "--out", out, "--sources", sources, "--poll-ms", "100" });
+    try argv.appendSlice(gpa, extra);
+    // `Child` does not retain `argv`: the command line is consumed by `spawn`.
+    return std.process.spawn(io, .{
+        .argv = argv.items,
+        .stdin = .ignore,
+        .stdout = .ignore,
+        .stderr = .ignore,
+    });
+}
+
+fn terminate(child: *std.process.Child) void {
+    // `Child.kill` terminates the process and reaps it (see the protocol
+    // harness); a following `wait` would assert on the nulled id.
+    child.kill(io);
+}
+
+fn readOr(path: []const u8) ?[]const u8 {
+    return std.Io.Dir.cwd().readFileAllocOptions(io, path, std.testing.allocator, .limited(16 * 1024 * 1024), .of(u8), null) catch null;
+}
+
+/// Polls `path` until every needle in `present` appears and no needle in
+/// `absent` does. A missing file is "not yet", never a pass: the artifact
+/// appears with its first publish.
+fn waitArtifact(path: []const u8, present: []const []const u8, absent: []const []const u8) !void {
+    const gpa = std.testing.allocator;
+    const start = std.Io.Clock.now(.awake, io).nanoseconds;
+    while (true) {
+        if (readOr(path)) |bytes| {
+            defer gpa.free(bytes);
+            var ok = true;
+            for (present) |needle| {
+                if (std.mem.indexOf(u8, bytes, needle) == null) {
+                    ok = false;
+                    break;
+                }
+            }
+            if (ok) {
+                for (absent) |needle| {
+                    if (std.mem.indexOf(u8, bytes, needle) != null) {
+                        ok = false;
+                        break;
+                    }
+                }
+            }
+            if (ok) return;
+        }
+        if (std.Io.Clock.now(.awake, io).nanoseconds - start > watch_deadline_ms * std.time.ns_per_ms) {
+            return error.WatchDeadline;
+        }
+        sleep_util.sleepMilliseconds(io, 100);
+    }
+}
+
+test "watch mode publishes a live edit the server's loader accepts, then a rewrite" {
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}", .{&tmp.sub_path});
+    defer gpa.free(root);
+    const out = try std.fmt.allocPrint(gpa, "{s}/tg/index.jsonl", .{root});
+    defer gpa.free(out);
+    // A missing registry file is the documented warn-and-discover-only path.
+    const sources = try std.fmt.allocPrint(gpa, "{s}/absent.zon", .{root});
+    defer gpa.free(sources);
+
+    try writeFixture(tmp.dir, "proj/a.zig", "/// doc v1\npub fn one() void {}\n");
+    var child = try spawnWatch(root, out, sources, &.{});
+    defer terminate(&child);
+
+    try waitArtifact(out, &.{ "\"project\":\"proj\"", "\"commit\":\"live\"", "doc v1" }, &.{});
+
+    // The artifact must satisfy the consumer contract: `doc_hash` re-verified
+    // and canonical order enforced by the very loader the server swaps in.
+    if (readOr(out)) |bytes| {
+        defer gpa.free(bytes);
+        var index = try docs_index.load(gpa, bytes);
+        index.deinit();
+    } else {
+        return error.MissingArtifact;
+    }
+
+    try writeFixture(tmp.dir, "proj/a.zig", "/// doc v2\npub fn one() void {}\n");
+    try waitArtifact(out, &.{"doc v2"}, &.{"doc v1"});
+}
+
+test "watch mode keeps .git and testdata out of the artifact" {
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}", .{&tmp.sub_path});
+    defer gpa.free(root);
+    const out = try std.fmt.allocPrint(gpa, "{s}/tg/index.jsonl", .{root});
+    defer gpa.free(out);
+    const sources = try std.fmt.allocPrint(gpa, "{s}/absent.zon", .{root});
+    defer gpa.free(sources);
+
+    try writeFixture(tmp.dir, "proj/keep.zig", "/// keep record\npub fn keep() void {}\n");
+    try writeFixture(tmp.dir, "proj/.git/hook.zig", "/// git secret\npub fn g() void {}\n");
+    try writeFixture(tmp.dir, "proj/testdata/deep/y.zig", "/// testdata secret\npub fn t() void {}\n");
+
+    var child = try spawnWatch(root, out, sources, &.{});
+    defer terminate(&child);
+
+    try waitArtifact(out, &.{"keep record"}, &.{ "git secret", "testdata secret", ".git", "testdata" });
+}
+
+test "watch mode adopts a new library directory and drops it when it vanishes" {
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}", .{&tmp.sub_path});
+    defer gpa.free(root);
+    const out = try std.fmt.allocPrint(gpa, "{s}/tg/index.jsonl", .{root});
+    defer gpa.free(out);
+    const status = try std.fmt.allocPrint(gpa, "{s}/tg/index.status.json", .{root});
+    defer gpa.free(status);
+    const sources = try std.fmt.allocPrint(gpa, "{s}/absent.zon", .{root});
+    defer gpa.free(sources);
+
+    try writeFixture(tmp.dir, "proj/a.zig", "/// proj record\npub fn one() void {}\n");
+    var child = try spawnWatch(root, out, sources, &.{});
+    defer terminate(&child);
+    try waitArtifact(out, &.{"proj record"}, &.{});
+
+    // A fresh clone under the root goes live with no config and no restart.
+    try writeFixture(tmp.dir, "newlib/b.zig", "/// new lib record\npub fn n() void {}\n");
+    try waitArtifact(out, &.{ "\"project\":\"newlib\"", "new lib record" }, &.{});
+    try waitArtifact(status, &.{"\"newlib\":{"}, &.{});
+
+    // Removal is equally live: the records and the sidecar member disappear.
+    // `deleteTree` on a missing path is a silent success in 0.17.1 — the tree
+    // exists here, created above.
+    try tmp.dir.deleteTree(io, "newlib");
+    try waitArtifact(out, &.{}, &.{"newlib"});
+    try waitArtifact(status, &.{"proj"}, &.{"newlib"});
+}
+
+test "watch mode gives a registry entry its key and scope to the matching directory" {
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}", .{&tmp.sub_path});
+    defer gpa.free(root);
+    const out = try std.fmt.allocPrint(gpa, "{s}/tg/index.jsonl", .{root});
+    defer gpa.free(out);
+    const sources = try std.fmt.allocPrint(gpa, "{s}/registry.zon", .{root});
+    defer gpa.free(sources);
+
+    // The entry name differs from the url basename on purpose: the directory
+    // `alpha` joins to the entry through the basename and must ship under the
+    // entry's key `alpha_std` — the key clients already use (AGENTS.md §10's
+    // manual recipe clones by url).
+    const reg =
+        \\.{
+        \\    .alpha_std = .{
+        \\        .url = "git+https://example.com/alpha.git?ref=main#abc123",
+        \\        .hash = "h",
+        \\        .branch = "main",
+        \\        .commit = "abc123",
+        \\        .scope = .{ .include = .{ "lib/**" }, .exclude = .{ "**/testdata/**" } },
+        \\    },
+        \\}
+    ;
+    try writeFixture(tmp.dir, "registry.zon", reg);
+    try writeFixture(tmp.dir, "alpha/lib/d.zig", "/// lib record\npub fn dl() void {}\n");
+    try writeFixture(tmp.dir, "alpha/other/e.zig", "/// other record\npub fn eo() void {}\n");
+
+    var child = try spawnWatch(root, out, sources, &.{});
+    defer terminate(&child);
+
+    try waitArtifact(
+        out,
+        &.{ "\"project\":\"alpha_std\"", "lib record" },
+        &.{ "other record", "\"project\":\"alpha\"" },
+    );
+}
+
+test "watch mode exits 2 on a malformed registry, an illegal flag mix, and a missing root" {
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}", .{&tmp.sub_path});
+    defer gpa.free(root);
+    const out = try std.fmt.allocPrint(gpa, "{s}/tg/index.jsonl", .{root});
+    defer gpa.free(out);
+
+    // SRV-8's shape: one stderr line and the usage block, never a bare Zig
+    // error name or a stack trace. A startup failure is loud and fatal; only
+    // mid-run failures degrade.
+    try writeFixture(tmp.dir, "bad.zon", "this is not zon {{{");
+    const bad_sources = try std.fmt.allocPrint(gpa, "{s}/bad.zon", .{root});
+    defer gpa.free(bad_sources);
+    const missing_root = try std.fmt.allocPrint(gpa, "{s}/nosuch", .{root});
+    defer gpa.free(missing_root);
+    const cases = [_][]const []const u8{
+        &.{ "--watch", "--root", root, "--out", out, "--sources", bad_sources },
+        &.{ "--watch", "--root", root, "--out", out, "--source", "p=c=d", "--poll-ms", "100" },
+        &.{ "--watch", "--root", missing_root, "--out", out },
+    };
+    var argv = std.ArrayList([]const u8).empty;
+    defer argv.deinit(gpa);
+    for (cases) |c| {
+        argv.clearRetainingCapacity();
+        try argv.append(gpa, options.indexer_exe);
+        try argv.appendSlice(gpa, c);
+        var child = try std.process.spawn(io, .{
+            .argv = argv.items,
+            .stdin = .ignore,
+            .stdout = .ignore,
+            .stderr = .ignore,
+        });
+        switch (try child.wait(io)) {
+            .exited => |code| try std.testing.expectEqual(@as(u8, 2), code),
+            else => return error.UnexpectedExit,
+        }
+    }
 }

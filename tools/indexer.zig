@@ -104,6 +104,10 @@ pub fn main(init: std.process.Init) !void {
     var out_path: ?[]const u8 = null;
     var status_path: ?[]const u8 = null;
     var previous_path: ?[]const u8 = null;
+    var watch_mode = false;
+    var watch_root: ?[]const u8 = null;
+    var watch_sources: ?[]const u8 = null;
+    var watch_poll: ?u64 = null;
     var sources = std.ArrayList(Source).empty;
     var includes = std.ArrayList([]const u8).empty;
     var excludes = std.ArrayList([]const u8).empty;
@@ -117,6 +121,15 @@ pub fn main(init: std.process.Init) !void {
             status_path = args_iter.next() orelse usage(io);
         } else if (std.mem.eql(u8, arg, "--previous")) {
             previous_path = args_iter.next() orelse usage(io);
+        } else if (std.mem.eql(u8, arg, "--watch")) {
+            watch_mode = true;
+        } else if (std.mem.eql(u8, arg, "--root")) {
+            watch_root = args_iter.next() orelse usage(io);
+        } else if (std.mem.eql(u8, arg, "--sources")) {
+            watch_sources = args_iter.next() orelse usage(io);
+        } else if (std.mem.eql(u8, arg, "--poll-ms")) {
+            const v = args_iter.next() orelse usage(io);
+            watch_poll = std.fmt.parseInt(u64, v, 10) catch usage(io);
         } else if (std.mem.eql(u8, arg, "--source")) {
             const v = args_iter.next() orelse usage(io);
             sources.append(gpa, try parseSource(io, gpa, v)) catch unreachable;
@@ -129,6 +142,34 @@ pub fn main(init: std.process.Init) !void {
         } else {
             usage(io);
         }
+    }
+
+    if (watch_mode) {
+        validateWatchArgs(.{
+            .out = out_path,
+            .root = watch_root,
+            .has_source = sources.items.len != 0,
+            .has_include = includes.items.len != 0,
+            .has_exclude = excludes.items.len != 0,
+            .has_previous = previous_path != null,
+        }) catch {
+            // SRV-8's shape: one line naming the illegal combination, then the
+            // usage block, then exit 2 — never a bare Zig error name.
+            logStderr(io, "indexer: --watch needs --root and --out and takes no --source/--include/--exclude/--previous\n", .{});
+            usage(io);
+        };
+        const poll_ms = @max(watch_poll orelse default_watch_poll_ms, min_watch_poll_ms); // REL-1
+        return watchMain(io, gpa, .{
+            .out = out_path.?,
+            .root = watch_root.?,
+            .sources = watch_sources orelse "data/sources.zon",
+            .status = status_path,
+            .poll_ms = poll_ms,
+        });
+    }
+    if (watch_root != null or watch_sources != null or watch_poll != null) {
+        logStderr(io, "indexer: --root, --sources and --poll-ms apply only to --watch\n", .{});
+        usage(io);
     }
 
     if (out_path == null or sources.items.len == 0) usage(io);
@@ -165,20 +206,18 @@ pub fn main(init: std.process.Init) !void {
     std.sort.block(Record, records.items, {}, lessThan.byRecord);
 
     // Compact JSON escaping must stay on the standard path.
-    var out_buf: [8192]u8 = undefined;
-    const out_file = std.Io.Dir.cwd().createFile(io, out_path.?, .{}) catch |err| {
+    var aw: std.Io.Writer.Allocating = .init(gpa);
+    defer aw.deinit();
+    for (records.items) |rec| {
+        const line = try std.json.Stringify.valueAlloc(gpa, rec, .{ .whitespace = .minified });
+        try aw.writer.writeAll(line);
+        try aw.writer.writeByte('\n');
+    }
+    const index_payload = try aw.toOwnedSlice();
+    writeFileAtomic(io, out_path.?, index_payload) catch |err| {
         std.debug.print("indexer: cannot create {s}: {}\n", .{ out_path.?, err });
         return err;
     };
-    defer out_file.close(io);
-    var fw = out_file.writer(io, &out_buf);
-    for (records.items) |rec| {
-        const line = try std.json.Stringify.valueAlloc(gpa, rec, .{ .whitespace = .minified });
-        defer gpa.free(line);
-        try fw.interface.writeAll(line);
-        try fw.interface.writeByte('\n');
-    }
-    try fw.flush();
 
     const sp = (status_path orelse deriveStatusPath(gpa, out_path.?)) catch unreachable;
     try writeStatus(io, gpa, sp, statuses.items, previous_path != null);
@@ -313,12 +352,7 @@ fn deriveStatusPath(gpa: std.mem.Allocator, out: []const u8) ![]const u8 {
 
 fn writeStatus(io: std.Io, gpa: std.mem.Allocator, path: []const u8, statuses: []ProjectStatus, report_skip: bool) !void {
     const payload = try buildStatus(gpa, statuses, report_skip);
-    var buf: [8192]u8 = undefined;
-    const f = try std.Io.Dir.cwd().createFile(io, path, .{});
-    defer f.close(io);
-    var w = f.writer(io, &buf);
-    try w.interface.writeAll(payload);
-    try w.flush();
+    try writeFileAtomic(io, path, payload);
 }
 
 fn buildStatus(gpa: std.mem.Allocator, statuses: []ProjectStatus, report_skip: bool) ![]const u8 {
@@ -382,10 +416,19 @@ fn usage(io: std.Io) noreturn {
     var w = f.writer(io, &buf);
     w.interface.writeAll(
         \\usage: indexer --out <index.jsonl> --source <project>=<commit>=<root> [--source ...] [--include <subpath> ...] [--exclude <subpath> ...] [--status <path>] [--previous <index.jsonl>]
+        \\       indexer --watch --root <dir> --out <index.jsonl> [--sources <file>] [--status <path>] [--poll-ms <n>]
     ) catch {};
     w.interface.writeAll("\n") catch {};
     w.flush() catch {};
     std.process.exit(2);
+}
+
+/// One line to stderr; stdout is not this binary's channel (AGENTS.md §6).
+fn logStderr(io: std.Io, comptime fmt: []const u8, args: anytype) void {
+    var buf: [1024]u8 = undefined;
+    var w = std.Io.File.stderr().writer(io, &buf);
+    w.interface.print(fmt, args) catch {};
+    w.flush() catch {};
 }
 
 fn parseSource(io: std.Io, gpa: std.mem.Allocator, v: []const u8) !Source {
@@ -971,6 +1014,646 @@ fn handleField(gpa: std.mem.Allocator, tree: *Ast, line_table: *const LineTable,
     }
 }
 
+// ---------------------------------------------------------------------------
+// Watch mode (AGENTS.md §8): one binary, a flag — "a different input shape is
+// one path with a flag, not two implementations" (D10). Poll `--root`,
+// re-index only the projects whose stat triples moved, and publish the merged
+// artifact by atomic replace so the server's own file poll hot-swaps it
+// (`src/docs/reload.zig`; the server needs no change).
+// ---------------------------------------------------------------------------
+
+const sources_lib = @import("sources");
+const sleep_util = @import("sleep_util");
+
+/// The provenance every watcher-built record carries: a live tree has no
+/// pinned commit, and the sentinel keeps `--previous`'s `(project, commit)`
+/// carry-over key out of this path — with a constant commit it would reuse a
+/// stale project as if it matched the current tree.
+const live_commit = "live";
+
+const default_watch_poll_ms: u64 = 2_000;
+
+/// Mirrors `docs.reload.min_poll_ms` (REL-1): a tighter interval only spins.
+const min_watch_poll_ms: u64 = 100;
+
+const max_sources_bytes = 16 * 1024 * 1024;
+
+/// Directories never descended during a poll and never indexed under any
+/// project — unioned into every scope, entry-scoped ones included. Batch
+/// mode's one-shot `walk` can afford a million-object `.git`; a watcher
+/// would re-walk it every tick. The `**/` prefix is load-bearing on both
+/// sides: `matchExcludeSegments` with a bare leading segment would anchor to
+/// the tree top only, while the walk prunes at any depth — one pattern set
+/// keeps the two halves answering the same question (nested submodule
+/// `.git`s would otherwise index once and then be invisible to detection
+/// forever).
+const prune_excludes = [_][]const u8{ "**/.git/**", "**/.zig-cache/**", "**/zig-out/**" };
+
+/// The scope of an auto-discovered project: batch mode takes its scope from
+/// `data/sources.zon` or the flags; a new clone has neither, so it indexes the
+/// whole tree minus the noise directories and test data.
+const default_excludes = [_][]const u8{ "**/.git/**", "**/.zig-cache/**", "**/zig-out/**", "**/testdata/**" };
+
+/// Never descend during a poll.
+const always_prune = [_][]const u8{ ".git", ".zig-cache", "zig-out" };
+
+const WatchOptions = struct {
+    out: []const u8,
+    root: []const u8,
+    sources: []const u8,
+    status: ?[]const u8,
+    poll_ms: u64,
+};
+
+const WatchProject = struct {
+    /// A project matched by a `data/sources.zon` entry takes that entry's
+    /// name as its key — the key clients already query (`zig_std`, not the
+    /// directory `zig`); auto-discovered projects take the sanitized
+    /// directory name. Keys are exact, case-sensitive project ids (AGENTS.md §5,
+    /// PROTO-13).
+    key: []const u8,
+    root: []const u8,
+    includes: []const []const u8,
+    excludes: []const []const u8,
+};
+
+const WatchArgs = struct {
+    out: ?[]const u8,
+    root: ?[]const u8,
+    has_source: bool,
+    has_include: bool,
+    has_exclude: bool,
+    has_previous: bool,
+};
+
+/// Watch mode has its own registration path (discovery plus the registry
+/// file), so the batch-only flags are an illegal combination, not a second
+/// scoping channel. Pure so a unit test can reach it without `usage`'s
+/// `noreturn`.
+fn validateWatchArgs(args: WatchArgs) error{IllegalFlagCombination}!void {
+    if (args.out == null or args.root == null) return error.IllegalFlagCombination;
+    if (args.has_source or args.has_include or args.has_exclude or args.has_previous) {
+        return error.IllegalFlagCombination;
+    }
+}
+
+/// The change-detection triple from REL-7: a rewrite restoring mtime still
+/// moves ctime, and a rename storm can fail a stat — the caller keeps the old
+/// entry and re-checks next tick.
+const FileStat = struct {
+    size: u64,
+    mtime_ns: i128,
+    ctime_ns: i128,
+};
+
+const StatChange = enum { unchanged, changed, added, removed };
+
+fn statDiff(old: ?FileStat, now: ?FileStat) StatChange {
+    if (old == null) return if (now == null) .unchanged else .added;
+    if (now == null) return .removed;
+    const a = old.?;
+    const b = now.?;
+    if (a.size != b.size or a.mtime_ns != b.mtime_ns or a.ctime_ns != b.ctime_ns) return .changed;
+    return .unchanged;
+}
+
+/// Project keys keep the charset a client can type and `docs://` can carry:
+/// `[A-Za-z0-9_]`, every other byte replaced. Nothing collapses and case is
+/// preserved, so `Fixture` and `fixture` stay two projects (PROTO-13).
+fn sanitizeName(gpa: std.mem.Allocator, name: []const u8) ![]const u8 {
+    const out = try gpa.alloc(u8, name.len);
+    for (name, 0..) |c, i| {
+        out[i] = if (std.ascii.isAlphanumeric(c) or c == '_') c else '_';
+    }
+    return out;
+}
+
+/// `git+https://github.com/ziglang/zig.git?ref=master#<sha>` → `zig`, and
+/// `…/mcp.zig.git?ref=main#<sha>` → `mcp_zig`. The readme clones by url
+/// basename, so this is how a checkout directory finds its registry entry.
+fn urlBasenameToKey(gpa: std.mem.Allocator, url: []const u8) ![]const u8 {
+    var base = if (std.mem.lastIndexOfScalar(u8, url, '/')) |slash| url[slash + 1 ..] else url;
+    if (std.mem.indexOfScalar(u8, base, '?')) |query| base = base[0..query];
+    if (std.mem.endsWith(u8, base, ".git")) base = base[0 .. base.len - ".git".len];
+    return sanitizeName(gpa, base);
+}
+
+fn prunedName(name: []const u8) bool {
+    for (always_prune) |pruned| {
+        if (std.mem.eql(u8, name, pruned)) return true;
+    }
+    return false;
+}
+
+fn scopesEqual(a: []const []const u8, b: []const []const u8) bool {
+    if (a.len != b.len) return false;
+    for (a, b) |x, y| {
+        if (!std.mem.eql(u8, x, y)) return false;
+    }
+    return true;
+}
+
+/// List the watch root's directories and match each against the registry.
+/// `log` prints the warnings only on the first pass — a repeated diagnostic
+/// every two seconds would bury stderr. A missing registry file is the
+/// documented warn-and-discover-only path; a malformed one fails the caller,
+/// which decides between exit 2 (startup) and keeping the previous projects.
+fn discover(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    root: []const u8,
+    sources_path: []const u8,
+    log: bool,
+) ![]WatchProject {
+    var registry: []const sources_lib.Source = &.{};
+    const registry_text = std.Io.Dir.cwd().readFileAllocOptions(
+        io,
+        sources_path,
+        gpa,
+        .limited(max_sources_bytes),
+        .of(u8),
+        0,
+    ) catch |err| switch (err) {
+        error.FileNotFound => null,
+        else => return err,
+    };
+    if (registry_text) |text| {
+        registry = try sources_lib.parse(gpa, text);
+    } else if (log) {
+        logStderr(io, "indexer: {s} not found; discovering directories only\n", .{sources_path});
+    }
+
+    var root_trimmed = root;
+    while (root_trimmed.len > 0 and (root_trimmed[root_trimmed.len - 1] == '/' or root_trimmed[root_trimmed.len - 1] == '\\')) {
+        root_trimmed = root_trimmed[0 .. root_trimmed.len - 1];
+    }
+    var names = std.ArrayList([]const u8).empty;
+    {
+        var root_dir = try std.Io.Dir.cwd().openDir(io, root_trimmed, .{ .iterate = true });
+        defer root_dir.close(io);
+        var it = root_dir.iterate();
+        while (try it.next(io)) |entry| {
+            if (entry.kind != .directory) continue;
+            if (entry.name.len == 0 or entry.name[0] == '.') continue;
+            try names.append(gpa, try gpa.dupe(u8, entry.name));
+        }
+    }
+    // Undefined iteration order must not make a collision winner a coin toss.
+    std.sort.block([]const u8, names.items, {}, struct {
+        fn lt(_: void, a: []const u8, b: []const u8) bool {
+            return std.mem.lessThan(u8, a, b);
+        }
+    }.lt);
+
+    var projects = std.ArrayList(WatchProject).empty;
+    var claimed = std.StringHashMap(void).init(gpa);
+    defer claimed.deinit();
+    for (names.items) |name| {
+        const dir_key = try sanitizeName(gpa, name);
+        var matched: ?sources_lib.Source = null;
+        var matches: usize = 0;
+        for (registry) |entry| {
+            const url_key = try urlBasenameToKey(gpa, entry.url);
+            if (std.mem.eql(u8, entry.name, dir_key) or std.mem.eql(u8, url_key, dir_key)) {
+                matches += 1;
+                if (matched == null) matched = entry;
+            }
+        }
+        if (matches > 1 and log) {
+            logStderr(io, "indexer: directory {s} matches several {s} entries; using the first\n", .{ name, sources_path });
+        }
+        const key = if (matched) |entry| entry.name else dir_key;
+        if (claimed.contains(key)) {
+            if (log) logStderr(io, "indexer: directory {s} claims project {s} already claimed; skipping\n", .{ name, key });
+            continue;
+        }
+        const includes: []const []const u8 = if (matched) |entry| entry.includes else &.{};
+        // A matched entry passes its scope verbatim with the prune set
+        // unioned in; an auto-discovered directory takes the full defaults.
+        // Watch mode and CI then index the same set of files for that
+        // project, except the noise directories no repo keeps as contract.
+        const excludes: []const []const u8 = blk: {
+            if (matched) |entry| {
+                var list = std.ArrayList([]const u8).empty;
+                try list.appendSlice(gpa, entry.excludes);
+                try list.appendSlice(gpa, &prune_excludes);
+                break :blk list.items;
+            }
+            break :blk &default_excludes;
+        };
+        try projects.append(gpa, .{
+            .key = key,
+            .root = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ root_trimmed, name }),
+            .includes = includes,
+            .excludes = excludes,
+        });
+        try claimed.put(key, {});
+    }
+    return projects.toOwnedSlice(gpa);
+}
+
+/// One watched project's live state. Two arenas with different lifetimes:
+/// the stat table is rebuilt every tick, the records only when a project is
+/// dirty — resetting one must not dangle the other (AGENTS.md §11: an arena is only
+/// ever created on the heap, never copied by value).
+const ProjectState = struct {
+    project: WatchProject, // strings owned by the long-lived allocator
+    records_arena: ?*std.heap.ArenaAllocator,
+    records: []const Record,
+    status: ProjectStatus,
+    stats_arena: ?*std.heap.ArenaAllocator,
+    stats: std.StringHashMap(FileStat),
+    dirty: bool,
+};
+
+fn dupeStrings(gpa: std.mem.Allocator, list: []const []const u8) ![]const []const u8 {
+    const out = try gpa.alloc([]const u8, list.len);
+    for (list, 0..) |s, i| out[i] = try gpa.dupe(u8, s);
+    return out;
+}
+
+fn cloneProject(gpa: std.mem.Allocator, p: WatchProject) !WatchProject {
+    return .{
+        .key = try gpa.dupe(u8, p.key),
+        .root = try gpa.dupe(u8, p.root),
+        .includes = try dupeStrings(gpa, p.includes),
+        .excludes = try dupeStrings(gpa, p.excludes),
+    };
+}
+
+/// Frees everything of a project except the key: the key doubles as the
+/// `states` map key, so it must outlive a scope replacement and is freed only
+/// when the map entry itself is gone (see `dropState`). Under the server's
+/// startup arena these are near-no-ops — an arena releases individual
+/// allocations only at its tail — so the real cleanup is the whole-arena
+/// `deinit`; production churn per add/remove/scope-edit stays bounded and
+/// tiny. The frees are not theater either: under a testing allocator they are
+/// real, and the unit layer is leak-checked.
+fn freeProjectStrings(gpa: std.mem.Allocator, p: WatchProject) void {
+    gpa.free(p.root);
+    for (p.includes) |s| gpa.free(s);
+    gpa.free(p.includes);
+    for (p.excludes) |s| gpa.free(s);
+    gpa.free(p.excludes);
+}
+
+fn createState(gpa: std.mem.Allocator, project: WatchProject) !*ProjectState {
+    const state = try gpa.create(ProjectState);
+    const owned = try cloneProject(gpa, project);
+    state.* = .{
+        .project = owned,
+        .records_arena = null,
+        .records = &.{},
+        .status = .{
+            .project = owned.key,
+            .commit = live_commit,
+            .records = 0,
+            .files_total = 0,
+            .degraded = .empty,
+        },
+        .stats_arena = null,
+        .stats = std.StringHashMap(FileStat).init(gpa),
+        .dirty = true,
+    };
+    return state;
+}
+
+fn dropState(gpa: std.mem.Allocator, state: *ProjectState) void {
+    if (state.records_arena) |arena| {
+        arena.deinit();
+        gpa.destroy(arena);
+    }
+    if (state.stats_arena) |arena| {
+        arena.deinit();
+        gpa.destroy(arena);
+    }
+    freeProjectStrings(gpa, state.project);
+    gpa.free(state.project.key);
+    gpa.destroy(state);
+}
+
+/// Re-index into a fresh arena and swap only on success: a parse or read
+/// failure mid-pass must leave the last good records serving, the same rule
+/// the server applies to index artifacts (AGENTS.md §8, REL-9's whole-or-nothing).
+fn indexNow(io: std.Io, gpa: std.mem.Allocator, state: *ProjectState) !void {
+    const fresh = try gpa.create(std.heap.ArenaAllocator);
+    fresh.* = std.heap.ArenaAllocator.init(gpa); // no allocation before the store: safe
+    errdefer {
+        fresh.deinit();
+        gpa.destroy(fresh);
+    }
+    var records = std.ArrayList(Record).empty;
+    var st = ProjectStatus{
+        .project = state.project.key,
+        .commit = live_commit,
+        .records = 0,
+        .files_total = 0,
+        .degraded = .empty,
+    };
+    try indexSource(
+        io,
+        fresh.allocator(),
+        .{ .project = state.project.key, .commit = live_commit, .root = state.project.root },
+        state.project.includes,
+        state.project.excludes,
+        &records,
+        &st,
+    );
+    st.records = records.items.len;
+    const old = state.records_arena;
+    state.records_arena = fresh;
+    state.records = records.items;
+    state.status = st;
+    if (old) |arena| {
+        arena.deinit();
+        gpa.destroy(arena);
+    }
+}
+
+/// Rebuild the `.zig` stat table of one project. The walk deliberately
+/// ignores include/exclude scope — the matcher's canonical home is this
+/// file's batch walker and a branch-wise copy would be a second convention
+/// (AGENTS.md §12); an edit to an excluded path costs one re-index whose identical
+/// bytes are dropped by the digest skip. `walkSelectively` because batch
+/// mode's `walk` auto-descends everything, `.git` included.
+fn scanProject(io: std.Io, gpa: std.mem.Allocator, state: *ProjectState) !void {
+    const fresh = try gpa.create(std.heap.ArenaAllocator);
+    fresh.* = std.heap.ArenaAllocator.init(gpa);
+    errdefer {
+        fresh.deinit();
+        gpa.destroy(fresh);
+    }
+    const arena = fresh.allocator();
+    var stats = std.StringHashMap(FileStat).init(arena);
+    var root_dir = try std.Io.Dir.cwd().openDir(io, state.project.root, .{ .iterate = true });
+    defer root_dir.close(io);
+    var walker = try root_dir.walkSelectively(arena);
+    defer walker.deinit();
+    while (try walker.next(io)) |entry| {
+        switch (entry.kind) {
+            .file => {
+                if (!std.mem.endsWith(u8, entry.basename, ".zig")) continue;
+                const stat = entry.dir.statFile(io, entry.basename, .{}) catch continue;
+                const rel = try normalizeSlashes(arena, entry.path);
+                try stats.put(rel, .{
+                    .size = stat.size,
+                    .mtime_ns = stat.mtime.nanoseconds,
+                    .ctime_ns = stat.ctime.nanoseconds,
+                });
+            },
+            .directory => {
+                if (prunedName(entry.basename)) continue;
+                try walker.enter(io, entry);
+            },
+            else => {},
+        }
+    }
+
+    var changed = false;
+    var old_it = state.stats.iterator();
+    while (old_it.next()) |kv| {
+        const now = stats.get(kv.key_ptr.*) orelse {
+            changed = true; // removed
+            break;
+        };
+        if (statDiff(kv.value_ptr.*, now) != .unchanged) changed = true;
+    }
+    if (!changed) {
+        var new_it = stats.iterator();
+        while (new_it.next()) |kv| {
+            if (!state.stats.contains(kv.key_ptr.*)) {
+                changed = true; // added
+                break;
+            }
+        }
+    }
+
+    if (state.stats_arena) |arena_box| {
+        arena_box.deinit();
+        gpa.destroy(arena_box);
+    }
+    state.stats_arena = fresh;
+    state.stats = stats;
+    if (changed) state.dirty = true;
+}
+
+/// SHA-256 over an artifact's bytes, the same call shape as `digestOf` in
+/// `src/docs/reload.zig`.
+fn digestOf(bytes: []const u8) [32]u8 {
+    var digest: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(bytes, &digest, .{});
+    return digest;
+}
+
+/// Write `payload` at `path` by atomic replace, creating the parent
+/// directory if needed. The server polls size+mtime+ctime and swaps only a
+/// fully validated artifact, so a publish must never be observable as a torn
+/// file — a plain `createFile` would stream the payload past a poll (REL-7,
+/// AGENTS.md §8). Windows leaves a brief `AccessDenied` window on the destination
+/// during `replace`; the server's stat poll swallows it as one no-change tick.
+fn writeFileAtomic(io: std.Io, path: []const u8, payload: []const u8) !void {
+    const sep = std.mem.lastIndexOfAny(u8, path, "/\\");
+    const base = if (sep) |s| path[s + 1 ..] else path;
+    var stem: []const u8 = if (sep) |s| path[0..s] else "";
+    if (stem.len == 0 and path.len > 0 and (path[0] == '/' or path[0] == '\\')) stem = path[0..1];
+
+    var dir = std.Io.Dir.cwd();
+    var opened = false;
+    if (stem.len > 0) {
+        std.Io.Dir.cwd().createDirPath(io, stem) catch |err| switch (err) {
+            error.PathAlreadyExists => {},
+            else => return err,
+        };
+        dir = try std.Io.Dir.cwd().openDir(io, stem, .{});
+        opened = true;
+    }
+    var af = dir.createFileAtomic(io, base, .{ .replace = true }) catch |err| {
+        if (opened) dir.close(io);
+        return err;
+    };
+    defer if (opened) dir.close(io); // runs after af.deinit, which may delete a tmp
+    defer af.deinit(io);
+    var buf: [64 * 1024]u8 = undefined;
+    var w = af.file.writer(io, &buf);
+    try w.interface.writeAll(payload);
+    try w.flush();
+    try af.replace(io);
+}
+
+const StatesMap = std.StringHashMap(*ProjectState);
+
+/// Serialize the live in-memory state in canonical order (AGENTS.md §7) and publish
+/// both artifacts, skipping any write whose bytes equal the last publish:
+/// the server keys on mtime/ctime, so a gratuitous rewrite would trigger a
+/// full validate-and-swap for identical content.
+fn publish(
+    io: std.Io,
+    scratch: std.mem.Allocator,
+    states: *const StatesMap,
+    out_path: []const u8,
+    status_path: []const u8,
+    last_index: *?[32]u8,
+    last_status: *?[32]u8,
+) !void {
+    var present = std.ArrayList(*ProjectState).empty;
+    var vit = states.valueIterator();
+    while (vit.next()) |boxed| try present.append(scratch, boxed.*);
+    // Sidecar and digest stability: map iteration order is undefined, so the
+    // projects go out in key order.
+    std.sort.block(*ProjectState, present.items, {}, struct {
+        fn lt(_: void, a: *ProjectState, b: *ProjectState) bool {
+            return std.mem.lessThan(u8, a.project.key, b.project.key);
+        }
+    }.lt);
+
+    var records = std.ArrayList(Record).empty;
+    for (present.items) |state| try records.appendSlice(scratch, state.records);
+    std.sort.block(Record, records.items, {}, lessThan.byRecord);
+
+    var aw: std.Io.Writer.Allocating = .init(scratch);
+    defer aw.deinit();
+    for (records.items) |rec| {
+        const line = try std.json.Stringify.valueAlloc(scratch, rec, .{ .whitespace = .minified });
+        try aw.writer.writeAll(line);
+        try aw.writer.writeByte('\n');
+    }
+    const payload = try aw.toOwnedSlice();
+    const index_digest = digestOf(payload);
+    if (last_index.* == null or !std.mem.eql(u8, &last_index.*.?, &index_digest)) {
+        try writeFileAtomic(io, out_path, payload);
+    }
+    last_index.* = index_digest;
+
+    var statuses = std.ArrayList(ProjectStatus).empty;
+    for (present.items) |state| try statuses.append(scratch, state.status);
+    // `report_skip = false`: the skipped/previous_records members are a
+    // `--previous` batch concept, and every project here was actually walked,
+    // so `declarations` is always a real count (IDX-10).
+    const status_payload = try buildStatus(scratch, statuses.items, false);
+    const status_digest = digestOf(status_payload);
+    if (last_status.* == null or !std.mem.eql(u8, &last_status.*.?, &status_digest)) {
+        try writeFileAtomic(io, status_path, status_payload);
+    }
+    last_status.* = status_digest;
+}
+
+fn sleepPoll(io: std.Io, ms: u64) void {
+    // Sliced so Ctrl+C does not wait out a long interval, and routed through
+    // the verified sleep helper (`src/util/sleep.zig`): on Windows the delay
+    // comes from the native timer, so a sleep that would have to be serviced
+    // by an `Io` can never degrade the loop into the spin class (AGENTS.md §16 #14).
+    var remaining = ms;
+    while (remaining > 0) {
+        const step = @min(remaining, 1_000);
+        sleep_util.sleepMilliseconds(io, step);
+        remaining -= step;
+    }
+}
+
+/// The foreground watch loop. Startup is the first tick — index everything,
+/// publish — and a failure to open the root or parse the registry is fatal
+/// and loud (a typo'd `--root` must not silently watch nothing). After
+/// startup, nothing a single tick does is fatal: a vanished directory, a
+/// failed re-index, a broken registry edit keeps the previous state serving
+/// and retries on the next poll (the same degrade-never-abort rule as the
+/// indexer's own walk, IDX-1).
+fn watchMain(io: std.Io, gpa: std.mem.Allocator, opts: WatchOptions) !void {
+    var states = StatesMap.init(gpa);
+    const scratch_box = try gpa.create(std.heap.ArenaAllocator);
+    scratch_box.* = std.heap.ArenaAllocator.init(gpa);
+    const status_path = opts.status orelse try deriveStatusPath(gpa, opts.out);
+    var last_index_digest: ?[32]u8 = null;
+    var last_status_digest: ?[32]u8 = null;
+
+    var first_tick = true;
+    while (true) {
+        _ = scratch_box.reset(.retain_capacity);
+        const tick = scratch_box.allocator();
+        var need_publish = first_tick;
+        var startup_ok = true;
+
+        var discovery_ok = true;
+        var discovered: []WatchProject = &.{};
+        discovered = discover(io, tick, opts.root, opts.sources, first_tick) catch |err| blk: {
+            if (first_tick) {
+                // SRV-8's spirit: the operator must see which path failed.
+                logStderr(io, "indexer: watch startup failed: {s} (root {s}, registry {s})\n", .{ @errorName(err), opts.root, opts.sources });
+                std.process.exit(2);
+            }
+            logStderr(io, "indexer: discovery failed: {s}; keeping previous projects this tick\n", .{@errorName(err)});
+            discovery_ok = false;
+            break :blk &.{};
+        };
+
+        if (discovery_ok) {
+            var seen = std.StringHashMap(void).init(tick);
+            for (discovered) |project| {
+                try seen.put(project.key, {});
+                if (states.get(project.key)) |state| {
+                    if (!std.mem.eql(u8, state.project.root, project.root) or
+                        !scopesEqual(state.project.includes, project.includes) or
+                        !scopesEqual(state.project.excludes, project.excludes))
+                    {
+                        // The registry moved under this directory; the scope
+                        // strings live in tick scratch, so own a copy. The
+                        // key string is the map key and stays put.
+                        var replacement = try cloneProject(gpa, project);
+                        gpa.free(replacement.key);
+                        replacement.key = state.project.key;
+                        freeProjectStrings(gpa, state.project);
+                        state.project = replacement;
+                        state.dirty = true;
+                    }
+                } else {
+                    const new_state = try createState(gpa, project);
+                    // The key is the clone's own string, not the tick scratch:
+                    // the map outlives every scratch reset.
+                    states.put(new_state.project.key, new_state) catch |err| {
+                        dropState(gpa, new_state);
+                        return err;
+                    };
+                    need_publish = true;
+                }
+            }
+            var removed = std.ArrayList([]const u8).empty;
+            var sit = states.keyIterator();
+            while (sit.next()) |key| {
+                if (!seen.contains(key.*)) try removed.append(tick, key.*);
+            }
+            for (removed.items) |key| {
+                if (states.fetchRemove(key)) |kv| dropState(gpa, kv.value);
+                need_publish = true; // the artifact must lose this project
+            }
+        }
+
+        var ait = states.valueIterator();
+        while (ait.next()) |boxed| {
+            const state = boxed.*;
+            scanProject(io, gpa, state) catch |err| {
+                logStderr(io, "indexer: scan failed for {s}: {s}\n", .{ state.project.key, @errorName(err) });
+                continue;
+            };
+            if (!state.dirty) continue;
+            indexNow(io, gpa, state) catch |err| {
+                logStderr(io, "indexer: re-index failed for {s}: {s}\n", .{ state.project.key, @errorName(err) });
+                if (first_tick) startup_ok = false;
+                continue;
+            };
+            state.dirty = false;
+            need_publish = true;
+        }
+
+        if (need_publish and startup_ok) {
+            publish(io, tick, &states, opts.out, status_path, &last_index_digest, &last_status_digest) catch |err| {
+                logStderr(io, "indexer: publish failed: {s}\n", .{@errorName(err)});
+            };
+        }
+
+        first_tick = false;
+        sleepPoll(io, opts.poll_ms);
+    }
+}
+
 test "a plain comment run attaches only when adjacent and not a doc comment" {
     // The tokenizer emits no token for `//` (only `///` and `//!`), so the
     // fallback scans source lines. Each case pins one rule of the attachment.
@@ -1023,4 +1706,211 @@ test "modulePath keeps dotfiles distinct and rejects a parent escape" {
     try std.testing.expectEqualStrings("lib.std.mem", try modulePath(gpa, "lib/std/mem.zig"));
     try std.testing.expectError(error.PathEscapesRoot, modulePath(gpa, "../x.zig"));
     try std.testing.expectError(error.PathEscapesRoot, modulePath(gpa, "lib/../x.zig"));
+}
+
+test "validateWatchArgs pins the flag matrix" {
+    // D10: one path with a flag. Watch mode owns discovery for scope, so the
+    // batch flags there are illegal combinations, and --root/--out are not
+    // optional.
+    const good = WatchArgs{ .out = "o", .root = "r", .has_source = false, .has_include = false, .has_exclude = false, .has_previous = false };
+    try validateWatchArgs(good);
+    const bad = [_]WatchArgs{
+        .{ .out = null, .root = "r", .has_source = false, .has_include = false, .has_exclude = false, .has_previous = false },
+        .{ .out = "o", .root = null, .has_source = false, .has_include = false, .has_exclude = false, .has_previous = false },
+        .{ .out = "o", .root = "r", .has_source = true, .has_include = false, .has_exclude = false, .has_previous = false },
+        .{ .out = "o", .root = "r", .has_source = false, .has_include = true, .has_exclude = false, .has_previous = false },
+        .{ .out = "o", .root = "r", .has_source = false, .has_include = false, .has_exclude = true, .has_previous = false },
+        .{ .out = "o", .root = "r", .has_source = false, .has_include = false, .has_exclude = false, .has_previous = true },
+    };
+    for (bad) |args| {
+        try std.testing.expectError(error.IllegalFlagCombination, validateWatchArgs(args));
+    }
+}
+
+test "sanitize keeps the docs-URI charset and the url basename maps a clone to its entry" {
+    // AGENTS.md §10's manual recipe clones by url; the watch root sees the checkout's
+    // directory name, so the url basename is the join key.
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    try std.testing.expectEqualStrings("mcp_zig", try sanitizeName(gpa, "mcp.zig"));
+    try std.testing.expectEqualStrings("my_lib_2", try sanitizeName(gpa, "my-lib 2"));
+    try std.testing.expectEqualStrings("Zig", try sanitizeName(gpa, "Zig")); // case preserved (PROTO-13)
+
+    try std.testing.expectEqualStrings(
+        "zig",
+        try urlBasenameToKey(gpa, "git+https://github.com/ziglang/zig.git?ref=master#738d2be"),
+    );
+    try std.testing.expectEqualStrings(
+        "mcp_zig",
+        try urlBasenameToKey(gpa, "git+https://github.com/kapzy/mcp.zig.git?ref=main#abc"),
+    );
+    // A url whose basename differs from the entry name is what makes the
+    // `upstream/zig` directory land on the `zig_std` key.
+    try std.testing.expectEqualStrings("zig", try urlBasenameToKey(gpa, "https://example.com/zig"));
+}
+
+test "statDiff reports only triple transitions" {
+    const a = FileStat{ .size = 10, .mtime_ns = 20, .ctime_ns = 30 };
+    var b = a;
+    try std.testing.expectEqual(StatChange.unchanged, statDiff(a, b));
+    b.ctime_ns += 1; // an in-place rewrite restoring mtime still moves ctime (REL-7)
+    try std.testing.expectEqual(StatChange.changed, statDiff(a, b));
+    try std.testing.expectEqual(StatChange.added, statDiff(null, a));
+    try std.testing.expectEqual(StatChange.removed, statDiff(a, null));
+    try std.testing.expectEqual(StatChange.unchanged, statDiff(null, null));
+}
+
+test "discover scopes by entry name and url basename, sanitizes the rest, and skips dots" {
+    const io = std.testing.io;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}", .{&tmp.sub_path});
+
+    // Directories mirroring the real layout: `zig` joined by url basename,
+    // `mcp.zig` by name, one auto-discovered, one dotted (skipped), one a
+    // prune-name (not skipped by discovery — it is a project to watch, and
+    // `always_prune` governs the descent inside a project).
+    for ([_][]const u8{ "zig", "mcp.zig", ".hidden", "env zig" }) |name| {
+        tmp.dir.createDirPath(io, name) catch |err| switch (err) {
+            error.PathAlreadyExists => {},
+            else => return err,
+        };
+    }
+    const reg =
+        \\.{
+        \\    .zig_std = .{ .url = "git+https://github.com/ziglang/zig.git?ref=master#deadbeef", .hash = "h", .branch = "master", .commit = "deadbeef", .scope = .{ .include = .{ "lib/std/**" }, .exclude = .{ "lib/std/**/testdata/**" } } },
+        \\    .mcp_zig = .{ .url = "git+https://github.com/kapzy/mcp.zig.git?ref=main#cafe", .hash = "h", .commit = "cafe" },
+        \\}
+    ;
+    const reg_path = try std.fmt.allocPrint(gpa, "{s}/reg.zon", .{root});
+    {
+        const f = try tmp.dir.createFile(io, "reg.zon", .{});
+        defer f.close(io);
+        var buf: [4096]u8 = undefined;
+        var w = f.writer(io, &buf);
+        try w.interface.writeAll(reg);
+        try w.flush();
+    }
+
+    const projects = try discover(io, gpa, root, reg_path, false);
+    try std.testing.expectEqual(@as(usize, 3), projects.len);
+    // Sorted directory order: "env zig", "mcp.zig", "zig".
+    try std.testing.expectEqualStrings("env_zig", projects[0].key);
+    try std.testing.expectEqual(@as(usize, 0), projects[0].includes.len);
+    try std.testing.expectEqual(default_excludes.len, projects[0].excludes.len);
+    try std.testing.expectEqualStrings("mcp_zig", projects[1].key);
+    // A scope-less entry keeps its own scope empty, but the prune set is
+    // unioned into every watched project: detection prunes `.git` at any
+    // depth, so indexing must refuse it at any depth too.
+    try std.testing.expectEqual(@as(usize, 0), projects[1].includes.len);
+    try std.testing.expectEqual(prune_excludes.len, projects[1].excludes.len);
+    try std.testing.expectEqualStrings("zig_std", projects[2].key); // via url basename
+    try std.testing.expectEqual(1 + prune_excludes.len, projects[2].excludes.len);
+    try std.testing.expectEqualStrings("lib/std/**", projects[2].includes[0]);
+    try std.testing.expect(std.mem.indexOfScalar(u8, projects[2].root, '\\') == null);
+    for (projects) |p| {
+        try std.testing.expect(!std.mem.eql(u8, p.key, ".hidden"));
+    }
+
+    // A missing registry file is the warn-and-discover-only path, not an error.
+    const auto = try discover(io, gpa, root, try std.fmt.allocPrint(gpa, "{s}/absent.zon", .{root}), false);
+    try std.testing.expectEqual(@as(usize, 3), auto.len);
+    try std.testing.expectEqualStrings("zig", auto[2].key); // no entry to join to: raw sanitized name
+}
+
+test "discover refuses to put two directories under one project key" {
+    const io = std.testing.io;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}", .{&tmp.sub_path});
+    for ([_][]const u8{ "a-b", "a_b" }) |name| {
+        tmp.dir.createDirPath(io, name) catch |err| switch (err) {
+            error.PathAlreadyExists => {},
+            else => return err,
+        };
+    }
+    const projects = try discover(io, gpa, root, "/nonexistent-regardless.zon", false);
+    // Both sanitize to `a_b`; the first (sorted order) claims it, the other
+    // is skipped — one key is one project (PROTO-13).
+    try std.testing.expectEqual(@as(usize, 1), projects.len);
+    try std.testing.expectEqualStrings("a_b", projects[0].key);
+}
+
+test "scanProject tables .zig files and never descends a prune name" {
+    const io = std.testing.io;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}", .{&tmp.sub_path});
+    // A .git nested at depth and a .zig-cache sibling: both carry .zig files
+    // that must never reach the stat table.
+    for ([_][]const u8{ "lib.zig", ".git/obj.zig", "sub/.zig-cache/deep.zig", "notes.txt", "sub/real.zig" }) |rel| {
+        const parent = std.fs.path.dirname(rel);
+        if (parent) |p| {
+            tmp.dir.createDirPath(io, p) catch |err| switch (err) {
+                error.PathAlreadyExists => {},
+                else => return err,
+            };
+        }
+        const f = try tmp.dir.createFile(io, rel, .{});
+        defer f.close(io);
+        if (std.mem.endsWith(u8, rel, ".zig")) {
+            // Every .zig file carries a documented declaration: the noise
+            // directories' records are the failure being pinned.
+            var buf: [64]u8 = undefined;
+            var w = f.writer(io, &buf);
+            try w.interface.writeAll("/// documented fn\npub fn f() void {}\n");
+            try w.flush();
+        }
+    }
+
+    const s = try createState(gpa, .{
+        .key = "p",
+        .root = root,
+        .includes = &.{},
+        .excludes = &default_excludes,
+    });
+    defer dropState(gpa, s);
+    try std.testing.expect(s.dirty);
+    try scanProject(io, gpa, s);
+    s.dirty = false;
+    try std.testing.expectEqual(@as(usize, 2), s.stats.count()); // lib.zig + sub/real.zig
+    try std.testing.expect(!s.dirty);
+    // The same paths the poll prunes must also be refused at index time:
+    // a nested `.git/…` that indexed once and was never tabled again would
+    // serve records no detection could ever refresh or remove.
+    try indexNow(io, gpa, s);
+    try std.testing.expectEqual(@as(usize, 2), s.records.len);
+    try std.testing.expectEqual(@as(usize, 2), s.status.files_total);
+    for (s.records) |rec| {
+        try std.testing.expect(std.mem.indexOf(u8, rec.path, ".git") == null);
+        try std.testing.expect(std.mem.indexOf(u8, rec.path, ".zig-cache") == null);
+    }
+    // A second scan with no writes changes nothing.
+    try scanProject(io, gpa, s);
+    try std.testing.expect(!s.dirty);
+    // An edit — ctime only — is enough to mark dirty.
+    {
+        const f = try tmp.dir.createFile(io, "lib.zig", .{});
+        defer f.close(io);
+        var buf: [64]u8 = undefined;
+        var w = f.writer(io, &buf);
+        try w.interface.writeAll("/// documented fn edited\npub fn f() void {}\n");
+        try w.flush();
+    }
+    try scanProject(io, gpa, s);
+    try std.testing.expect(s.dirty);
 }

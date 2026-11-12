@@ -217,7 +217,7 @@ upstream-parse failure modes on the request path.
 |`src/util/sleep.zig`|Thread sleep that does not share the server's `Io`|
 |`data/advice/`|`patterns.zon` (P01–P12), `rules.zon` (R01–R12), `guarantees.zon`, `limits.zon` (+ evidence legend), `sources.zon` (S01–S24)|
 |`data/sources.zon`|Upstream projects: url, hash, branch, commit, scope (the pin home, D6)|
-|`tools/indexer.zig`|Upstream tree → JSONL + status sidecar (§7)|
+|`tools/indexer.zig`|Upstream tree → JSONL + status sidecar; `--watch` polls a local root and republishes (§7, §8)|
 |`tools/line_table.zig`|Per-file line-start table, binary-searched for record line numbers (IDX-9)|
 |`tools/sources_plan.zig`|`data/sources.zon` → one plan line per source for both workflows (`zig build plan-sources`)|
 |`tools/advice_check.zig`|Corpus validator (`zig build check`)|
@@ -496,6 +496,62 @@ being republished as complete (IDX-3). With no sidecar (a release baseline ships
 JSONL) there is no oracle, so the records are trusted as before. A carried-over project
 gets its `declarations` from that sidecar, or omits the member (§7).
 
+### Watch mode (`indexer --watch`)
+
+One binary, one flag (D10): watch mode polls a local root, re-indexes the projects whose
+files moved, and publishes the same two artifacts CI publishes — the server hot-reloads
+them with no change on that side.
+
+```
+indexer --watch --root <dir> --out <index.jsonl> [--sources <file>] [--status <path>] [--poll-ms <n>]
+```
+
+`--root` and `--out` are required; `--source`, `--include`, `--exclude` and `--previous`
+are batch-only and refused with SRV-8's shape (one line, the usage block, exit 2). The
+registry defaults to `data/sources.zon`, the poll to 2 s with a 100 ms floor (REL-1).
+Both the registry and the root are re-listed every tick.
+
+- **Registration.** Every directory directly under `--root` is one project (dot
+  directories are skipped). A directory is *scoped* when its sanitized name
+  (`[^A-Za-z0-9_]` → `_`, case kept) equals an entry name, or the entry's url basename
+  (`.git` suffix and `?…` cut away): it then takes the entry's key (`zig_std`, not the
+  directory `zig`) and that entry's include/exclude scope verbatim, so the live index and
+  the CI index agree per project. An unscoped directory is auto-discovered: no includes,
+  the default excludes (`**/.git/**`, `**/.zig-cache/**`, `**/zig-out/**`,
+  `**/testdata/**`); the three noise-directory patterns are also unioned onto a matched
+  entry's excludes — detection prunes at any depth, so indexing must refuse at any depth
+  (an anchored `.git/**` would let a nested `.git` index once and freeze).
+  Two directories sanitizing to one key: the first in sorted order claims it, the second
+  warns and is skipped. A missing registry file warns and discovery continues; a
+  malformed one is exit 2 at startup, and mid-run keeps the last good registry.
+- **Provenance.** Every watcher-built record carries `commit = "live"`. `--previous`
+  carry-over keys on `(project, commit)`; a sentinel that never changes while the tree
+  does would reuse stale projects, so the flag is refused instead.
+- **Detection.** Polling, not events: Zig 0.17.1's standard library exposes no
+  filesystem-event API (no `std.Io.Watcher`, no VNODE use in `Kqueue.zig`, no
+  `ReadDirectoryChangesW` binding — re-verify before restating this elsewhere).
+  Each project's `.zig` files are tabled as size+mtime+ctime triples
+  (REL-7) by a `Dir.walkSelectively` walk that never descends `.git`, `.zig-cache` or
+  `zig-out` at any depth — the same set the index refuses, so nothing pruned can also
+  be indexed; an added, changed or vanished entry marks the project dirty, and a dirty
+  project is re-indexed whole through the same `indexSource` the batch path calls. The
+  table deliberately ignores scope — one canonical matcher lives here for the walker —
+  so an excluded-path edit costs one wasted re-index, absorbed by the publish digest
+  skip. A new directory is adopted on the tick it appears; a vanished one drops its
+  records and sidecar member on the next publish.
+- **Publish.** The merged JSONL and the sidecar are serialized from the in-memory
+  records — the same `Record`, comparator, §7 order, `buildStatus` and `deriveStatusPath`
+  as batch mode, restated nowhere — and both go out through `Dir.createFileAtomic` +
+  `replace`, so the server's stat poll never observes a torn file. A payload whose
+  SHA-256 equals the last publish is not rewritten: the server keys on mtime/ctime
+  (REL-7), so a gratuitous rewrite is a wasted full validate-and-swap. Batch writes use
+  the same atomic helper; the byte-exact golden artifact is the proof the extraction
+  changed nothing.
+- **Lifetime.** A foreground loop owning its `Io` (§11); Ctrl+C is the shutdown, and
+  atomic replace means a kill mid-publish leaves the previous artifacts intact. Nothing
+  here ships into the server: "the indexer lives in CI" (§3) stays true — this is a
+  tool loop, never linked into `src/`.
+
 ### Server-side loading and hot reload (`src/docs/reload.zig`)
 
 - Index location: `--index` or `ZIGMCP_INDEX` — a local path or an `http(s)://` URL.
@@ -607,6 +663,7 @@ zig build workflows          # workflow trigger/expression consistency (CI-1)
 zig build plan-sources       # print the upstream plan from data/sources.zon (CI-4/CI-5)
 zig build bench              # verification report
 zig build run -- --index tests/golden/index.jsonl
+zig-out/bin/indexer --watch --root upstream --out generated/index.jsonl   # live local indexing (§8)
 zig build -Doptimize=ReleaseSafe
 zig fmt --check . --exclude tests/fixtures   # the fixture tree is deliberately unformattable
 ```

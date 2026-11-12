@@ -258,6 +258,37 @@ what the tool arguments accept. One indexer run takes several `--source` flags a
 the merged output itself — list every project in the same run, because the server loads
 one file and a project missing from it is a project the tools cannot see.
 
+#### Watching a tree live
+
+Editing a local checkout? The indexer can watch the directory instead of being rerun
+by hand:
+
+```bash
+zig-out/bin/indexer --watch --root upstream --out generated/index.jsonl
+```
+
+It polls every 2 s (`--poll-ms`, floor 100), re-indexes only the projects whose files
+actually changed, and rewrites `generated/index.jsonl` and its status file atomically —
+a running server picks each publish up within its own `--index-poll-ms`, no restart
+anywhere.
+
+Projects are registered by directory: every directory under `--root` becomes one.
+A directory that matches a [`data/sources.zon`](data/sources.zon) entry — by entry name
+or by the url basename your clone made (`upstream/zig` matches `zig_std`) — indexes with
+that entry's key and scope, so the live index and the CI index agree per project.
+Anything else is auto-discovered: whole tree, minus `.git`, `.zig-cache`, `zig-out` and
+`testdata` anywhere in it, keyed by its sanitized directory name. Drop a fresh clone into
+`upstream/` and it is searchable within the poll interval; delete the directory and its
+records vanish on the next publish.
+
+Watcher-built records carry `"commit": "live"` — a working tree has no pinned commit.
+That is why watch mode takes no `--source`/`--previous` flags: carry-over keys on the
+commit, and a sentinel that never changes while the tree does would reuse stale records
+as if they matched. One-shot batch mode above stays the pinned-provenance path.
+
+Run it from the repository root: paths resolve against the current directory, like
+every other indexer mode.
+
 #### How updates land
 
 | Index location | Checked every | Replaced when |
