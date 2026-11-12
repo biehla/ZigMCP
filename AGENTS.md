@@ -77,8 +77,9 @@ runtime. Never embed the index in the binary (D3).
 Two paragraphs in this file can go stale, and only two kinds exist: a dated snapshot, and
 a command. Nothing else is allowed.
 
-- **Implemented (checked 2026-11-09):** protocol core, advice corpus, doc indexer,
-  columnar index, hot reload (local file and `http(s)` URL), incremental re-index, every
+- **Implemented (checked 2026-11-12):** protocol core, advice corpus, doc indexer
+  including watch mode for live local indexing (`indexer --watch`, §8), columnar
+  index, hot reload (local file and `http(s)` URL), incremental re-index, every
   test layer, the verification report, the four CI workflows. `generated/` is
   CI-produced and gitignored.
 - **Open work:** `PLAN.md` §1, never here — a second copy drifts.
@@ -994,6 +995,8 @@ prevent than to debug, and each already has a guard here.
 |23|A path-qualified symbol typed unqualified returns a bare miss|PROTO-15|`doc_get` lists the closest stored symbols in `candidates`; a unique dotted tail resolves (PROTO-16)|
 |24|A carried-over project reports a count it never walked|IDX-10|the count is `?usize`: read from the previous sidecar, omitted when unknown|
 |25|A metric's numerator and denominator count different things|IDX-10|the set is closed — every record-eligible site is counted, so the ratio cannot exceed 1|
+|26|A nested `.git` indexed once and then invisible to a shallower prune: detection and indexing refused different path sets|IDX-11|one any-depth exclude set, unioned into every monitored scope; the unit test indexes and scans the same tree|
+|27|The atomic-replace share window reported `reload_failed` for a perfectly served index and pinned the triple until the next change|REL-12|share-class open errors retry silently next poll; only content-class failures report and pin|
 
 Add a row when a defect is fixed and no existing row would have caught it. A row that has
 never fired is still worth keeping: it is the checklist, not the history.
